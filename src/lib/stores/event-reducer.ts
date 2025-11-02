@@ -21,6 +21,9 @@ import type {
 	RotateElementEvent,
 	ReorderElementEvent,
 	ToggleFrameEvent,
+	GroupMoveElementsEvent,
+	GroupResizeElementsEvent,
+	GroupRotateElementsEvent,
 	UpdateStylesEvent,
 	UpdateTypographyEvent,
 	UpdateSpacingEvent,
@@ -89,6 +92,12 @@ export function reduceEvent(state: DesignState, event: DesignEvent): DesignState
 			return handleReorderElement(state, event);
 		case 'TOGGLE_FRAME':
 			return handleToggleFrame(state, event);
+		case 'GROUP_MOVE_ELEMENTS':
+			return handleGroupMoveElements(state, event);
+		case 'GROUP_RESIZE_ELEMENTS':
+			return handleGroupResizeElements(state, event);
+		case 'GROUP_ROTATE_ELEMENTS':
+			return handleGroupRotateElements(state, event);
 
 		// Style operations
 		case 'UPDATE_STYLES':
@@ -355,6 +364,71 @@ function handleReorderElement(state: DesignState, event: ReorderElementEvent): D
 		...state,
 		elements: newElements,
 		frames: newFrames
+	};
+}
+
+function handleGroupMoveElements(state: DesignState, event: GroupMoveElementsEvent): DesignState {
+	const { elements } = event.payload;
+	const newElements = { ...state.elements };
+
+	// Update all elements atomically
+	for (const { elementId, position } of elements) {
+		const element = newElements[elementId];
+		if (element) {
+			newElements[elementId] = {
+				...element,
+				position
+			};
+		}
+	}
+
+	return {
+		...state,
+		elements: newElements
+	};
+}
+
+function handleGroupResizeElements(state: DesignState, event: GroupResizeElementsEvent): DesignState {
+	const { elements } = event.payload;
+	const newElements = { ...state.elements };
+
+	// Update all elements atomically
+	for (const { elementId, size, position } of elements) {
+		const element = newElements[elementId];
+		if (element) {
+			newElements[elementId] = {
+				...element,
+				size,
+				...(position && { position })
+			};
+		}
+	}
+
+	return {
+		...state,
+		elements: newElements
+	};
+}
+
+function handleGroupRotateElements(state: DesignState, event: GroupRotateElementsEvent): DesignState {
+	const { elements } = event.payload;
+	const newElements = { ...state.elements };
+
+	// Update all elements atomically
+	for (const { elementId, rotation, position } of elements) {
+		const element = newElements[elementId];
+		if (element) {
+			newElements[elementId] = {
+				...element,
+				rotation,
+				position
+			};
+		}
+	}
+
+	return {
+		...state,
+		elements: newElements
 	};
 }
 

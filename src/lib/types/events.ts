@@ -19,6 +19,9 @@ export type EventType =
 	| 'ROTATE_ELEMENT'
 	| 'REORDER_ELEMENT'
 	| 'TOGGLE_FRAME'
+	| 'GROUP_MOVE_ELEMENTS'
+	| 'GROUP_RESIZE_ELEMENTS'
+	| 'GROUP_ROTATE_ELEMENTS'
 	// Style operations
 	| 'UPDATE_STYLES'
 	| 'UPDATE_TYPOGRAPHY'
@@ -126,6 +129,38 @@ export interface ToggleFrameEvent extends BaseEvent {
 		isFrame: boolean;
 		frameName?: string;
 		breakpointWidth?: number;
+	};
+}
+
+export interface GroupMoveElementsEvent extends BaseEvent {
+	type: 'GROUP_MOVE_ELEMENTS';
+	payload: {
+		elements: Array<{
+			elementId: string;
+			position: Position;
+		}>;
+	};
+}
+
+export interface GroupResizeElementsEvent extends BaseEvent {
+	type: 'GROUP_RESIZE_ELEMENTS';
+	payload: {
+		elements: Array<{
+			elementId: string;
+			size: Size;
+			position?: Position;
+		}>;
+	};
+}
+
+export interface GroupRotateElementsEvent extends BaseEvent {
+	type: 'GROUP_ROTATE_ELEMENTS';
+	payload: {
+		elements: Array<{
+			elementId: string;
+			rotation: number;
+			position: Position;
+		}>;
 	};
 }
 
@@ -297,6 +332,9 @@ export type DesignEvent =
 	| RotateElementEvent
 	| ReorderElementEvent
 	| ToggleFrameEvent
+	| GroupMoveElementsEvent
+	| GroupResizeElementsEvent
+	| GroupRotateElementsEvent
 	| UpdateStylesEvent
 	| UpdateTypographyEvent
 	| UpdateSpacingEvent

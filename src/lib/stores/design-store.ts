@@ -400,6 +400,62 @@ export async function rotateElement(elementId: string, rotation: number): Promis
 	});
 }
 
+/**
+ * Move multiple elements as a single atomic operation (for group operations)
+ */
+export async function moveElementsGroup(
+	elements: Array<{ elementId: string; position: { x: number; y: number } }>
+): Promise<void> {
+	await dispatch({
+		id: uuidv4(),
+		type: 'GROUP_MOVE_ELEMENTS',
+		timestamp: Date.now(),
+		payload: {
+			elements
+		}
+	});
+}
+
+/**
+ * Resize multiple elements as a single atomic operation (for group operations)
+ */
+export async function resizeElementsGroup(
+	elements: Array<{
+		elementId: string;
+		size: { width: number; height: number };
+		position?: { x: number; y: number };
+	}>
+): Promise<void> {
+	await dispatch({
+		id: uuidv4(),
+		type: 'GROUP_RESIZE_ELEMENTS',
+		timestamp: Date.now(),
+		payload: {
+			elements
+		}
+	});
+}
+
+/**
+ * Rotate multiple elements as a single atomic operation (for group operations)
+ */
+export async function rotateElementsGroup(
+	elements: Array<{
+		elementId: string;
+		rotation: number;
+		position: { x: number; y: number };
+	}>
+): Promise<void> {
+	await dispatch({
+		id: uuidv4(),
+		type: 'GROUP_ROTATE_ELEMENTS',
+		timestamp: Date.now(),
+		payload: {
+			elements
+		}
+	});
+}
+
 export async function reorderElement(
 	elementId: string,
 	newParentId: string | null,

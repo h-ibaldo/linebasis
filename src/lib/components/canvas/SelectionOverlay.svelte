@@ -12,7 +12,7 @@
 	import { onDestroy } from 'svelte';
 	import { get } from 'svelte/store';
 	import type { Element } from '$lib/types/events';
-	import { moveElement, resizeElement, rotateElement, selectElement, selectElements, clearSelection, addToSelection, removeFromSelection } from '$lib/stores/design-store';
+	import { moveElement, resizeElement, rotateElement, moveElementsGroup, resizeElementsGroup, rotateElementsGroup, selectElement, selectElements, clearSelection, addToSelection, removeFromSelection } from '$lib/stores/design-store';
 	import { interactionState } from '$lib/stores/interaction-store';
 	import { currentTool } from '$lib/stores/tool-store';
 	import SelectionUI from './SelectionUI.svelte';
@@ -1130,11 +1130,12 @@
 					const deltaX = pendingPosition.x - elementStartCanvas.x;
 					const deltaY = pendingPosition.y - elementStartCanvas.y;
 
-					// Move all elements by the same delta
-					await Promise.all(
-						groupStartElements.map(el =>
-							moveElement(el.id, { x: el.x + deltaX, y: el.y + deltaY })
-						)
+					// Move all elements by the same delta as a single batch operation
+					await moveElementsGroup(
+						groupStartElements.map(el => ({
+							elementId: el.id,
+							position: { x: el.x + deltaX, y: el.y + deltaY }
+						}))
 					);
 				}
 			} else if (interactionMode === 'resizing' && pendingSize && pendingPosition) {
@@ -1147,8 +1148,8 @@
 					const deltaX = pendingPosition.x - elementStartCanvas.x;
 					const deltaY = pendingPosition.y - elementStartCanvas.y;
 
-					// Resize and reposition all elements proportionally
-					await Promise.all(
+					// Resize and reposition all elements proportionally as a single batch operation
+					await resizeElementsGroup(
 						groupStartElements.map(el => {
 							const relX = el.x - elementStartCanvas.x;
 							const relY = el.y - elementStartCanvas.y;
@@ -1157,7 +1158,11 @@
 							const newX = elementStartCanvas.x + deltaX + relX * scaleX;
 							const newY = elementStartCanvas.y + deltaY + relY * scaleY;
 
-							return resizeElement(el.id, { width: newWidth, height: newHeight }, { x: newX, y: newY });
+							return {
+								elementId: el.id,
+								size: { width: newWidth, height: newHeight },
+								position: { x: newX, y: newY }
+							};
 						})
 					);
 				}
@@ -1170,8 +1175,8 @@
 				const rotationDelta = (pendingRotation - elementStartRotation) * (Math.PI / 180);
 				const rotationDeltaDegrees = pendingRotation - elementStartRotation;
 
-				// Apply rotation to all selected elements around group center
-				await Promise.all(
+				// Apply rotation to all selected elements around group center as a single batch operation
+				await rotateElementsGroup(
 					groupStartElements.map(el => {
 						// Get the original element's rotation
 						const originalElement = selectedElements.find(e => e.id === el.id);
@@ -1202,11 +1207,11 @@
 						while (newRotation > 180) newRotation -= 360;
 						while (newRotation < -180) newRotation += 360;
 
-						// Apply rotation and move
-						return Promise.all([
-							rotateElement(el.id, newRotation),
-							moveElement(el.id, { x: newElX, y: newElY })
-						]);
+						return {
+							elementId: el.id,
+							rotation: newRotation,
+							position: { x: newElX, y: newElY }
+						};
 					})
 				);
 			}
