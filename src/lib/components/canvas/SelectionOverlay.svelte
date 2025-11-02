@@ -12,7 +12,7 @@
 	import { onDestroy } from 'svelte';
 	import { get } from 'svelte/store';
 	import type { Element } from '$lib/types/events';
-	import { moveElement, resizeElement, selectElement, selectElements, clearSelection, addToSelection, removeFromSelection } from '$lib/stores/design-store';
+	import { moveElement, resizeElement, rotateElement, selectElement, selectElements, clearSelection, addToSelection, removeFromSelection } from '$lib/stores/design-store';
 	import { interactionState } from '$lib/stores/interaction-store';
 	import { currentTool } from '$lib/stores/tool-store';
 	import SelectionUI from './SelectionUI.svelte';
@@ -24,13 +24,16 @@
 
 	// Local interaction state
 	let activeElementId: string | null = null;
-	let interactionMode: 'idle' | 'dragging' | 'resizing' = 'idle';
+	let interactionMode: 'idle' | 'dragging' | 'resizing' | 'rotating' = 'idle';
 	let resizeHandle: string | null = null;
 	let isGroupInteraction = false; // Track if interacting with multiple elements
 
 	// Pending transform during interaction (for live preview)
 	let pendingPosition: { x: number; y: number } | null = null;
 	let pendingSize: { width: number; height: number } | null = null;
+	let pendingRotation: number | null = null;
+	let rotationStartAngle: number = 0; // Initial angle at rotation start
+	let elementStartRotation: number = 0; // Element's rotation at start
 	let groupPendingTransforms: Map<string, { position: { x: number; y: number }; size: { width: number; height: number } }> = new Map();
 
 	// Broadcast state to store for CanvasElement to consume
@@ -40,6 +43,7 @@
 			mode: interactionMode,
 			pendingPosition,
 			pendingSize,
+			pendingRotation,
 			groupTransforms: groupPendingTransforms
 		});
 	}
@@ -72,6 +76,29 @@
 
 	// Reactive: compute group bounds (depends on groupPendingTransforms for live updates)
 	$: groupBounds = selectedElements.length > 1 && groupPendingTransforms ? getGroupBounds(selectedElements) : null;
+
+	// Helper: Get common rotation angle if all selected elements have the same rotation
+	function getCommonRotation(elements: Element[]): number | null {
+		if (elements.length === 0) return null;
+
+		// Get rotation from pending state if rotating, otherwise from elements
+		if (interactionMode === 'rotating' && pendingRotation !== null) {
+			return pendingRotation;
+		}
+
+		const firstRotation = elements[0].rotation || 0;
+		const allSame = elements.every(el => (el.rotation || 0) === firstRotation);
+		return allSame ? firstRotation : null;
+	}
+
+	// Reactive: compute common rotation (also depends on interactionMode and pendingRotation)
+	let commonRotation: number | null;
+	$: {
+		// Trigger reactivity on these values
+		interactionMode;
+		pendingRotation;
+		commonRotation = getCommonRotation(selectedElements);
+	}
 
 	// Helper: Get display position (pending or actual)
 	function getDisplayPosition(element: Element): { x: number; y: number } {
@@ -200,7 +227,7 @@
 			return;
 		}
 
-		// Handle is provided (resize)
+		// Handle is provided (resize or rotate)
 		e.stopPropagation();
 		e.preventDefault();
 
@@ -220,10 +247,31 @@
 		const bounds = getGroupBounds(selectedElements);
 		elementStartCanvas = bounds;
 
-		interactionMode = 'resizing';
-		resizeHandle = handle;
-		pendingSize = { width: bounds.width, height: bounds.height };
-		pendingPosition = { x: bounds.x, y: bounds.y };
+		if (handle === 'rotate') {
+			// Rotation mode
+			interactionMode = 'rotating';
+
+			// Calculate center point of selection
+			const centerX = bounds.x + bounds.width / 2;
+			const centerY = bounds.y + bounds.height / 2;
+
+			// Convert mouse position to canvas space
+			const mouseCanvasX = (e.clientX - viewport.x) / viewport.scale;
+			const mouseCanvasY = (e.clientY - viewport.y) / viewport.scale;
+
+			// Calculate initial angle
+			rotationStartAngle = Math.atan2(mouseCanvasY - centerY, mouseCanvasX - centerX) * (180 / Math.PI);
+
+			// Store current rotation of first element (for groups, we'll rotate all together)
+			elementStartRotation = selectedElements[0].rotation || 0;
+			pendingRotation = elementStartRotation;
+		} else {
+			// Resize mode
+			interactionMode = 'resizing';
+			resizeHandle = handle;
+			pendingSize = { width: bounds.width, height: bounds.height };
+			pendingPosition = { x: bounds.x, y: bounds.y };
+		}
 
 		document.addEventListener('mousemove', handleMouseMove);
 		document.addEventListener('mouseup', handleMouseUp);
@@ -255,7 +303,25 @@
 			height: size.height
 		};
 
-		if (handle) {
+		if (handle === 'rotate') {
+			// Rotation mode
+			interactionMode = 'rotating';
+
+			// Calculate center point
+			const centerX = pos.x + size.width / 2;
+			const centerY = pos.y + size.height / 2;
+
+			// Convert mouse position to canvas space
+			const mouseCanvasX = (e.clientX - viewport.x) / viewport.scale;
+			const mouseCanvasY = (e.clientY - viewport.y) / viewport.scale;
+
+			// Calculate initial angle
+			rotationStartAngle = Math.atan2(mouseCanvasY - centerY, mouseCanvasX - centerX) * (180 / Math.PI);
+
+			// Store current rotation
+			elementStartRotation = element.rotation || 0;
+			pendingRotation = elementStartRotation;
+		} else if (handle) {
 			// Resize mode
 			interactionMode = 'resizing';
 			resizeHandle = handle;
@@ -478,6 +544,68 @@
 					})
 				);
 			}
+		} else if (interactionMode === 'rotating') {
+			// Calculate center point of selection
+			const centerX = elementStartCanvas.x + elementStartCanvas.width / 2;
+			const centerY = elementStartCanvas.y + elementStartCanvas.height / 2;
+
+			// Convert current mouse position to canvas space
+			const mouseCanvasX = (e.clientX - viewport.x) / viewport.scale;
+			const mouseCanvasY = (e.clientY - viewport.y) / viewport.scale;
+
+			// Calculate current angle
+			const currentAngle = Math.atan2(mouseCanvasY - centerY, mouseCanvasX - centerX) * (180 / Math.PI);
+
+			// Calculate rotation delta
+			let angleDelta = currentAngle - rotationStartAngle;
+
+			// Apply Shift key snap to 15° increments
+			if (e.shiftKey) {
+				angleDelta = Math.round(angleDelta / 15) * 15;
+			}
+
+			// Calculate new rotation
+			pendingRotation = elementStartRotation + angleDelta;
+
+			// Normalize to -180 to 180 range
+			while (pendingRotation > 180) pendingRotation -= 360;
+			while (pendingRotation < -180) pendingRotation += 360;
+
+			// Update pending transforms for all group elements during rotation
+			if (isGroupInteraction) {
+				const rotationDelta = (pendingRotation - elementStartRotation) * (Math.PI / 180);
+
+				groupPendingTransforms = new Map(
+					groupStartElements.map(el => {
+						// Calculate element's center relative to group center
+						const elCenterX = el.x + el.width / 2;
+						const elCenterY = el.y + el.height / 2;
+						const relX = elCenterX - centerX;
+						const relY = elCenterY - centerY;
+
+						// Rotate the relative position around group center
+						const cos = Math.cos(rotationDelta);
+						const sin = Math.sin(rotationDelta);
+						const newRelX = relX * cos - relY * sin;
+						const newRelY = relX * sin + relY * cos;
+
+						// Calculate new element position (top-left corner)
+						const newElCenterX = centerX + newRelX;
+						const newElCenterY = centerY + newRelY;
+						const newElX = newElCenterX - el.width / 2;
+						const newElY = newElCenterY - el.height / 2;
+
+						return [
+							el.id,
+							{
+								position: { x: newElX, y: newElY },
+								size: { width: el.width, height: el.height },
+								rotation: pendingRotation
+							}
+						];
+					})
+				);
+			}
 		}
 	}
 
@@ -529,6 +657,42 @@
 						})
 					);
 				}
+			} else if (interactionMode === 'rotating' && pendingRotation !== null) {
+				// Calculate group center
+				const groupCenterX = elementStartCanvas.x + elementStartCanvas.width / 2;
+				const groupCenterY = elementStartCanvas.y + elementStartCanvas.height / 2;
+
+				// Calculate rotation delta in radians
+				const rotationDelta = (pendingRotation - elementStartRotation) * (Math.PI / 180);
+
+				// Apply rotation to all selected elements around group center
+				await Promise.all(
+					groupStartElements.map(el => {
+						// Calculate element's center relative to group center
+						const elCenterX = el.x + el.width / 2;
+						const elCenterY = el.y + el.height / 2;
+						const relX = elCenterX - groupCenterX;
+						const relY = elCenterY - groupCenterY;
+
+						// Rotate the relative position around group center
+						const cos = Math.cos(rotationDelta);
+						const sin = Math.sin(rotationDelta);
+						const newRelX = relX * cos - relY * sin;
+						const newRelY = relX * sin + relY * cos;
+
+						// Calculate new element position (top-left corner)
+						const newElCenterX = groupCenterX + newRelX;
+						const newElCenterY = groupCenterY + newRelY;
+						const newElX = newElCenterX - el.width / 2;
+						const newElY = newElCenterY - el.height / 2;
+
+						// Apply rotation and move
+						return Promise.all([
+							rotateElement(el.id, pendingRotation!),
+							moveElement(el.id, { x: newElX, y: newElY })
+						]);
+					})
+				);
 			}
 
 			// Keep group selected after interaction
@@ -554,6 +718,9 @@
 						);
 					}
 				}
+			} else if (interactionMode === 'rotating' && pendingRotation !== null) {
+				// Apply rotation
+				await rotateElement(activeElementId, pendingRotation);
 			}
 
 			// Keep element selected after interaction
@@ -567,6 +734,7 @@
 		resizeHandle = null;
 		pendingPosition = null;
 		pendingSize = null;
+		pendingRotation = null;
 		groupStartElements = [];
 		groupPendingTransforms = new Map();
 
@@ -590,6 +758,7 @@
 		{isPanning}
 		pendingPosition={activeElementId === selectedElements[0].id ? pendingPosition : null}
 		pendingSize={activeElementId === selectedElements[0].id ? pendingSize : null}
+		rotation={commonRotation || 0}
 		onMouseDown={(e, handle) => handleMouseDown(e, selectedElements[0], handle)}
 	/>
 {:else if selectedElements.length > 1 && groupBounds}
@@ -612,6 +781,31 @@
 		{isPanning}
 		pendingPosition={null}
 		pendingSize={null}
+		rotation={commonRotation || 0}
 		onMouseDown={(e, handle) => startGroupInteraction(e, handle)}
 	/>
+{/if}
+
+<!-- Rotation angle display -->
+{#if interactionMode === 'rotating' && pendingRotation !== null}
+	<div
+		style="
+			position: absolute;
+			left: {viewport.x + (elementStartCanvas.x + elementStartCanvas.width / 2) * viewport.scale}px;
+			top: {viewport.y + (elementStartCanvas.y + elementStartCanvas.height / 2) * viewport.scale - 60}px;
+			transform: translateX(-50%);
+			background: #1e293b;
+			color: white;
+			padding: 4px 12px;
+			border-radius: 4px;
+			font-size: 12px;
+			font-family: system-ui, -apple-system, sans-serif;
+			font-weight: 500;
+			pointer-events: none;
+			white-space: nowrap;
+			box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+		"
+	>
+		{Math.round(pendingRotation)}°
+	</div>
 {/if}

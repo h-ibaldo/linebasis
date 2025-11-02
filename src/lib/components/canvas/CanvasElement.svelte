@@ -80,6 +80,13 @@
 			? $interactionState.pendingSize
 			: element.size;
 
+	$: displayRotation =
+		$interactionState.groupTransforms.has(element.id) && $interactionState.groupTransforms.get(element.id)!.rotation !== undefined
+			? $interactionState.groupTransforms.get(element.id)!.rotation
+			: $interactionState.activeElementId === element.id && $interactionState.pendingRotation !== null
+			? $interactionState.pendingRotation
+			: element.rotation || 0;
+
 	// Generate inline styles from element properties
 	$: elementStyles = (() => {
 		const styles: string[] = [];
@@ -91,6 +98,12 @@
 		styles.push(`width: ${displaySize.width}px`);
 		styles.push(`height: ${displaySize.height}px`);
 		styles.push(`cursor: ${elementCursor}`);
+
+		// Rotation
+		if (displayRotation) {
+			styles.push(`transform: rotate(${displayRotation}deg)`);
+			styles.push(`transform-origin: center center`);
+		}
 
 		// Element styles
 		if (element.styles.backgroundColor) styles.push(`background-color: ${element.styles.backgroundColor}`);

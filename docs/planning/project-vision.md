@@ -13,7 +13,7 @@ Use Figma and code it myself? Figma components aren't real components. Divs aren
 And here's the thing that really bugs me: graphic designers figured out typography and layout 100 years ago. Baseline grids, vertical rhythm, proper alignment — these aren't new problems. But web design tools mostly ignore them.
 
 # What I'm Building
-LineBasis is the tool I wish existed:
+Linebasis is the tool I wish existed:
 * Visual website builder with polished, modern UX
 * Self-hosted and 100% open source
 * Design with real web elements (divs are divs, components are components)

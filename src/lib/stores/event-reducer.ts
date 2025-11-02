@@ -18,6 +18,7 @@ import type {
 	DeleteElementEvent,
 	MoveElementEvent,
 	ResizeElementEvent,
+	RotateElementEvent,
 	ReorderElementEvent,
 	ToggleFrameEvent,
 	UpdateStylesEvent,
@@ -82,6 +83,8 @@ export function reduceEvent(state: DesignState, event: DesignEvent): DesignState
 			return handleMoveElement(state, event);
 		case 'RESIZE_ELEMENT':
 			return handleResizeElement(state, event);
+		case 'ROTATE_ELEMENT':
+			return handleRotateElement(state, event);
 		case 'REORDER_ELEMENT':
 			return handleReorderElement(state, event);
 		case 'TOGGLE_FRAME':
@@ -279,6 +282,24 @@ function handleResizeElement(state: DesignState, event: ResizeElementEvent): Des
 				size,
 				// Update position if provided (for N/W handles)
 				...(position && { position })
+			}
+		}
+	};
+}
+
+function handleRotateElement(state: DesignState, event: RotateElementEvent): DesignState {
+	const { elementId, rotation } = event.payload;
+	const element = state.elements[elementId];
+
+	if (!element) return state;
+
+	return {
+		...state,
+		elements: {
+			...state.elements,
+			[elementId]: {
+				...element,
+				rotation
 			}
 		}
 	};

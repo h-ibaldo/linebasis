@@ -16,6 +16,7 @@ export type EventType =
 	| 'DELETE_ELEMENT'
 	| 'MOVE_ELEMENT'
 	| 'RESIZE_ELEMENT'
+	| 'ROTATE_ELEMENT'
 	| 'REORDER_ELEMENT'
 	| 'TOGGLE_FRAME'
 	// Style operations
@@ -98,6 +99,14 @@ export interface ResizeElementEvent extends BaseEvent {
 		elementId: string;
 		size: Size;
 		position?: Position; // Optional: for N/W handles that also move the element
+	};
+}
+
+export interface RotateElementEvent extends BaseEvent {
+	type: 'ROTATE_ELEMENT';
+	payload: {
+		elementId: string;
+		rotation: number; // Rotation angle in degrees
 	};
 }
 
@@ -285,6 +294,7 @@ export type DesignEvent =
 	| DeleteElementEvent
 	| MoveElementEvent
 	| ResizeElementEvent
+	| RotateElementEvent
 	| ReorderElementEvent
 	| ToggleFrameEvent
 	| UpdateStylesEvent
@@ -397,6 +407,7 @@ export interface Element {
 	frameId: string; // Elements belong to frames
 	position: Position;
 	size: Size;
+	rotation?: number; // Rotation angle in degrees (default 0)
 	styles: Partial<ElementStyles>;
 	typography: Partial<TypographyStyle>;
 	spacing: Partial<SpacingStyle>;

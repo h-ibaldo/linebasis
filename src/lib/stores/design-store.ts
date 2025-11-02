@@ -388,6 +388,18 @@ export async function resizeElement(
 	});
 }
 
+export async function rotateElement(elementId: string, rotation: number): Promise<void> {
+	await dispatch({
+		id: uuidv4(),
+		type: 'ROTATE_ELEMENT',
+		timestamp: Date.now(),
+		payload: {
+			elementId,
+			rotation
+		}
+	});
+}
+
 export async function reorderElement(
 	elementId: string,
 	newParentId: string | null,
@@ -809,6 +821,28 @@ export function setupKeyboardShortcuts(): (() => void) | undefined {
 		else if (e.key === 'i' && !isTyping) {
 			e.preventDefault();
 			currentTool.set('media');
+		}
+		// Cmd/Ctrl + [ - Rotate 15° counter-clockwise
+		else if ((e.metaKey || e.ctrlKey) && e.key === '[' && !isTyping) {
+			e.preventDefault();
+			const selected = get(selectedElements);
+			if (selected.length > 0) {
+				selected.forEach(el => {
+					const currentRotation = el.rotation || 0;
+					rotateElement(el.id, currentRotation - 15);
+				});
+			}
+		}
+		// Cmd/Ctrl + ] - Rotate 15° clockwise
+		else if ((e.metaKey || e.ctrlKey) && e.key === ']' && !isTyping) {
+			e.preventDefault();
+			const selected = get(selectedElements);
+			if (selected.length > 0) {
+				selected.forEach(el => {
+					const currentRotation = el.rotation || 0;
+					rotateElement(el.id, currentRotation + 15);
+				});
+			}
 		}
 		// Delete or Backspace - delete selected elements
 		else if ((e.key === 'Delete' || e.key === 'Backspace') && !isTyping) {
