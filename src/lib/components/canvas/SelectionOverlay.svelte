@@ -52,9 +52,13 @@
 	let dragStartScreen = { x: 0, y: 0 };
 	let elementStartCanvas = { x: 0, y: 0, width: 0, height: 0 };
 	let groupStartElements: Array<{ id: string; x: number; y: number; width: number; height: number }> = [];
+	let hasMovedPastThreshold = false; // Track if we've moved past the initial dead zone
+	let initialHandlePosition: Point | null = null; // The ideal position of the handle being dragged at start
+	let mouseToHandleOffset: Point = { x: 0, y: 0 }; // Offset from mouse click to ideal handle position
 
 	// Constants
 	const MOVEMENT_THRESHOLD = 2; // px
+	const RESIZE_START_THRESHOLD = 3; // px - dead zone for resize start to avoid initial jump
 
 	// Calculate bounding box for multiple elements
 	function getGroupBounds(elements: Element[]): { x: number; y: number; width: number; height: number } {
@@ -98,6 +102,183 @@
 		interactionMode;
 		pendingRotation;
 		commonRotation = getCommonRotation(selectedElements);
+	}
+
+	// Geometry helpers for rotated resize
+	interface Point {
+		x: number;
+		y: number;
+	}
+
+	interface RotatedRect {
+		x: number;
+		y: number;
+		width: number;
+		height: number;
+		rotation: number;
+	}
+
+	/**
+	 * Get the four corners of a rotated rectangle in world space
+	 * Returns [topLeft, topRight, bottomRight, bottomLeft]
+	 */
+	function getRotatedCorners(rect: RotatedRect): [Point, Point, Point, Point] {
+		const { x, y, width, height, rotation } = rect;
+		const angleRad = rotation * (Math.PI / 180);
+		const cos = Math.cos(angleRad);
+		const sin = Math.sin(angleRad);
+
+		// Center of the rectangle
+		const centerX = x + width / 2;
+		const centerY = y + height / 2;
+
+		// Local corners (relative to center)
+		const halfW = width / 2;
+		const halfH = height / 2;
+		const localCorners = [
+			{ x: -halfW, y: -halfH }, // Top-left
+			{ x: halfW, y: -halfH },  // Top-right
+			{ x: halfW, y: halfH },   // Bottom-right
+			{ x: -halfW, y: halfH }   // Bottom-left
+		];
+
+		// Rotate each corner around center and convert to world space
+		return localCorners.map(corner => ({
+			x: centerX + corner.x * cos - corner.y * sin,
+			y: centerY + corner.x * sin + corner.y * cos
+		})) as [Point, Point, Point, Point];
+	}
+
+	/**
+	 * Get the index of the opposite corner for a given resize handle
+	 * 0 = top-left, 1 = top-right, 2 = bottom-right, 3 = bottom-left
+	 */
+	function getAnchorCornerIndex(handle: string): number {
+		if (handle === 'nw') return 2; // Bottom-right
+		if (handle === 'ne') return 3; // Bottom-left
+		if (handle === 'se') return 0; // Top-left
+		if (handle === 'sw') return 1; // Top-right
+		return -1;
+	}
+
+	/**
+	 * Calculate new rectangle for rotated resize
+	 *
+	 * APPROACH: When resizing a rotated rectangle:
+	 * 1. We have a fixed point (opposite corner/edge or center)
+	 * 2. We transform the element's START state into a local coordinate system where the fixed point is at origin
+	 * 3. We project the mouse position onto this local coordinate system
+	 * 4. We calculate new dimensions, then transform back to world space
+	 */
+	function calculateRectFromFixedPoint(
+		fixedPoint: Point,
+		mouseCanvas: Point,
+		rotation: number,
+		maintainAspectRatio: boolean,
+		originalAspectRatio: number,
+		isFromCenter: boolean,
+		currentWidth: number,
+		currentHeight: number,
+		handle: string
+	): { width: number; height: number; x: number; y: number } {
+		const angleRad = rotation * (Math.PI / 180);
+		const cos = Math.cos(angleRad);
+		const sin = Math.sin(angleRad);
+
+		const isCornerHandle = handle.length === 2;
+
+		// Transform mouse position to local space (rotated coordinate system)
+		// In this local space, the element's axes are aligned with X and Y
+		const worldDx = mouseCanvas.x - fixedPoint.x;
+		const worldDy = mouseCanvas.y - fixedPoint.y;
+
+		// Rotate by -angle to get to local space
+		const localDx = worldDx * cos + worldDy * sin;
+		const localDy = -worldDx * sin + worldDy * cos;
+
+		// Calculate new dimensions based on which handle is being dragged
+		// The key insight: localDx and localDy represent the vector from fixed point to mouse in local space
+		// For dimensions, we want absolute values, but we also need to track if the mouse crossed over
+		let newWidth: number;
+		let newHeight: number;
+
+		if (isCornerHandle) {
+			if (isFromCenter) {
+				// When resizing from center, the mouse distance is half the dimension
+				newWidth = Math.abs(localDx) * 2;
+				newHeight = Math.abs(localDy) * 2;
+			} else {
+				// Normal resize: the distance from fixed point to mouse is the dimension
+				// Use absolute values since dimensions are always positive
+				newWidth = Math.abs(localDx);
+				newHeight = Math.abs(localDy);
+			}
+
+			if (maintainAspectRatio) {
+				// Lock aspect ratio - use the larger dimension change
+				if (Math.abs(localDx) > Math.abs(localDy)) {
+					newHeight = newWidth / originalAspectRatio;
+				} else {
+					newWidth = newHeight * originalAspectRatio;
+				}
+			}
+		} else {
+			// Edge handle
+			if (handle === 'n' || handle === 's') {
+				newHeight = isFromCenter ? Math.abs(localDy) * 2 : Math.abs(localDy);
+				newWidth = maintainAspectRatio ? newHeight * originalAspectRatio : currentWidth;
+			} else {
+				newWidth = isFromCenter ? Math.abs(localDx) * 2 : Math.abs(localDx);
+				newHeight = maintainAspectRatio ? newWidth / originalAspectRatio : currentHeight;
+			}
+		}
+
+		// Now calculate where the top-left corner should be in world space
+		// We know:
+		// - The fixedPoint location in world space
+		// - The new dimensions
+		// - Where the fixed point is relative to the new rectangle's center (in local space)
+
+		// Determine the fixed point's position in the NEW rectangle's local space
+		let fixedLocalX: number, fixedLocalY: number;
+
+		if (isFromCenter) {
+			// Center is fixed - it's at (0, 0) in local space
+			fixedLocalX = 0;
+			fixedLocalY = 0;
+		} else if (isCornerHandle) {
+			// Fixed corner is opposite to the handle being dragged
+			// In local space (center-relative coords):
+			if (handle === 'se') { fixedLocalX = -newWidth / 2; fixedLocalY = -newHeight / 2; } // Fixed at NW
+			else if (handle === 'sw') { fixedLocalX = newWidth / 2; fixedLocalY = -newHeight / 2; } // Fixed at NE
+			else if (handle === 'ne') { fixedLocalX = -newWidth / 2; fixedLocalY = newHeight / 2; } // Fixed at SW
+			else if (handle === 'nw') { fixedLocalX = newWidth / 2; fixedLocalY = newHeight / 2; } // Fixed at SE
+			else { fixedLocalX = 0; fixedLocalY = 0; }
+		} else {
+			// Edge handle - fixed edge center
+			if (handle === 'n') { fixedLocalX = 0; fixedLocalY = newHeight / 2; } // S edge fixed
+			else if (handle === 's') { fixedLocalX = 0; fixedLocalY = -newHeight / 2; } // N edge fixed
+			else if (handle === 'e') { fixedLocalX = -newWidth / 2; fixedLocalY = 0; } // W edge fixed
+			else if (handle === 'w') { fixedLocalX = newWidth / 2; fixedLocalY = 0; } // E edge fixed
+			else { fixedLocalX = 0; fixedLocalY = 0; }
+		}
+
+		// Convert the fixed point's local position to world space offset from center
+		// fixedPoint (world) = center (world) + rotate(fixedLocal)
+		// Therefore: center (world) = fixedPoint (world) - rotate(fixedLocal)
+		const rotatedFixedX = fixedLocalX * cos - fixedLocalY * sin;
+		const rotatedFixedY = fixedLocalX * sin + fixedLocalY * cos;
+
+		const newCenterX = fixedPoint.x - rotatedFixedX;
+		const newCenterY = fixedPoint.y - rotatedFixedY;
+
+		// Now calculate the top-left corner position
+		// IMPORTANT: The position {x, y} represents the top-left of the UNROTATED rectangle
+		// So we simply subtract half-widths from the center (no rotation needed)
+		const newX = newCenterX - newWidth / 2;
+		const newY = newCenterY - newHeight / 2;
+
+		return { x: newX, y: newY, width: newWidth, height: newHeight };
 	}
 
 	// Helper: Get display position (pending or actual)
@@ -325,8 +506,65 @@
 			// Resize mode
 			interactionMode = 'resizing';
 			resizeHandle = handle;
-			pendingSize = { ...size };
-			pendingPosition = { ...pos };
+			// Don't set pending values yet - wait until mouse actually moves
+			// This prevents initial jump from coordinate calculation differences
+			pendingSize = null;
+			pendingPosition = null;
+
+			// Calculate where the handle SHOULD be (the ideal corner/edge position)
+			// This will be used for the first resize calculation to avoid jump
+			const rotation = element.rotation || 0;
+			if (rotation !== 0) {
+				const corners = getRotatedCorners({
+					x: pos.x,
+					y: pos.y,
+					width: size.width,
+					height: size.height,
+					rotation
+				});
+
+				const isCornerHandle = handle.length === 2;
+				const isEdgeHandle = handle.length === 1;
+
+				if (isCornerHandle) {
+					// For corner handles, the dragged corner is opposite to the anchor
+					const anchorIndex = getAnchorCornerIndex(handle);
+					const draggedCornerIndex = (anchorIndex + 2) % 4;
+					initialHandlePosition = corners[draggedCornerIndex];
+				} else if (isEdgeHandle) {
+					// For edge handles, calculate the center of the edge
+					if (handle === 'n') {
+						initialHandlePosition = {
+							x: (corners[0].x + corners[1].x) / 2,
+							y: (corners[0].y + corners[1].y) / 2
+						};
+					} else if (handle === 's') {
+						initialHandlePosition = {
+							x: (corners[2].x + corners[3].x) / 2,
+							y: (corners[2].y + corners[3].y) / 2
+						};
+					} else if (handle === 'e') {
+						initialHandlePosition = {
+							x: (corners[1].x + corners[2].x) / 2,
+							y: (corners[1].y + corners[2].y) / 2
+						};
+					} else if (handle === 'w') {
+						initialHandlePosition = {
+							x: (corners[0].x + corners[3].x) / 2,
+							y: (corners[0].y + corners[3].y) / 2
+						};
+					}
+				}
+				// Calculate the offset from the mouse click position to the ideal handle position
+				const mouseCanvasX = (e.clientX - viewport.x) / viewport.scale;
+				const mouseCanvasY = (e.clientY - viewport.y) / viewport.scale;
+				if (initialHandlePosition) {
+					mouseToHandleOffset = {
+						x: initialHandlePosition.x - mouseCanvasX,
+						y: initialHandlePosition.y - mouseCanvasY
+					};
+				}
+			}
 		} else {
 			// Drag mode
 			interactionMode = 'dragging';
@@ -389,13 +627,129 @@
 			const maintainAspectRatio = tool === 'scale' || e.shiftKey;
 			const resizeFromCenter = e.altKey; // Option/Alt key resizes from center
 
+			// Get current rotation from active element or pending rotation
+			const activeElement = selectedElements.find(el => el.id === activeElementId);
+			const rotation = activeElement?.rotation || 0;
+
 			// Calculate new size based on handle
 			let newWidth = elementStartCanvas.width;
 			let newHeight = elementStartCanvas.height;
 			let newX = elementStartCanvas.x;
 			let newY = elementStartCanvas.y;
 
-			if (maintainAspectRatio) {
+			// Convert current mouse position to canvas space
+			let mouseCanvasX = (e.clientX - viewport.x) / viewport.scale;
+			let mouseCanvasY = (e.clientY - viewport.y) / viewport.scale;
+
+			// Check if we've moved past the threshold
+			if (!hasMovedPastThreshold) {
+				const deltaScreenDist = Math.sqrt(deltaScreen.x ** 2 + deltaScreen.y ** 2);
+				if (deltaScreenDist < RESIZE_START_THRESHOLD) {
+					// Still within dead zone - don't update position/size yet
+					return;
+				}
+				hasMovedPastThreshold = true;
+			}
+
+			// Apply the offset to compensate for where the user clicked vs where the handle actually is
+			// This ensures smooth resizing even if the user didn't click exactly on the handle center
+			if (rotation !== 0 && (mouseToHandleOffset.x !== 0 || mouseToHandleOffset.y !== 0)) {
+				mouseCanvasX += mouseToHandleOffset.x;
+				mouseCanvasY += mouseToHandleOffset.y;
+			}
+
+			// Handle rotated object resize with proper geometry
+			if (rotation !== 0) {
+				const isCornerHandle = resizeHandle.length === 2;
+				const isEdgeHandle = resizeHandle.length === 1;
+
+				let fixedPoint: Point;
+				let edgeAxis: 'horizontal' | 'vertical' | null = null;
+
+				if (resizeFromCenter) {
+					// Alt/Option: resize from center
+					// The center is simply the midpoint of the original bounds
+					// (elementStartCanvas represents the un-rotated bounding box)
+					fixedPoint = {
+						x: elementStartCanvas.x + elementStartCanvas.width / 2,
+						y: elementStartCanvas.y + elementStartCanvas.height / 2
+					};
+					// For center resize, we treat it as an edge resize with 2x distance
+					edgeAxis = isEdgeHandle ? (resizeHandle === 'n' || resizeHandle === 's' ? 'horizontal' : 'vertical') : null;
+				} else {
+					// Normal resize: fix opposite corner/edge
+					const corners = getRotatedCorners({
+						x: elementStartCanvas.x,
+						y: elementStartCanvas.y,
+						width: elementStartCanvas.width,
+						height: elementStartCanvas.height,
+						rotation
+					});
+
+					if (isCornerHandle) {
+						// For corner handles, use the opposite corner as anchor
+						const anchorIndex = getAnchorCornerIndex(resizeHandle);
+						fixedPoint = corners[anchorIndex];
+					} else if (isEdgeHandle) {
+						// For edge handles, use center of opposite edge as anchor
+						if (resizeHandle === 'n') {
+							// North handle: fix south edge (bottom-right and bottom-left midpoint)
+							fixedPoint = {
+								x: (corners[2].x + corners[3].x) / 2,
+								y: (corners[2].y + corners[3].y) / 2
+							};
+							edgeAxis = 'horizontal';
+						} else if (resizeHandle === 's') {
+							// South handle: fix north edge (top-left and top-right midpoint)
+							fixedPoint = {
+								x: (corners[0].x + corners[1].x) / 2,
+								y: (corners[0].y + corners[1].y) / 2
+							};
+							edgeAxis = 'horizontal';
+						} else if (resizeHandle === 'e') {
+							// East handle: fix west edge (top-left and bottom-left midpoint)
+							fixedPoint = {
+								x: (corners[0].x + corners[3].x) / 2,
+								y: (corners[0].y + corners[3].y) / 2
+							};
+							edgeAxis = 'vertical';
+						} else {
+							// West handle: fix east edge (top-right and bottom-right midpoint)
+							fixedPoint = {
+								x: (corners[1].x + corners[2].x) / 2,
+								y: (corners[1].y + corners[2].y) / 2
+							};
+							edgeAxis = 'vertical';
+						}
+					} else {
+						// Shouldn't happen, but fallback to center
+						fixedPoint = {
+							x: elementStartCanvas.x + elementStartCanvas.width / 2,
+							y: elementStartCanvas.y + elementStartCanvas.height / 2
+						};
+					}
+				}
+
+				// Calculate new dimensions with fixed point
+				const originalAspectRatio = elementStartCanvas.width / elementStartCanvas.height;
+
+				const result = calculateRectFromFixedPoint(
+					fixedPoint,
+					{ x: mouseCanvasX, y: mouseCanvasY },
+					rotation,
+					maintainAspectRatio,
+					originalAspectRatio,
+					resizeFromCenter,
+					elementStartCanvas.width,
+					elementStartCanvas.height,
+					resizeHandle
+				);
+
+				newX = result.x;
+				newY = result.y;
+				newWidth = result.width;
+				newHeight = result.height;
+			} else if (maintainAspectRatio) {
 				// For scale tool, calculate scale factor based on handle
 				let scaleFactor = 1;
 
@@ -737,6 +1091,9 @@
 		pendingRotation = null;
 		groupStartElements = [];
 		groupPendingTransforms = new Map();
+		hasMovedPastThreshold = false;
+		initialHandlePosition = null;
+		mouseToHandleOffset = { x: 0, y: 0 };
 
 		document.removeEventListener('mousemove', handleMouseMove);
 		document.removeEventListener('mouseup', handleMouseUp);
