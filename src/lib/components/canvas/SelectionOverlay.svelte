@@ -34,7 +34,7 @@
 	let pendingRotation: number | null = null;
 	let rotationStartAngle: number = 0; // Initial angle at rotation start
 	let elementStartRotation: number = 0; // Element's rotation at start
-	let groupPendingTransforms: Map<string, { position: { x: number; y: number }; size: { width: number; height: number } }> = new Map();
+	let groupPendingTransforms: Map<string, { position: { x: number; y: number }; size: { width: number; height: number }; rotation?: number }> = new Map();
 
 	// Broadcast state to store for CanvasElement to consume
 	$: {
@@ -69,6 +69,47 @@
 		for (const el of elements) {
 			const pos = getDisplayPosition(el);
 			const size = getDisplaySize(el);
+			const rotation = getDisplayRotation(el);
+
+			if (rotation !== 0) {
+				// For rotated elements, get all four corners and find their bounds
+				const corners = getRotatedCorners({
+					x: pos.x,
+					y: pos.y,
+					width: size.width,
+					height: size.height,
+					rotation
+				});
+
+				// Find min/max across all corners
+				for (const corner of corners) {
+					minX = Math.min(minX, corner.x);
+					minY = Math.min(minY, corner.y);
+					maxX = Math.max(maxX, corner.x);
+					maxY = Math.max(maxY, corner.y);
+				}
+			} else {
+				// For non-rotated elements, use simple bounds
+				minX = Math.min(minX, pos.x);
+				minY = Math.min(minY, pos.y);
+				maxX = Math.max(maxX, pos.x + size.width);
+				maxY = Math.max(maxY, pos.y + size.height);
+			}
+		}
+
+		return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+	}
+
+	// Calculate unrotated bounding box for multiple elements (used for resize handles)
+	function getUnrotatedGroupBounds(elements: Element[]): { x: number; y: number; width: number; height: number } {
+		if (elements.length === 0) return { x: 0, y: 0, width: 0, height: 0 };
+
+		let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+
+		for (const el of elements) {
+			const pos = getDisplayPosition(el);
+			const size = getDisplaySize(el);
+
 			minX = Math.min(minX, pos.x);
 			minY = Math.min(minY, pos.y);
 			maxX = Math.max(maxX, pos.x + size.width);
@@ -79,7 +120,55 @@
 	}
 
 	// Reactive: compute group bounds (depends on groupPendingTransforms for live updates)
-	$: groupBounds = selectedElements.length > 1 && groupPendingTransforms ? getGroupBounds(selectedElements) : null;
+	// Use rotated bounds to properly surround rotated elements
+	// During interactions, use the pending transforms to show real-time updates
+	$: groupBounds = (() => {
+		if (selectedElements.length <= 1) return null;
+
+		// If we're in a group interaction and have pending transforms, calculate bounds from those
+		if (isGroupInteraction && groupPendingTransforms.size > 0) {
+			let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+
+			for (const el of selectedElements) {
+				const pending = groupPendingTransforms.get(el.id);
+				if (!pending) continue;
+
+				const pos = pending.position;
+				const size = pending.size;
+				const rotation = pending.rotation || 0;
+
+				if (rotation !== 0) {
+					// For rotated elements, get all four corners and find their bounds
+					const corners = getRotatedCorners({
+						x: pos.x,
+						y: pos.y,
+						width: size.width,
+						height: size.height,
+						rotation
+					});
+
+					// Find min/max across all corners
+					for (const corner of corners) {
+						minX = Math.min(minX, corner.x);
+						minY = Math.min(minY, corner.y);
+						maxX = Math.max(maxX, corner.x);
+						maxY = Math.max(maxY, corner.y);
+					}
+				} else {
+					// For non-rotated elements, use simple bounds
+					minX = Math.min(minX, pos.x);
+					minY = Math.min(minY, pos.y);
+					maxX = Math.max(maxX, pos.x + size.width);
+					maxY = Math.max(maxY, pos.y + size.height);
+				}
+			}
+
+			return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+		}
+
+		// Otherwise use the current state
+		return getGroupBounds(selectedElements);
+	})();
 
 	// Helper: Get common rotation angle if all selected elements have the same rotation
 	function getCommonRotation(elements: Element[]): number | null {
@@ -297,6 +386,17 @@
 		return pendingSize && activeElementId === element.id ? pendingSize : element.size;
 	}
 
+	// Helper: Get display rotation (pending or actual)
+	function getDisplayRotation(element: Element): number {
+		if (isGroupInteraction && groupPendingTransforms.has(element.id)) {
+			return groupPendingTransforms.get(element.id)!.rotation || 0;
+		}
+		if (interactionMode === 'rotating' && pendingRotation !== null && activeElementId === element.id) {
+			return pendingRotation;
+		}
+		return element.rotation || 0;
+	}
+
 	// Start group interaction (for multi-selection)
 	function startGroupInteraction(e: MouseEvent, handle?: string) {
 		const tool = get(currentTool);
@@ -389,12 +489,17 @@
 					height: el.size.height
 				}));
 
-				// Store group bounds
-				const bounds = getGroupBounds(selectedElements);
-				elementStartCanvas = bounds;
+				// Store group bounds (use unrotated bounds for consistent coordinate system)
+				const unrotatedBounds = getUnrotatedGroupBounds(selectedElements);
+				elementStartCanvas = {
+					x: unrotatedBounds.x,
+					y: unrotatedBounds.y,
+					width: unrotatedBounds.width,
+					height: unrotatedBounds.height
+				};
 
 				interactionMode = 'dragging';
-				pendingPosition = { x: bounds.x, y: bounds.y };
+				pendingPosition = { x: elementStartCanvas.x, y: elementStartCanvas.y };
 
 				document.addEventListener('mousemove', handleMouseMove);
 				document.addEventListener('mouseup', handleMouseUp);
@@ -424,17 +529,23 @@
 			height: el.size.height
 		}));
 
-		// Store group bounds
-		const bounds = getGroupBounds(selectedElements);
-		elementStartCanvas = bounds;
+		// Store group bounds (use unrotated bounds for resize calculations)
+		// This ensures consistent coordinate system when scaling
+		const unrotatedBounds = getUnrotatedGroupBounds(selectedElements);
+		elementStartCanvas = {
+			x: unrotatedBounds.x,
+			y: unrotatedBounds.y,
+			width: unrotatedBounds.width,
+			height: unrotatedBounds.height
+		};
 
 		if (handle === 'rotate') {
 			// Rotation mode
 			interactionMode = 'rotating';
 
 			// Calculate center point of selection
-			const centerX = bounds.x + bounds.width / 2;
-			const centerY = bounds.y + bounds.height / 2;
+			const centerX = elementStartCanvas.x + elementStartCanvas.width / 2;
+			const centerY = elementStartCanvas.y + elementStartCanvas.height / 2;
 
 			// Convert mouse position to canvas space
 			const mouseCanvasX = (e.clientX - viewport.x) / viewport.scale;
@@ -450,8 +561,8 @@
 			// Resize mode
 			interactionMode = 'resizing';
 			resizeHandle = handle;
-			pendingSize = { width: bounds.width, height: bounds.height };
-			pendingPosition = { x: bounds.x, y: bounds.y };
+			pendingSize = { width: elementStartCanvas.width, height: elementStartCanvas.height };
+			pendingPosition = { x: elementStartCanvas.x, y: elementStartCanvas.y };
 		}
 
 		document.addEventListener('mousemove', handleMouseMove);
@@ -612,13 +723,20 @@
 				const deltaY = deltaCanvas.y;
 
 				groupPendingTransforms = new Map(
-					groupStartElements.map(el => [
-						el.id,
-						{
-							position: { x: el.x + deltaX, y: el.y + deltaY },
-							size: { width: el.width, height: el.height }
-						}
-					])
+					groupStartElements.map(el => {
+						// Find the original element to preserve its rotation
+						const originalElement = selectedElements.find(e => e.id === el.id);
+						const rotation = originalElement?.rotation || 0;
+
+						return [
+							el.id,
+							{
+								position: { x: el.x + deltaX, y: el.y + deltaY },
+								size: { width: el.width, height: el.height },
+								rotation
+							}
+						];
+					})
 				);
 			}
 		} else if (interactionMode === 'resizing' && resizeHandle) {
@@ -876,23 +994,43 @@
 			if (isGroupInteraction) {
 				const scaleX = newWidth / elementStartCanvas.width;
 				const scaleY = newHeight / elementStartCanvas.height;
-				const deltaX = newX - elementStartCanvas.x;
-				const deltaY = newY - elementStartCanvas.y;
 
 				groupPendingTransforms = new Map(
 					groupStartElements.map(el => {
-						const relX = el.x - elementStartCanvas.x;
-						const relY = el.y - elementStartCanvas.y;
+						// Find the original element to get its rotation
+						const originalElement = selectedElements.find(e => e.id === el.id);
+						const rotation = originalElement?.rotation || 0;
+
+						// Calculate element's center in original group
+						const elCenterX = el.x + el.width / 2;
+						const elCenterY = el.y + el.height / 2;
+
+						// Calculate offset from group top-left
+						const offsetX = elCenterX - elementStartCanvas.x;
+						const offsetY = elCenterY - elementStartCanvas.y;
+
+						// Scale the offset (this maintains relative positions)
+						const newOffsetX = offsetX * scaleX;
+						const newOffsetY = offsetY * scaleY;
+
+						// Calculate new element center
+						const newElCenterX = newX + newOffsetX;
+						const newElCenterY = newY + newOffsetY;
+
+						// Scale element size
 						const newElWidth = el.width * scaleX;
 						const newElHeight = el.height * scaleY;
-						const newElX = elementStartCanvas.x + deltaX + relX * scaleX;
-						const newElY = elementStartCanvas.y + deltaY + relY * scaleY;
+
+						// Calculate new top-left position
+						const newElX = newElCenterX - newElWidth / 2;
+						const newElY = newElCenterY - newElHeight / 2;
 
 						return [
 							el.id,
 							{
 								position: { x: newElX, y: newElY },
-								size: { width: newElWidth, height: newElHeight }
+								size: { width: newElWidth, height: newElHeight },
+								rotation
 							}
 						];
 					})
@@ -928,9 +1066,14 @@
 			// Update pending transforms for all group elements during rotation
 			if (isGroupInteraction) {
 				const rotationDelta = (pendingRotation - elementStartRotation) * (Math.PI / 180);
+				const rotationDeltaDegrees = pendingRotation - elementStartRotation;
 
 				groupPendingTransforms = new Map(
 					groupStartElements.map(el => {
+						// Get the original element's rotation
+						const originalElement = selectedElements.find(e => e.id === el.id);
+						const originalRotation = originalElement?.rotation || 0;
+
 						// Calculate element's center relative to group center
 						const elCenterX = el.x + el.width / 2;
 						const elCenterY = el.y + el.height / 2;
@@ -949,12 +1092,19 @@
 						const newElX = newElCenterX - el.width / 2;
 						const newElY = newElCenterY - el.height / 2;
 
+						// Apply rotation delta to element's original rotation
+						let newRotation = originalRotation + rotationDeltaDegrees;
+
+						// Normalize to -180 to 180 range
+						while (newRotation > 180) newRotation -= 360;
+						while (newRotation < -180) newRotation += 360;
+
 						return [
 							el.id,
 							{
 								position: { x: newElX, y: newElY },
 								size: { width: el.width, height: el.height },
-								rotation: pendingRotation
+								rotation: newRotation
 							}
 						];
 					})
@@ -1016,12 +1166,17 @@
 				const groupCenterX = elementStartCanvas.x + elementStartCanvas.width / 2;
 				const groupCenterY = elementStartCanvas.y + elementStartCanvas.height / 2;
 
-				// Calculate rotation delta in radians
+				// Calculate rotation delta in radians and degrees
 				const rotationDelta = (pendingRotation - elementStartRotation) * (Math.PI / 180);
+				const rotationDeltaDegrees = pendingRotation - elementStartRotation;
 
 				// Apply rotation to all selected elements around group center
 				await Promise.all(
 					groupStartElements.map(el => {
+						// Get the original element's rotation
+						const originalElement = selectedElements.find(e => e.id === el.id);
+						const originalRotation = originalElement?.rotation || 0;
+
 						// Calculate element's center relative to group center
 						const elCenterX = el.x + el.width / 2;
 						const elCenterY = el.y + el.height / 2;
@@ -1040,9 +1195,16 @@
 						const newElX = newElCenterX - el.width / 2;
 						const newElY = newElCenterY - el.height / 2;
 
+						// Apply rotation delta to element's original rotation
+						let newRotation = originalRotation + rotationDeltaDegrees;
+
+						// Normalize to -180 to 180 range
+						while (newRotation > 180) newRotation -= 360;
+						while (newRotation < -180) newRotation += 360;
+
 						// Apply rotation and move
 						return Promise.all([
-							rotateElement(el.id, pendingRotation!),
+							rotateElement(el.id, newRotation),
 							moveElement(el.id, { x: newElX, y: newElY })
 						]);
 					})
@@ -1120,14 +1282,16 @@
 	/>
 {:else if selectedElements.length > 1 && groupBounds}
 	<!-- Multi-element selection - single bounding box -->
+	<!-- Note: groupBounds already accounts for rotated elements by calculating their corners -->
+	<!-- groupBounds is reactive to groupPendingTransforms, so it updates in real-time during interactions -->
 	<SelectionUI
 		element={{
 			id: 'group',
 			type: 'div',
 			parentId: null,
 			frameId: '',
-			position: isGroupInteraction && pendingPosition ? pendingPosition : { x: groupBounds.x, y: groupBounds.y },
-			size: isGroupInteraction && pendingSize ? pendingSize : { width: groupBounds.width, height: groupBounds.height },
+			position: { x: groupBounds.x, y: groupBounds.y },
+			size: { width: groupBounds.width, height: groupBounds.height },
 			styles: {},
 			typography: {},
 			spacing: {},
@@ -1138,7 +1302,7 @@
 		{isPanning}
 		pendingPosition={null}
 		pendingSize={null}
-		rotation={commonRotation || 0}
+		rotation={0}
 		onMouseDown={(e, handle) => startGroupInteraction(e, handle)}
 	/>
 {/if}
