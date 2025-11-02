@@ -690,6 +690,11 @@ export async function pasteElements(): Promise<void> {
 			await updateElementSpacing(newElementId, element.spacing);
 		}
 
+		// Copy rotation if it exists
+		if (element.rotation && element.rotation !== 0) {
+			await rotateElement(newElementId, element.rotation);
+		}
+
 		// Copy other properties
 		if (element.alt || element.href || element.src) {
 			await updateElement(newElementId, {
