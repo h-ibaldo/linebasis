@@ -13,6 +13,7 @@
 
 	export let canvasElement: HTMLElement;
 	export let viewport: { x: number; y: number; scale: number };
+	export let isPanning: boolean = false;
 
 	let isSelecting = false;
 	let selectionStart = { x: 0, y: 0 };
@@ -30,6 +31,9 @@
 	});
 
 	function handleMouseDown(e: MouseEvent) {
+		// Don't start selection if spacebar panning is active
+		if (isPanning) return;
+
 		// Only work with move tool
 		const tool = get(currentTool);
 		if (tool !== 'move') return;

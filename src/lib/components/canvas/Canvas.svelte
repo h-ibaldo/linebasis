@@ -119,6 +119,13 @@
 		// Space key for panning
 		if (e.code === 'Space' && !isPanning) {
 			e.preventDefault();
+			e.stopPropagation();
+			
+			// Blur any focused select elements to prevent dropdown toggle
+			if (document.activeElement && document.activeElement.tagName === 'SELECT') {
+				(document.activeElement as HTMLElement).blur();
+			}
+			
 			isPanning = true;
 			return;
 		}
@@ -458,7 +465,7 @@
 		
 		<!-- Selection Box - multi-select by dragging -->
 		{#if canvasElement}
-			<SelectionBox {canvasElement} {viewport} />
+			<SelectionBox {canvasElement} {viewport} {isPanning} />
 		{/if}
 	</div>
 </div>

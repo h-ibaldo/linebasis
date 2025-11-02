@@ -423,6 +423,9 @@
 				document.removeEventListener('mousemove', checkMove);
 				document.removeEventListener('mouseup', handleClick);
 
+				// Don't handle clicks if panning is active
+				if (isPanning) return;
+
 				if (!hasMoved) {
 					// It was a click, not a drag - check what's underneath
 					const allSelectionElements = document.querySelectorAll('.selection-border, .drag-area, .resize-handle');
