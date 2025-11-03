@@ -488,6 +488,25 @@ export async function updateElementStyles(
 	});
 }
 
+/**
+ * Update styles for multiple elements as a single atomic operation (for multi-selection)
+ */
+export async function updateElementsStylesGroup(
+	elements: Array<{
+		elementId: string;
+		styles: Partial<Element['styles']>;
+	}>
+): Promise<void> {
+	await dispatch({
+		id: uuidv4(),
+		type: 'GROUP_UPDATE_STYLES',
+		timestamp: Date.now(),
+		payload: {
+			elements
+		}
+	});
+}
+
 export async function updateElementTypography(
 	elementId: string,
 	typography: Partial<Element['typography']>

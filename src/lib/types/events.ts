@@ -24,6 +24,7 @@ export type EventType =
 	| 'GROUP_ROTATE_ELEMENTS'
 	// Style operations
 	| 'UPDATE_STYLES'
+	| 'GROUP_UPDATE_STYLES'
 	| 'UPDATE_TYPOGRAPHY'
 	| 'UPDATE_SPACING'
 	// Frame operations
@@ -160,6 +161,16 @@ export interface GroupRotateElementsEvent extends BaseEvent {
 			elementId: string;
 			rotation: number;
 			position: Position;
+		}>;
+	};
+}
+
+export interface GroupUpdateStylesEvent extends BaseEvent {
+	type: 'GROUP_UPDATE_STYLES';
+	payload: {
+		elements: Array<{
+			elementId: string;
+			styles: Partial<ElementStyles>;
 		}>;
 	};
 }
@@ -335,6 +346,7 @@ export type DesignEvent =
 	| GroupMoveElementsEvent
 	| GroupResizeElementsEvent
 	| GroupRotateElementsEvent
+	| GroupUpdateStylesEvent
 	| UpdateStylesEvent
 	| UpdateTypographyEvent
 	| UpdateSpacingEvent

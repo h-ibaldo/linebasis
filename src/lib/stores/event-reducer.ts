@@ -24,6 +24,7 @@ import type {
 	GroupMoveElementsEvent,
 	GroupResizeElementsEvent,
 	GroupRotateElementsEvent,
+	GroupUpdateStylesEvent,
 	UpdateStylesEvent,
 	UpdateTypographyEvent,
 	UpdateSpacingEvent,
@@ -98,6 +99,8 @@ export function reduceEvent(state: DesignState, event: DesignEvent): DesignState
 			return handleGroupResizeElements(state, event);
 		case 'GROUP_ROTATE_ELEMENTS':
 			return handleGroupRotateElements(state, event);
+		case 'GROUP_UPDATE_STYLES':
+			return handleGroupUpdateStyles(state, event);
 
 		// Style operations
 		case 'UPDATE_STYLES':
@@ -422,6 +425,30 @@ function handleGroupRotateElements(state: DesignState, event: GroupRotateElement
 				...element,
 				rotation,
 				position
+			};
+		}
+	}
+
+	return {
+		...state,
+		elements: newElements
+	};
+}
+
+function handleGroupUpdateStyles(state: DesignState, event: GroupUpdateStylesEvent): DesignState {
+	const { elements } = event.payload;
+	const newElements = { ...state.elements };
+
+	// Update all elements atomically
+	for (const { elementId, styles } of elements) {
+		const element = newElements[elementId];
+		if (element) {
+			newElements[elementId] = {
+				...element,
+				styles: {
+					...element.styles,
+					...styles
+				}
 			};
 		}
 	}
