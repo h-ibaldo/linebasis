@@ -8,8 +8,12 @@ import type { RequestHandler } from './$types';
 import { login } from '$lib/server/services/auth';
 
 export const POST: RequestHandler = async ({ request }) => {
+	let email: string | undefined;
+	
 	try {
-		const { email, password } = await request.json();
+		const body = await request.json();
+		email = body.email;
+		const password = body.password;
 
 		// Validate input
 		if (!email || !password) {
@@ -31,7 +35,16 @@ export const POST: RequestHandler = async ({ request }) => {
 			refreshToken: result.tokens.refreshToken
 		});
 	} catch (error) {
-		console.error('Login error:', error);
+		// Enhanced error logging with stack traces and context
+		console.error('[POST /api/auth/login] Error details:');
+		console.error('Error type:', error instanceof Error ? error.constructor.name : typeof error);
+		console.error('Error message:', error instanceof Error ? error.message : String(error));
+		console.error('Email attempted:', email || 'unknown');
+		if (error instanceof Error && error.stack) {
+			console.error('Stack trace:', error.stack);
+		}
+		console.error('Full error object:', error);
+		
 		return json({ error: 'Internal server error' }, { status: 500 });
 	}
 };

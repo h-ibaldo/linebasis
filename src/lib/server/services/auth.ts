@@ -13,6 +13,18 @@ const JWT_SECRET = process.env.JWT_SECRET || 'development-secret-change-in-produ
 const JWT_EXPIRES_IN = '15m'; // Short-lived access tokens
 const REFRESH_TOKEN_EXPIRES_DAYS = 30;
 
+/**
+ * Validate JWT_SECRET is present and valid
+ */
+function validateJWTSecret(): void {
+	if (!JWT_SECRET || JWT_SECRET.trim().length === 0) {
+		throw new Error('JWT_SECRET is not configured. Please set JWT_SECRET environment variable.');
+	}
+	if (JWT_SECRET === 'development-secret-change-in-production') {
+		console.warn('[auth] Warning: Using default JWT_SECRET. This should be changed in production.');
+	}
+}
+
 export interface AuthTokens {
 	accessToken: string;
 	refreshToken: string;
@@ -44,32 +56,61 @@ export async function verifyPassword(password: string, hash: string): Promise<bo
  * Generate JWT access token
  */
 export function generateAccessToken(user: User): string {
-	const payload: JWTPayload = {
-		userId: user.id,
-		email: user.email,
-		role: user.role,
-		teamId: user.teamId
-	};
-	return jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+	try {
+		validateJWTSecret();
+
+		const payload: JWTPayload = {
+			userId: user.id,
+			email: user.email,
+			role: user.role,
+			teamId: user.teamId
+		};
+
+		const token = jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+		return token;
+	} catch (error) {
+		console.error('[generateAccessToken] Error:', error);
+		if (error instanceof Error) {
+			console.error('[generateAccessToken] Error message:', error.message);
+		}
+		throw new Error(`Failed to generate access token: ${error instanceof Error ? error.message : String(error)}`);
+	}
 }
 
 /**
  * Generate refresh token and store in database
  */
 export async function generateRefreshToken(userId: string): Promise<string> {
-	const token = nanoid(64);
-	const expiresAt = new Date();
-	expiresAt.setDate(expiresAt.getDate() + REFRESH_TOKEN_EXPIRES_DAYS);
+	try {
+		const token = nanoid(64);
+		const expiresAt = new Date();
+		expiresAt.setDate(expiresAt.getDate() + REFRESH_TOKEN_EXPIRES_DAYS);
 
-	await db.session.create({
-		data: {
-			userId,
-			token,
-			expiresAt
+		try {
+			await db.session.create({
+				data: {
+					userId,
+					token,
+					expiresAt
+				}
+			});
+		} catch (dbError) {
+			console.error('[generateRefreshToken] Database error creating session:', dbError);
+			if (dbError instanceof Error) {
+				console.error('[generateRefreshToken] Database error message:', dbError.message);
+				console.error('[generateRefreshToken] Database error stack:', dbError.stack);
+			}
+			throw new Error(`Failed to create session in database: ${dbError instanceof Error ? dbError.message : String(dbError)}`);
 		}
-	});
 
-	return token;
+		return token;
+	} catch (error) {
+		console.error('[generateRefreshToken] Error:', error);
+		if (error instanceof Error && error.stack) {
+			console.error('[generateRefreshToken] Error stack:', error.stack);
+		}
+		throw error;
+	}
 }
 
 /**
@@ -151,35 +192,86 @@ export async function login(
 	email: string,
 	password: string
 ): Promise<{ user: User; tokens: AuthTokens } | { error: string }> {
-	// Find user
-	const user = await db.user.findUnique({
-		where: { email }
-	});
+	try {
+		// Find user
+		let user: User | null;
+		try {
+			user = await db.user.findUnique({
+				where: { email }
+			});
+		} catch (dbError) {
+			console.error('[login] Database error finding user:', dbError);
+			if (dbError instanceof Error) {
+				console.error('[login] Database error message:', dbError.message);
+				console.error('[login] Database error stack:', dbError.stack);
+			}
+			return { error: 'Database connection error. Please try again.' };
+		}
 
-	if (!user) {
-		return { error: 'Invalid email or password' };
+		if (!user) {
+			return { error: 'Invalid email or password' };
+		}
+
+		// Verify password
+		let isValid: boolean;
+		try {
+			isValid = await verifyPassword(password, user.passwordHash);
+		} catch (passwordError) {
+			console.error('[login] Password verification error:', passwordError);
+			return { error: 'Authentication error. Please try again.' };
+		}
+
+		if (!isValid) {
+			return { error: 'Invalid email or password' };
+		}
+
+		// Update last login
+		try {
+			await db.user.update({
+				where: { id: user.id },
+				data: { lastLoginAt: new Date() }
+			});
+		} catch (updateError) {
+			console.error('[login] Database error updating last login:', updateError);
+			// Non-critical error, continue with login
+		}
+
+		// Generate tokens
+		let accessToken: string;
+		try {
+			accessToken = generateAccessToken(user);
+		} catch (tokenError) {
+			console.error('[login] Error generating access token:', tokenError);
+			if (tokenError instanceof Error) {
+				console.error('[login] Token error message:', tokenError.message);
+			}
+			return { error: 'Token generation failed. Please try again.' };
+		}
+
+		let refreshToken: string;
+		try {
+			refreshToken = await generateRefreshToken(user.id);
+		} catch (refreshError) {
+			console.error('[login] Error generating refresh token:', refreshError);
+			if (refreshError instanceof Error) {
+				console.error('[login] Refresh token error message:', refreshError.message);
+				console.error('[login] Refresh token error stack:', refreshError.stack);
+			}
+			return { error: 'Session creation failed. Please try again.' };
+		}
+
+		return {
+			user,
+			tokens: { accessToken, refreshToken }
+		};
+	} catch (error) {
+		console.error('[login] Unexpected error:', error);
+		if (error instanceof Error) {
+			console.error('[login] Unexpected error message:', error.message);
+			console.error('[login] Unexpected error stack:', error.stack);
+		}
+		return { error: 'Login failed. Please try again.' };
 	}
-
-	// Verify password
-	const isValid = await verifyPassword(password, user.passwordHash);
-	if (!isValid) {
-		return { error: 'Invalid email or password' };
-	}
-
-	// Update last login
-	await db.user.update({
-		where: { id: user.id },
-		data: { lastLoginAt: new Date() }
-	});
-
-	// Generate tokens
-	const accessToken = generateAccessToken(user);
-	const refreshToken = await generateRefreshToken(user.id);
-
-	return {
-		user,
-		tokens: { accessToken, refreshToken }
-	};
 }
 
 /**
