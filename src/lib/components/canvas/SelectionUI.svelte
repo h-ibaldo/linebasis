@@ -21,6 +21,8 @@
 
 	const HANDLE_SIZE = 8;
 	const BORDER_WIDTH = 2;
+	const ROTATION_ZONE_SIZE = 15; // Size of rotation zone extending from each corner handle
+	const EDGE_RESIZE_ZONE_WIDTH = 6; // Width of the invisible resize zone along each edge (extends inward and outward)
 
 	// Reactive: Get display position/size
 	$: pos = pendingPosition || element.position;
@@ -92,22 +94,7 @@
 		aria-label="Drag {element.type}"
 	/>
 
-	<!-- Resize handles - N -->
-	<div
-		class="resize-handle"
-		style="
-			position: absolute;
-			left: calc(50% - {handleOffset}px);
-			top: -{handleOffset}px;
-			cursor: ns-resize;
-			pointer-events: auto;
-		"
-		on:mousedown={(e) => onMouseDown(e, 'n')}
-		role="button"
-		tabindex="0"
-		aria-label="Resize north"
-	/>
-
+	<!-- Corner resize handles (visual indicators) -->
 	<!-- NE -->
 	<div
 		class="resize-handle"
@@ -122,22 +109,6 @@
 		role="button"
 		tabindex="0"
 		aria-label="Resize northeast"
-	/>
-
-	<!-- E -->
-	<div
-		class="resize-handle"
-		style="
-			position: absolute;
-			left: calc(100% - {handleOffset}px);
-			top: calc(50% - {handleOffset}px);
-			cursor: ew-resize;
-			pointer-events: auto;
-		"
-		on:mousedown={(e) => onMouseDown(e, 'e')}
-		role="button"
-		tabindex="0"
-		aria-label="Resize east"
 	/>
 
 	<!-- SE -->
@@ -156,22 +127,6 @@
 		aria-label="Resize southeast"
 	/>
 
-	<!-- S -->
-	<div
-		class="resize-handle"
-		style="
-			position: absolute;
-			left: calc(50% - {handleOffset}px);
-			top: calc(100% - {handleOffset}px);
-			cursor: ns-resize;
-			pointer-events: auto;
-		"
-		on:mousedown={(e) => onMouseDown(e, 's')}
-		role="button"
-		tabindex="0"
-		aria-label="Resize south"
-	/>
-
 	<!-- SW -->
 	<div
 		class="resize-handle"
@@ -186,22 +141,6 @@
 		role="button"
 		tabindex="0"
 		aria-label="Resize southwest"
-	/>
-
-	<!-- W -->
-	<div
-		class="resize-handle"
-		style="
-			position: absolute;
-			left: -{handleOffset}px;
-			top: calc(50% - {handleOffset}px);
-			cursor: ew-resize;
-			pointer-events: auto;
-		"
-		on:mousedown={(e) => onMouseDown(e, 'w')}
-		role="button"
-		tabindex="0"
-		aria-label="Resize west"
 	/>
 
 	<!-- NW -->
@@ -254,6 +193,227 @@
 		tabindex="0"
 		aria-label="Rotate element"
 	/>
+
+	<!-- Full-width invisible edge resize zones (Figma-style) -->
+	<!-- North edge - full width clickable zone -->
+	<div
+		class="edge-resize-zone"
+		style="
+			position: absolute;
+			left: 0;
+			top: -{EDGE_RESIZE_ZONE_WIDTH}px;
+			width: 100%;
+			height: {EDGE_RESIZE_ZONE_WIDTH * 2}px;
+			cursor: ns-resize;
+			pointer-events: auto;
+		"
+		on:mousedown={(e) => onMouseDown(e, 'n')}
+		role="button"
+		tabindex="0"
+		aria-label="Resize north"
+	/>
+
+	<!-- East edge - full height clickable zone -->
+	<div
+		class="edge-resize-zone"
+		style="
+			position: absolute;
+			left: calc(100% - {EDGE_RESIZE_ZONE_WIDTH}px);
+			top: 0;
+			width: {EDGE_RESIZE_ZONE_WIDTH * 2}px;
+			height: 100%;
+			cursor: ew-resize;
+			pointer-events: auto;
+		"
+		on:mousedown={(e) => onMouseDown(e, 'e')}
+		role="button"
+		tabindex="0"
+		aria-label="Resize east"
+	/>
+
+	<!-- South edge - full width clickable zone -->
+	<div
+		class="edge-resize-zone"
+		style="
+			position: absolute;
+			left: 0;
+			top: calc(100% - {EDGE_RESIZE_ZONE_WIDTH}px);
+			width: 100%;
+			height: {EDGE_RESIZE_ZONE_WIDTH * 2}px;
+			cursor: ns-resize;
+			pointer-events: auto;
+		"
+		on:mousedown={(e) => onMouseDown(e, 's')}
+		role="button"
+		tabindex="0"
+		aria-label="Resize south"
+	/>
+
+	<!-- West edge - full height clickable zone -->
+	<div
+		class="edge-resize-zone"
+		style="
+			position: absolute;
+			left: -{EDGE_RESIZE_ZONE_WIDTH}px;
+			top: 0;
+			width: {EDGE_RESIZE_ZONE_WIDTH * 2}px;
+			height: 100%;
+			cursor: ew-resize;
+			pointer-events: auto;
+		"
+		on:mousedown={(e) => onMouseDown(e, 'w')}
+		role="button"
+		tabindex="0"
+		aria-label="Resize west"
+	/>
+
+	<!-- Rotation zones - L-shaped areas around each corner handle for rotation -->
+	<!-- Only show rotation zones when not panning -->
+	{#if !isPanning}
+		<!-- NW (top-left) corner rotation zone - L-shaped -->
+		<!-- Horizontal part -->
+		<div
+			class="rotation-zone"
+			style="
+				position: absolute;
+				left: -{ROTATION_ZONE_SIZE}px;
+				top: -{ROTATION_ZONE_SIZE}px;
+				width: {ROTATION_ZONE_SIZE * 2}px;
+				height: {ROTATION_ZONE_SIZE}px;
+				cursor: grab;
+				pointer-events: auto;
+			"
+			on:mousedown={(e) => onMouseDown(e, 'rotate')}
+			role="button"
+			tabindex="0"
+			aria-label="Rotate element"
+		/>
+		<!-- Vertical part -->
+		<div
+			class="rotation-zone"
+			style="
+				position: absolute;
+				left: -{ROTATION_ZONE_SIZE}px;
+				top: -{ROTATION_ZONE_SIZE}px;
+				width: {ROTATION_ZONE_SIZE}px;
+				height: {ROTATION_ZONE_SIZE * 2}px;
+				cursor: grab;
+				pointer-events: auto;
+			"
+			on:mousedown={(e) => onMouseDown(e, 'rotate')}
+			role="button"
+			tabindex="0"
+			aria-label="Rotate element"
+		/>
+
+		<!-- NE (top-right) corner rotation zone - L-shaped -->
+		<!-- Horizontal part -->
+		<div
+			class="rotation-zone"
+			style="
+				position: absolute;
+				left: calc(100% - {ROTATION_ZONE_SIZE}px);
+				top: -{ROTATION_ZONE_SIZE}px;
+				width: {ROTATION_ZONE_SIZE * 2}px;
+				height: {ROTATION_ZONE_SIZE}px;
+				cursor: grab;
+				pointer-events: auto;
+			"
+			on:mousedown={(e) => onMouseDown(e, 'rotate')}
+			role="button"
+			tabindex="0"
+			aria-label="Rotate element"
+		/>
+		<!-- Vertical part -->
+		<div
+			class="rotation-zone"
+			style="
+				position: absolute;
+				left: calc(100%);
+				top: -{ROTATION_ZONE_SIZE}px;
+				width: {ROTATION_ZONE_SIZE}px;
+				height: {ROTATION_ZONE_SIZE * 2}px;
+				cursor: grab;
+				pointer-events: auto;
+			"
+			on:mousedown={(e) => onMouseDown(e, 'rotate')}
+			role="button"
+			tabindex="0"
+			aria-label="Rotate element"
+		/>
+
+		<!-- SE (bottom-right) corner rotation zone - L-shaped -->
+		<!-- Horizontal part -->
+		<div
+			class="rotation-zone"
+			style="
+				position: absolute;
+				left: calc(100% - {ROTATION_ZONE_SIZE}px);
+				top: calc(100%);
+				width: {ROTATION_ZONE_SIZE * 2}px;
+				height: {ROTATION_ZONE_SIZE}px;
+				cursor: grab;
+				pointer-events: auto;
+			"
+			on:mousedown={(e) => onMouseDown(e, 'rotate')}
+			role="button"
+			tabindex="0"
+			aria-label="Rotate element"
+		/>
+		<!-- Vertical part -->
+		<div
+			class="rotation-zone"
+			style="
+				position: absolute;
+				left: calc(100%);
+				top: calc(100% - {ROTATION_ZONE_SIZE}px);
+				width: {ROTATION_ZONE_SIZE}px;
+				height: {ROTATION_ZONE_SIZE * 2}px;
+				cursor: grab;
+				pointer-events: auto;
+			"
+			on:mousedown={(e) => onMouseDown(e, 'rotate')}
+			role="button"
+			tabindex="0"
+			aria-label="Rotate element"
+		/>
+
+		<!-- SW (bottom-left) corner rotation zone - L-shaped -->
+		<!-- Horizontal part -->
+		<div
+			class="rotation-zone"
+			style="
+				position: absolute;
+				left: -{ROTATION_ZONE_SIZE}px;
+				top: calc(100%);
+				width: {ROTATION_ZONE_SIZE * 2}px;
+				height: {ROTATION_ZONE_SIZE}px;
+				cursor: grab;
+				pointer-events: auto;
+			"
+			on:mousedown={(e) => onMouseDown(e, 'rotate')}
+			role="button"
+			tabindex="0"
+			aria-label="Rotate element"
+		/>
+		<!-- Vertical part -->
+		<div
+			class="rotation-zone"
+			style="
+				position: absolute;
+				left: -{ROTATION_ZONE_SIZE}px;
+				top: calc(100% - {ROTATION_ZONE_SIZE}px);
+				width: {ROTATION_ZONE_SIZE}px;
+				height: {ROTATION_ZONE_SIZE * 2}px;
+				cursor: grab;
+				pointer-events: auto;
+			"
+			on:mousedown={(e) => onMouseDown(e, 'rotate')}
+			role="button"
+			tabindex="0"
+			aria-label="Rotate element"
+		/>
+	{/if}
 </div>
 
 <style>
@@ -266,6 +426,7 @@
 	}
 
 	.resize-handle {
+		/* Corner resize handles - visual indicators only */
 		position: absolute;
 		width: 8px;
 		height: 8px;
@@ -273,9 +434,44 @@
 		border: 1px solid #3b82f6;
 		pointer-events: auto;
 		box-sizing: border-box;
+		z-index: 4; /* Above edge zones */
 	}
 
 	.resize-handle:hover {
 		background: #3b82f6;
+	}
+
+	.edge-resize-zone {
+		/* Invisible full-width edge resize zones (Figma-style) */
+		background: transparent;
+		/* Uncomment for debugging to see the edge zones */
+		/* background: rgba(59, 130, 246, 0.05); */
+		/* border: 1px dashed rgba(59, 130, 246, 0.2); */
+		z-index: 2; /* Above rotation zones, below corner resize handles */
+	}
+
+	.rotation-zone {
+		/* Invisible rotation zone */
+		background: transparent;
+		/* Uncomment for debugging to see the rotation zones */
+		/* background: rgba(59, 130, 246, 0.1); */
+		/* border: 1px dashed rgba(59, 130, 246, 0.3); */
+		z-index: 1; /* Below resize zones */
+	}
+
+	.rotation-zone:hover {
+		cursor: grab;
+	}
+
+	.rotation-zone:active {
+		cursor: grabbing;
+	}
+
+	.rotation-handle {
+		z-index: 5; /* Highest priority for dedicated rotation handle */
+	}
+
+	.rotation-line {
+		z-index: 1;
 	}
 </style>
