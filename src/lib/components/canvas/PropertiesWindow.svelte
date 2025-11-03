@@ -12,14 +12,18 @@
 	import FloatingWindow from '$lib/components/ui/FloatingWindow.svelte';
 	import DivProperties from './properties/DivProperties.svelte';
 	import MediaProperties from './properties/MediaProperties.svelte';
+	import MultiSelectionProperties from './properties/MultiSelectionProperties.svelte';
 
 	$: selectedElement = $selectedElements.length === 1 ? $selectedElements[0] : null;
 	$: elementType = selectedElement?.type;
+	$: isMultiSelection = $selectedElements.length > 1;
 </script>
 
 <FloatingWindow title="Properties" defaultX={-320} defaultY={-400} storageKey="properties-window-pos">
 	<div class="properties-panel">
-		{#if !selectedElement}
+		{#if isMultiSelection}
+			<MultiSelectionProperties elements={$selectedElements} />
+		{:else if !selectedElement}
 			<div class="no-selection">
 				<p>No element selected</p>
 				<p class="hint">Select an element to edit its properties</p>
