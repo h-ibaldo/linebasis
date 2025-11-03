@@ -154,6 +154,9 @@ async function dispatch(event: DesignEvent): Promise<void> {
 	// Recompute design state
 	const newDesignState = reduceEvents(newEvents);
 
+	// Preserve selection state (selection is not part of event sourcing)
+	newDesignState.selectedElementIds = state.designState.selectedElementIds;
+
 	// Update store
 	storeState.update((s) => ({
 		...s,

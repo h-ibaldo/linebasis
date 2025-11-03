@@ -45,9 +45,10 @@
 	});
 
 	function handleMouseDown(e: MouseEvent) {
-		// Stop propagation to prevent canvas from handling clicks
+		// Always stop propagation to prevent canvas from handling clicks
+		// This prevents deselection when interacting with window controls
 		e.stopPropagation();
-		
+
 		if ((e.target as HTMLElement).closest('.window-header')) {
 			isDragging = true;
 			dragStartX = e.clientX;
@@ -58,6 +59,11 @@
 			document.addEventListener('mousemove', handleMouseMove);
 			document.addEventListener('mouseup', handleMouseUp);
 		}
+	}
+
+	function handleClick(e: MouseEvent) {
+		// Also stop click propagation for extra safety
+		e.stopPropagation();
 	}
 
 	function handleMouseMove(e: MouseEvent) {
@@ -74,7 +80,10 @@
 		y = Math.max(0, Math.min(y, window.innerHeight - 100));
 	}
 
-	function handleMouseUp() {
+	function handleMouseUp(e?: MouseEvent) {
+		// Stop mouseup propagation to prevent canvas from handling it
+		e?.stopPropagation();
+
 		if (isDragging) {
 			isDragging = false;
 			document.removeEventListener('mousemove', handleMouseMove);
@@ -95,6 +104,10 @@
 		class="floating-window"
 		style="left: {x}px; top: {y}px; min-width: {minWidth}px;"
 		on:mousedown={handleMouseDown}
+		on:mouseup={handleMouseUp}
+		on:click={handleClick}
+		role="dialog"
+		aria-label={title}
 	>
 		<div class="window-header">
 			<span class="window-title">{title}</span>
