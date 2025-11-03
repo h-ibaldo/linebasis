@@ -153,6 +153,9 @@ function handleCreateElement(state: DesignState, event: CreateElementEvent): Des
 	const { elementId, parentId, frameId, elementType, position, size, styles, content } =
 		event.payload;
 
+	// Calculate next z-index: find highest z-index among all elements and add 1
+	const maxZIndex = Math.max(0, ...Object.values(state.elements).map(el => el.zIndex || 0));
+
 	const element: Element = {
 		id: elementId,
 		type: elementType,
@@ -165,7 +168,7 @@ function handleCreateElement(state: DesignState, event: CreateElementEvent): Des
 		spacing: {},
 		content,
 		children: [],
-		zIndex: 0
+		zIndex: maxZIndex + 1
 	};
 
 	// Add element to state

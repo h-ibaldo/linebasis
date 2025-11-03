@@ -406,8 +406,8 @@
 			class="canvas-viewport"
 			style="transform: translate({viewport.x}px, {viewport.y}px) scale({viewport.scale});"
 		>
-			<!-- Render all root elements (no parent) directly on infinite canvas -->
-			{#each Object.values($designState.elements).filter(el => el.parentId === null) as element (element.id)}
+			<!-- Render all root elements (no parent) directly on infinite canvas, sorted by z-index -->
+			{#each Object.values($designState.elements).filter(el => el.parentId === null).sort((a, b) => (a.zIndex || 0) - (b.zIndex || 0)) as element (element.id)}
 				<CanvasElement
 					{element}
 					{isPanning}

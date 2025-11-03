@@ -99,6 +99,11 @@
 		styles.push(`height: ${displaySize.height}px`);
 		styles.push(`cursor: ${elementCursor}`);
 
+		// Z-index for stacking order
+		if (element.zIndex !== undefined) {
+			styles.push(`z-index: ${element.zIndex}`);
+		}
+
 		// Rotation
 		if (displayRotation) {
 			styles.push(`transform: rotate(${displayRotation}deg)`);

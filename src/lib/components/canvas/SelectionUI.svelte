@@ -75,6 +75,7 @@
 	/>
 
 	<!-- Draggable area (invisible, covers element) -->
+	<!-- NOTE: pointer-events: none allows clicks to pass through to elements with higher z-index -->
 	<div
 		class="drag-area"
 		style="
@@ -84,9 +85,8 @@
 			width: 100%;
 			height: 100%;
 			cursor: {dragCursor};
-			pointer-events: auto;
+			pointer-events: none;
 		"
-		on:mousedown={(e) => onMouseDown(e)}
 		role="button"
 		tabindex="0"
 		aria-label="Drag {element.type}"
