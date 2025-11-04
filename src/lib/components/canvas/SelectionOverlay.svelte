@@ -590,7 +590,11 @@
 		e.preventDefault();
 
 		activeElementId = element.id;
-		isGroupInteraction = false;
+
+		// Check if we're working with a multi-selection
+		// If multiple elements are selected, this is a group interaction
+		isGroupInteraction = selectedElements.length > 1;
+
 		dragStartScreen = { x: e.clientX, y: e.clientY };
 
 		const pos = getDisplayPosition(element);
@@ -782,11 +786,36 @@
 		} else {
 			// Drag mode
 			interactionMode = 'dragging';
-			pendingPosition = { ...pos };
+
+			if (isGroupInteraction) {
+				// Initialize group dragging
+				// Store initial bounds for all selected elements
+				groupStartElements = selectedElements.map(el => ({
+					id: el.id,
+					x: el.position.x,
+					y: el.position.y,
+					width: el.size.width,
+					height: el.size.height
+				}));
+
+				// Store group bounds (use unrotated bounds for consistent coordinate system)
+				const unrotatedBounds = getUnrotatedGroupBounds(selectedElements);
+				elementStartCanvas = {
+					x: unrotatedBounds.x,
+					y: unrotatedBounds.y,
+					width: unrotatedBounds.width,
+					height: unrotatedBounds.height
+				};
+
+				pendingPosition = { x: elementStartCanvas.x, y: elementStartCanvas.y };
+			} else {
+				// Single element drag
+				pendingPosition = { ...pos };
+			}
 		}
 
-		// Select the element (already selected by CanvasElement, but ensure it)
-		selectElement(element.id);
+		// Don't call selectElement here - CanvasElement already handles selection logic
+		// This prevents clearing multi-selection when starting to drag
 
 		// Add global listeners
 		document.addEventListener('mousemove', handleMouseMove);

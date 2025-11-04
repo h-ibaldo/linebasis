@@ -15,7 +15,7 @@
 	import type { Element } from '$lib/types/events';
 
 	export let element: Element;
-	export let onStartDrag: ((e: MouseEvent, element: Element) => void) | undefined = undefined;
+	export let onStartDrag: ((e: MouseEvent, element: Element, handle?: string) => void) | undefined = undefined;
 	export let isPanning: boolean = false;
 	export let isDragging: boolean = false;
 
@@ -50,8 +50,15 @@
 			return;
 		}
 
-		// Normal click: select only this element
-		selectElement(element.id);
+		// Check if this element is part of a multi-selection
+		const currentSelection = get(selectedElements).map(el => el.id);
+		const isPartOfMultiSelection = currentSelection.length > 1 && currentSelection.includes(element.id);
+
+		// If clicking on an element that's part of a multi-selection, keep the selection
+		// and start dragging all selected elements. Otherwise, select only this element.
+		if (!isPartOfMultiSelection) {
+			selectElement(element.id);
+		}
 
 		// If scale tool, start scaling from any click (not just handles)
 		// If onStartDrag is provided (from SelectionOverlay), call it
