@@ -200,6 +200,7 @@
 				border: 1px solid #3b82f6;
 				cursor: move;
 				pointer-events: auto;
+				z-index: 4;
 			"
 			on:mousedown={(e) => onMouseDown(e, 'radius-nw')}
 			role="button"
@@ -221,6 +222,7 @@
 				border: 1px solid #3b82f6;
 				cursor: move;
 				pointer-events: auto;
+				z-index: 3;
 			"
 			on:mousedown={(e) => onMouseDown(e, 'radius-ne')}
 			role="button"
@@ -242,6 +244,7 @@
 				border: 1px solid #3b82f6;
 				cursor: move;
 				pointer-events: auto;
+				z-index: 2;
 			"
 			on:mousedown={(e) => onMouseDown(e, 'radius-se')}
 			role="button"
@@ -263,6 +266,7 @@
 				border: 1px solid #3b82f6;
 				cursor: move;
 				pointer-events: auto;
+				z-index: 1;
 			"
 			on:mousedown={(e) => onMouseDown(e, 'radius-sw')}
 			role="button"
