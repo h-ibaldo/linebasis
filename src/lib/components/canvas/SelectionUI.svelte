@@ -43,7 +43,8 @@
 	// Reactive: Calculate radius handle distance based on clamped radius value
 	// Position handle center at the border-radius arc along the 45° diagonal
 	// For a circle with radius r, the point on the arc at 45° is exactly at distance r from corner
-	$: radiusHandleDistance = clampedDisplayRadius > 0 ? clampedDisplayRadius : RADIUS_HANDLE_BASE_DISTANCE;
+	// During drag (pendingRadius !== null), allow handle to go to 0. Otherwise, show BASE_DISTANCE minimum.
+	$: radiusHandleDistance = clampedDisplayRadius > 0 ? clampedDisplayRadius : (pendingRadius !== null ? 0 : RADIUS_HANDLE_BASE_DISTANCE);
 
 	// Reactive: Determine if radius handles should be shown
 	// Hide only if element dimensions are too small (below a minimum size threshold)

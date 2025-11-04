@@ -630,7 +630,15 @@
 
 			// Store current border radius
 			radiusInitialValue = parseFloat(element.styles?.borderRadius as string) || 0;
-			pendingRadius = radiusInitialValue;
+
+			// When starting interaction, if radius is 0, treat it as BASE_DISTANCE for handle positioning
+			// This matches the visual position of the handle in SelectionUI
+			const BASE_DISTANCE = 10;
+			const visualRadius = radiusInitialValue > 0 ? radiusInitialValue : BASE_DISTANCE;
+
+			// Set pendingRadius to visualRadius to prevent jump on mousedown
+			// This keeps the handle at its current visual position when drag starts
+			pendingRadius = visualRadius;
 
 			// Convert mouse position to canvas space
 			const mouseCanvasX = (e.clientX - viewport.x) / viewport.scale;
@@ -697,11 +705,9 @@
 			// Project cursor position onto diagonal to get initial cursor distance from corner
 			const initialCursorDistance = dx * diagonalDirX + dy * diagonalDirY;
 
-			// Calculate where the handle is currently positioned
-			// Handle is at (radius, radius) from corner, so its distance along the 45° diagonal is radius * √2
-			const BASE_DISTANCE = 10;
-			const radiusValue = radiusInitialValue > 0 ? radiusInitialValue : BASE_DISTANCE;
-			const initialHandleDistance = radiusValue * Math.sqrt(2);
+			// Calculate where the handle is currently positioned visually
+			// Handle is at (visualRadius, visualRadius) from corner, so its distance along the 45° diagonal is visualRadius * √2
+			const initialHandleDistance = visualRadius * Math.sqrt(2);
 
 			// Store the offset between cursor and handle
 			// This allows us to maintain the relative position during drag
