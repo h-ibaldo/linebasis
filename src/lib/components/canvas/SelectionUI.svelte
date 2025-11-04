@@ -34,10 +34,22 @@
 	// Reactive: Get display radius (use pendingRadius if available, otherwise element's borderRadius)
 	$: displayRadius = pendingRadius !== null ? pendingRadius : (parseFloat(element.styles?.borderRadius as string) || 0);
 
-	// Reactive: Calculate radius handle distance based on current radius value
-	// Base distance (10px from resize handle) + radius value offset
-	// The handle moves along the 45° diagonal as radius changes
-	$: radiusHandleDistance = (RADIUS_HANDLE_BASE_DISTANCE + displayRadius) * Math.sqrt(2);
+	// Reactive: Calculate max allowed radius (50% of smaller dimension)
+	$: maxAllowedRadius = Math.min(size.width, size.height) / 2;
+
+	// Reactive: Clamp display radius to max allowed (ensures handle stops at 50% mark)
+	$: clampedDisplayRadius = Math.min(displayRadius, maxAllowedRadius);
+
+	// Reactive: Calculate radius handle distance based on clamped radius value
+	// Position handle center at the border-radius arc along the 45° diagonal
+	// For a circle with radius r, the point on the arc at 45° is exactly at distance r from corner
+	$: radiusHandleDistance = clampedDisplayRadius > 0 ? clampedDisplayRadius : RADIUS_HANDLE_BASE_DISTANCE;
+
+	// Reactive: Determine if radius handles should be shown
+	// Hide only if element dimensions are too small (below a minimum size threshold)
+	// Don't hide based on radius value - let the user drag to maximum even if handles would overlap
+	const MIN_DIMENSION_FOR_RADIUS_HANDLES = 40; // Minimum px for width/height to show radius handles
+	$: showRadiusHandles = size.width >= MIN_DIMENSION_FOR_RADIUS_HANDLES && size.height >= MIN_DIMENSION_FOR_RADIUS_HANDLES;
 
 	// Reactive: Convert to screen coordinates
 	$: screenTopLeft = {
@@ -171,89 +183,92 @@
 	/>
 
 	<!-- Corner radius handles (one per corner, positioned inside at 45° diagonal) -->
-	<!-- NW corner radius handle -->
-	<div
-		class="radius-handle"
-		style="
-			position: absolute;
-			left: calc({radiusHandleDistance / Math.sqrt(2)}px - {RADIUS_HANDLE_SIZE / 2}px);
-			top: calc({radiusHandleDistance / Math.sqrt(2)}px - {RADIUS_HANDLE_SIZE / 2}px);
-			width: {RADIUS_HANDLE_SIZE}px;
-			height: {RADIUS_HANDLE_SIZE}px;
-			border-radius: 50%;
-			background: white;
-			border: 1px solid #3b82f6;
-			cursor: move;
-			pointer-events: auto;
-		"
-		on:mousedown={(e) => onMouseDown(e, 'radius-nw')}
-		role="button"
-		tabindex="0"
-		aria-label="Adjust corner radius"
-	/>
+	<!-- Only show if element is large enough relative to radius -->
+	{#if showRadiusHandles}
+		<!-- NW corner radius handle -->
+		<div
+			class="radius-handle"
+			style="
+				position: absolute;
+				left: calc({radiusHandleDistance}px - {RADIUS_HANDLE_SIZE / 2}px);
+				top: calc({radiusHandleDistance}px - {RADIUS_HANDLE_SIZE / 2}px);
+				width: {RADIUS_HANDLE_SIZE}px;
+				height: {RADIUS_HANDLE_SIZE}px;
+				border-radius: 50%;
+				background: white;
+				border: 1px solid #3b82f6;
+				cursor: move;
+				pointer-events: auto;
+			"
+			on:mousedown={(e) => onMouseDown(e, 'radius-nw')}
+			role="button"
+			tabindex="0"
+			aria-label="Adjust corner radius"
+		/>
 
-	<!-- NE corner radius handle -->
-	<div
-		class="radius-handle"
-		style="
-			position: absolute;
-			left: calc(100% - {radiusHandleDistance / Math.sqrt(2)}px - {RADIUS_HANDLE_SIZE / 2}px);
-			top: calc({radiusHandleDistance / Math.sqrt(2)}px - {RADIUS_HANDLE_SIZE / 2}px);
-			width: {RADIUS_HANDLE_SIZE}px;
-			height: {RADIUS_HANDLE_SIZE}px;
-			border-radius: 50%;
-			background: white;
-			border: 1px solid #3b82f6;
-			cursor: move;
-			pointer-events: auto;
-		"
-		on:mousedown={(e) => onMouseDown(e, 'radius-ne')}
-		role="button"
-		tabindex="0"
-		aria-label="Adjust corner radius"
-	/>
+		<!-- NE corner radius handle -->
+		<div
+			class="radius-handle"
+			style="
+				position: absolute;
+				left: calc(100% - {radiusHandleDistance}px - {RADIUS_HANDLE_SIZE / 2}px);
+				top: calc({radiusHandleDistance}px - {RADIUS_HANDLE_SIZE / 2}px);
+				width: {RADIUS_HANDLE_SIZE}px;
+				height: {RADIUS_HANDLE_SIZE}px;
+				border-radius: 50%;
+				background: white;
+				border: 1px solid #3b82f6;
+				cursor: move;
+				pointer-events: auto;
+			"
+			on:mousedown={(e) => onMouseDown(e, 'radius-ne')}
+			role="button"
+			tabindex="0"
+			aria-label="Adjust corner radius"
+		/>
 
-	<!-- SE corner radius handle -->
-	<div
-		class="radius-handle"
-		style="
-			position: absolute;
-			left: calc(100% - {radiusHandleDistance / Math.sqrt(2)}px - {RADIUS_HANDLE_SIZE / 2}px);
-			top: calc(100% - {radiusHandleDistance / Math.sqrt(2)}px - {RADIUS_HANDLE_SIZE / 2}px);
-			width: {RADIUS_HANDLE_SIZE}px;
-			height: {RADIUS_HANDLE_SIZE}px;
-			border-radius: 50%;
-			background: white;
-			border: 1px solid #3b82f6;
-			cursor: move;
-			pointer-events: auto;
-		"
-		on:mousedown={(e) => onMouseDown(e, 'radius-se')}
-		role="button"
-		tabindex="0"
-		aria-label="Adjust corner radius"
-	/>
+		<!-- SE corner radius handle -->
+		<div
+			class="radius-handle"
+			style="
+				position: absolute;
+				left: calc(100% - {radiusHandleDistance}px - {RADIUS_HANDLE_SIZE / 2}px);
+				top: calc(100% - {radiusHandleDistance}px - {RADIUS_HANDLE_SIZE / 2}px);
+				width: {RADIUS_HANDLE_SIZE}px;
+				height: {RADIUS_HANDLE_SIZE}px;
+				border-radius: 50%;
+				background: white;
+				border: 1px solid #3b82f6;
+				cursor: move;
+				pointer-events: auto;
+			"
+			on:mousedown={(e) => onMouseDown(e, 'radius-se')}
+			role="button"
+			tabindex="0"
+			aria-label="Adjust corner radius"
+		/>
 
-	<!-- SW corner radius handle -->
-	<div
-		class="radius-handle"
-		style="
-			position: absolute;
-			left: calc({radiusHandleDistance / Math.sqrt(2)}px - {RADIUS_HANDLE_SIZE / 2}px);
-			top: calc(100% - {radiusHandleDistance / Math.sqrt(2)}px - {RADIUS_HANDLE_SIZE / 2}px);
-			width: {RADIUS_HANDLE_SIZE}px;
-			height: {RADIUS_HANDLE_SIZE}px;
-			border-radius: 50%;
-			background: white;
-			border: 1px solid #3b82f6;
-			cursor: move;
-			pointer-events: auto;
-		"
-		on:mousedown={(e) => onMouseDown(e, 'radius-sw')}
-		role="button"
-		tabindex="0"
-		aria-label="Adjust corner radius"
-	/>
+		<!-- SW corner radius handle -->
+		<div
+			class="radius-handle"
+			style="
+				position: absolute;
+				left: calc({radiusHandleDistance}px - {RADIUS_HANDLE_SIZE / 2}px);
+				top: calc(100% - {radiusHandleDistance}px - {RADIUS_HANDLE_SIZE / 2}px);
+				width: {RADIUS_HANDLE_SIZE}px;
+				height: {RADIUS_HANDLE_SIZE}px;
+				border-radius: 50%;
+				background: white;
+				border: 1px solid #3b82f6;
+				cursor: move;
+				pointer-events: auto;
+			"
+			on:mousedown={(e) => onMouseDown(e, 'radius-sw')}
+			role="button"
+			tabindex="0"
+			aria-label="Adjust corner radius"
+		/>
+	{/if}
 
 	<!-- Full-width invisible edge resize zones (Figma-style) -->
 	<!-- North edge - full width clickable zone -->
