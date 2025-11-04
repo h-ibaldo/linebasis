@@ -12,6 +12,7 @@
 	export let viewport: { x: number; y: number; scale: number };
 	export let pendingPosition: { x: number; y: number } | null;
 	export let pendingSize: { width: number; height: number } | null;
+	export let pendingRadius: number | null = null;
 	export let rotation: number = 0; // Rotation angle in degrees for the selection UI
 	export let isPanning: boolean = false;
 	export let onMouseDown: (e: MouseEvent, handle?: string) => void;
@@ -23,10 +24,20 @@
 	const BORDER_WIDTH = 2;
 	const ROTATION_ZONE_SIZE = 15; // Size of rotation zone extending from each corner handle
 	const EDGE_RESIZE_ZONE_WIDTH = 6; // Width of the invisible resize zone along each edge (extends inward and outward)
+	const RADIUS_HANDLE_SIZE = 10; // Size of radius handle
+	const RADIUS_HANDLE_BASE_DISTANCE = 10; // Base distance from corner resize handle (10px as requested)
 
 	// Reactive: Get display position/size
 	$: pos = pendingPosition || element.position;
 	$: size = pendingSize || element.size;
+
+	// Reactive: Get display radius (use pendingRadius if available, otherwise element's borderRadius)
+	$: displayRadius = pendingRadius !== null ? pendingRadius : (parseFloat(element.styles?.borderRadius as string) || 0);
+
+	// Reactive: Calculate radius handle distance based on current radius value
+	// Base distance (10px from resize handle) + radius value offset
+	// The handle moves along the 45° diagonal as radius changes
+	$: radiusHandleDistance = (RADIUS_HANDLE_BASE_DISTANCE + displayRadius) * Math.sqrt(2);
 
 	// Reactive: Convert to screen coordinates
 	$: screenTopLeft = {
@@ -159,39 +170,89 @@
 		aria-label="Resize northwest"
 	/>
 
-	<!-- Rotation handle line -->
+	<!-- Corner radius handles (one per corner, positioned inside at 45° diagonal) -->
+	<!-- NW corner radius handle -->
 	<div
-		class="rotation-line"
+		class="radius-handle"
 		style="
 			position: absolute;
-			left: 50%;
-			top: -30px;
-			width: 1px;
-			height: 30px;
-			background: #3b82f6;
-			pointer-events: none;
-		"
-	/>
-
-	<!-- Rotation handle -->
-	<div
-		class="rotation-handle"
-		style="
-			position: absolute;
-			left: calc(50% - 6px);
-			top: -36px;
-			width: 12px;
-			height: 12px;
+			left: calc({radiusHandleDistance / Math.sqrt(2)}px - {RADIUS_HANDLE_SIZE / 2}px);
+			top: calc({radiusHandleDistance / Math.sqrt(2)}px - {RADIUS_HANDLE_SIZE / 2}px);
+			width: {RADIUS_HANDLE_SIZE}px;
+			height: {RADIUS_HANDLE_SIZE}px;
 			border-radius: 50%;
 			background: white;
-			border: 2px solid #3b82f6;
-			cursor: grab;
+			border: 1px solid #3b82f6;
+			cursor: move;
 			pointer-events: auto;
 		"
-		on:mousedown={(e) => onMouseDown(e, 'rotate')}
+		on:mousedown={(e) => onMouseDown(e, 'radius-nw')}
 		role="button"
 		tabindex="0"
-		aria-label="Rotate element"
+		aria-label="Adjust corner radius"
+	/>
+
+	<!-- NE corner radius handle -->
+	<div
+		class="radius-handle"
+		style="
+			position: absolute;
+			left: calc(100% - {radiusHandleDistance / Math.sqrt(2)}px - {RADIUS_HANDLE_SIZE / 2}px);
+			top: calc({radiusHandleDistance / Math.sqrt(2)}px - {RADIUS_HANDLE_SIZE / 2}px);
+			width: {RADIUS_HANDLE_SIZE}px;
+			height: {RADIUS_HANDLE_SIZE}px;
+			border-radius: 50%;
+			background: white;
+			border: 1px solid #3b82f6;
+			cursor: move;
+			pointer-events: auto;
+		"
+		on:mousedown={(e) => onMouseDown(e, 'radius-ne')}
+		role="button"
+		tabindex="0"
+		aria-label="Adjust corner radius"
+	/>
+
+	<!-- SE corner radius handle -->
+	<div
+		class="radius-handle"
+		style="
+			position: absolute;
+			left: calc(100% - {radiusHandleDistance / Math.sqrt(2)}px - {RADIUS_HANDLE_SIZE / 2}px);
+			top: calc(100% - {radiusHandleDistance / Math.sqrt(2)}px - {RADIUS_HANDLE_SIZE / 2}px);
+			width: {RADIUS_HANDLE_SIZE}px;
+			height: {RADIUS_HANDLE_SIZE}px;
+			border-radius: 50%;
+			background: white;
+			border: 1px solid #3b82f6;
+			cursor: move;
+			pointer-events: auto;
+		"
+		on:mousedown={(e) => onMouseDown(e, 'radius-se')}
+		role="button"
+		tabindex="0"
+		aria-label="Adjust corner radius"
+	/>
+
+	<!-- SW corner radius handle -->
+	<div
+		class="radius-handle"
+		style="
+			position: absolute;
+			left: calc({radiusHandleDistance / Math.sqrt(2)}px - {RADIUS_HANDLE_SIZE / 2}px);
+			top: calc(100% - {radiusHandleDistance / Math.sqrt(2)}px - {RADIUS_HANDLE_SIZE / 2}px);
+			width: {RADIUS_HANDLE_SIZE}px;
+			height: {RADIUS_HANDLE_SIZE}px;
+			border-radius: 50%;
+			background: white;
+			border: 1px solid #3b82f6;
+			cursor: move;
+			pointer-events: auto;
+		"
+		on:mousedown={(e) => onMouseDown(e, 'radius-sw')}
+		role="button"
+		tabindex="0"
+		aria-label="Adjust corner radius"
 	/>
 
 	<!-- Full-width invisible edge resize zones (Figma-style) -->
@@ -441,6 +502,17 @@
 		background: #3b82f6;
 	}
 
+	.radius-handle {
+		/* Corner radius handles - small circles at 45° from corners */
+		position: absolute;
+		box-sizing: border-box;
+		z-index: 6; /* Highest priority */
+	}
+
+	.radius-handle:hover {
+		background: #3b82f6;
+	}
+
 	.edge-resize-zone {
 		/* Invisible full-width edge resize zones (Figma-style) */
 		background: transparent;
@@ -465,13 +537,5 @@
 
 	.rotation-zone:active {
 		cursor: grabbing;
-	}
-
-	.rotation-handle {
-		z-index: 5; /* Highest priority for dedicated rotation handle */
-	}
-
-	.rotation-line {
-		z-index: 1;
 	}
 </style>

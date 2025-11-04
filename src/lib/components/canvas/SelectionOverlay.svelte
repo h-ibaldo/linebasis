@@ -12,7 +12,7 @@
 	import { onDestroy } from 'svelte';
 	import { get } from 'svelte/store';
 	import type { Element } from '$lib/types/events';
-	import { moveElement, resizeElement, rotateElement, moveElementsGroup, resizeElementsGroup, rotateElementsGroup, selectElement, selectElements, clearSelection, addToSelection, removeFromSelection } from '$lib/stores/design-store';
+	import { moveElement, resizeElement, rotateElement, moveElementsGroup, resizeElementsGroup, rotateElementsGroup, selectElement, selectElements, clearSelection, addToSelection, removeFromSelection, updateElementStyles } from '$lib/stores/design-store';
 	import { interactionState } from '$lib/stores/interaction-store';
 	import { currentTool } from '$lib/stores/tool-store';
 	import SelectionUI from './SelectionUI.svelte';
@@ -24,7 +24,7 @@
 
 	// Local interaction state
 	let activeElementId: string | null = null;
-	let interactionMode: 'idle' | 'dragging' | 'resizing' | 'rotating' = 'idle';
+	let interactionMode: 'idle' | 'dragging' | 'resizing' | 'rotating' | 'radius' = 'idle';
 	let resizeHandle: string | null = null;
 	let isGroupInteraction = false; // Track if interacting with multiple elements
 
@@ -32,8 +32,12 @@
 	let pendingPosition: { x: number; y: number } | null = null;
 	let pendingSize: { width: number; height: number } | null = null;
 	let pendingRotation: number | null = null;
+	let pendingRadius: number | null = null;
 	let rotationStartAngle: number = 0; // Initial angle at rotation start
 	let elementStartRotation: number = 0; // Element's rotation at start
+	let radiusCorner: 'nw' | 'ne' | 'se' | 'sw' | null = null; // Which corner is being adjusted
+	let radiusStartDistance: number = 0; // Initial distance from corner at drag start
+	let radiusInitialValue: number = 0; // Initial radius value at drag start
 	let groupPendingTransforms: Map<string, { position: { x: number; y: number }; size: { width: number; height: number }; rotation?: number }> = new Map();
 
 	// Broadcast state to store for CanvasElement to consume
@@ -44,6 +48,7 @@
 			pendingPosition,
 			pendingSize,
 			pendingRotation,
+			pendingRadius,
 			groupTransforms: groupPendingTransforms
 		});
 	}
@@ -616,6 +621,85 @@
 			// Store current rotation
 			elementStartRotation = element.rotation || 0;
 			pendingRotation = elementStartRotation;
+		} else if (handle?.startsWith('radius-')) {
+			// Corner radius mode
+			interactionMode = 'radius';
+
+			// Extract corner from handle (e.g., 'radius-nw' -> 'nw')
+			radiusCorner = handle.split('-')[1] as 'nw' | 'ne' | 'se' | 'sw';
+
+			// Store current border radius
+			radiusInitialValue = parseFloat(element.styles?.borderRadius as string) || 0;
+			pendingRadius = radiusInitialValue;
+
+			// Convert mouse position to canvas space
+			const mouseCanvasX = (e.clientX - viewport.x) / viewport.scale;
+			const mouseCanvasY = (e.clientY - viewport.y) / viewport.scale;
+
+			// Get the center point of the element
+			const centerX = pos.x + size.width / 2;
+			const centerY = pos.y + size.height / 2;
+
+			// Get element rotation in radians
+			const rotationRad = ((element.rotation || 0) * Math.PI) / 180;
+
+			// Translate mouse position to element's local coordinate system
+			const relX = mouseCanvasX - centerX;
+			const relY = mouseCanvasY - centerY;
+			const cos = Math.cos(-rotationRad);
+			const sin = Math.sin(-rotationRad);
+			const localX = relX * cos - relY * sin + centerX;
+			const localY = relX * sin + relY * cos + centerY;
+
+			// Get the corner position in local space
+			let cornerX: number, cornerY: number;
+
+			if (radiusCorner === 'nw') {
+				cornerX = pos.x;
+				cornerY = pos.y;
+			} else if (radiusCorner === 'ne') {
+				cornerX = pos.x + size.width;
+				cornerY = pos.y;
+			} else if (radiusCorner === 'se') {
+				cornerX = pos.x + size.width;
+				cornerY = pos.y + size.height;
+			} else { // sw
+				cornerX = pos.x;
+				cornerY = pos.y + size.height;
+			}
+
+			// Project cursor onto the 45° diagonal line from corner towards element center
+			const dx = localX - cornerX;
+			const dy = localY - cornerY;
+
+			// Determine the direction of the 45° diagonal based on which corner
+			let diagonalDirX: number, diagonalDirY: number;
+
+			if (radiusCorner === 'nw') {
+				diagonalDirX = 1;
+				diagonalDirY = 1;
+			} else if (radiusCorner === 'ne') {
+				diagonalDirX = -1;
+				diagonalDirY = 1;
+			} else if (radiusCorner === 'se') {
+				diagonalDirX = -1;
+				diagonalDirY = -1;
+			} else { // sw
+				diagonalDirX = 1;
+				diagonalDirY = -1;
+			}
+
+			// Normalize the diagonal direction
+			const diagonalLength = Math.sqrt(2);
+			diagonalDirX /= diagonalLength;
+			diagonalDirY /= diagonalLength;
+
+			// Project the cursor displacement onto the diagonal direction
+			radiusStartDistance = dx * diagonalDirX + dy * diagonalDirY;
+
+			// Add global listeners
+			document.addEventListener('mousemove', handleMouseMove);
+			document.addEventListener('mouseup', handleMouseUp);
 		} else if (handle) {
 			// Resize mode
 			interactionMode = 'resizing';
@@ -1113,6 +1197,88 @@
 					})
 				);
 			}
+		} else if (interactionMode === 'radius' && radiusCorner) {
+			// Convert current mouse position to canvas space
+			const mouseCanvasX = (e.clientX - viewport.x) / viewport.scale;
+			const mouseCanvasY = (e.clientY - viewport.y) / viewport.scale;
+
+			// Get the center point of the element
+			const centerX = elementStartCanvas.x + elementStartCanvas.width / 2;
+			const centerY = elementStartCanvas.y + elementStartCanvas.height / 2;
+
+			// Get element rotation in radians
+			const activeElement = selectedElements.find(el => el.id === activeElementId);
+			const rotationRad = ((activeElement?.rotation || 0) * Math.PI) / 180;
+
+			// Translate mouse position to element's local coordinate system
+			const relX = mouseCanvasX - centerX;
+			const relY = mouseCanvasY - centerY;
+			const cos = Math.cos(-rotationRad);
+			const sin = Math.sin(-rotationRad);
+			const localX = relX * cos - relY * sin + centerX;
+			const localY = relX * sin + relY * cos + centerY;
+
+			// Get the corner position in local space
+			let cornerX: number, cornerY: number;
+
+			if (radiusCorner === 'nw') {
+				cornerX = elementStartCanvas.x;
+				cornerY = elementStartCanvas.y;
+			} else if (radiusCorner === 'ne') {
+				cornerX = elementStartCanvas.x + elementStartCanvas.width;
+				cornerY = elementStartCanvas.y;
+			} else if (radiusCorner === 'se') {
+				cornerX = elementStartCanvas.x + elementStartCanvas.width;
+				cornerY = elementStartCanvas.y + elementStartCanvas.height;
+			} else { // sw
+				cornerX = elementStartCanvas.x;
+				cornerY = elementStartCanvas.y + elementStartCanvas.height;
+			}
+
+			// Project cursor onto the 45° diagonal line from corner towards element center
+			// This constrains the movement to only along the diagonal, preventing issues when cursor goes far away
+			const dx = localX - cornerX;
+			const dy = localY - cornerY;
+
+			// Determine the direction of the 45° diagonal based on which corner
+			// The diagonal should always point towards the center of the element
+			let diagonalDirX: number, diagonalDirY: number;
+
+			if (radiusCorner === 'nw') {
+				diagonalDirX = 1;
+				diagonalDirY = 1;
+			} else if (radiusCorner === 'ne') {
+				diagonalDirX = -1;
+				diagonalDirY = 1;
+			} else if (radiusCorner === 'se') {
+				diagonalDirX = -1;
+				diagonalDirY = -1;
+			} else { // sw
+				diagonalDirX = 1;
+				diagonalDirY = -1;
+			}
+
+			// Normalize the diagonal direction (already unit vector for 45°)
+			const diagonalLength = Math.sqrt(2);
+			diagonalDirX /= diagonalLength;
+			diagonalDirY /= diagonalLength;
+
+			// Project the cursor displacement onto the diagonal direction
+			// This gives us the distance along the diagonal
+			const projectedDistance = dx * diagonalDirX + dy * diagonalDirY;
+
+			// Calculate the change in distance from the start
+			const distanceDelta = projectedDistance - radiusStartDistance;
+
+			// Update radius based on distance delta
+			// The formula from SelectionUI: radiusHandleDistance = (BASE_DISTANCE + displayRadius) * sqrt(2)
+			// Distance along 45° diagonal corresponds to: distanceDelta / sqrt(2) = radiusDelta
+			const radiusDelta = distanceDelta / Math.sqrt(2);
+			const newRadius = radiusInitialValue + radiusDelta;
+
+			// Update pending radius (clamp to valid range)
+			const maxRadius = Math.min(elementStartCanvas.width, elementStartCanvas.height) / 2;
+			pendingRadius = Math.max(0, Math.min(maxRadius, newRadius));
 		}
 	}
 
@@ -1245,6 +1411,11 @@
 			} else if (interactionMode === 'rotating' && pendingRotation !== null) {
 				// Apply rotation
 				await rotateElement(activeElementId, pendingRotation);
+			} else if (interactionMode === 'radius' && pendingRadius !== null) {
+				// Apply border radius change
+				await updateElementStyles(activeElementId, {
+					borderRadius: `${pendingRadius}px`
+				});
 			}
 
 			// Keep element selected after interaction
@@ -1259,6 +1430,10 @@
 		pendingPosition = null;
 		pendingSize = null;
 		pendingRotation = null;
+		pendingRadius = null;
+		radiusCorner = null;
+		radiusStartDistance = 0;
+		radiusInitialValue = 0;
 		groupStartElements = [];
 		groupPendingTransforms = new Map();
 		hasMovedPastThreshold = false;
@@ -1285,6 +1460,7 @@
 		{isPanning}
 		pendingPosition={activeElementId === selectedElements[0].id ? pendingPosition : null}
 		pendingSize={activeElementId === selectedElements[0].id ? pendingSize : null}
+		pendingRadius={activeElementId === selectedElements[0].id ? pendingRadius : null}
 		rotation={commonRotation || 0}
 		onMouseDown={(e, handle) => handleMouseDown(e, selectedElements[0], handle)}
 	/>
@@ -1310,6 +1486,7 @@
 		{isPanning}
 		pendingPosition={null}
 		pendingSize={null}
+		pendingRadius={null}
 		rotation={0}
 		onMouseDown={(e, handle) => startGroupInteraction(e, handle)}
 	/>

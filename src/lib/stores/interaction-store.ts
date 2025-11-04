@@ -9,10 +9,11 @@ import { writable } from 'svelte/store';
 
 export interface InteractionState {
 	activeElementId: string | null;
-	mode: 'idle' | 'dragging' | 'resizing' | 'rotating';
+	mode: 'idle' | 'dragging' | 'resizing' | 'rotating' | 'radius';
 	pendingPosition: { x: number; y: number } | null;
 	pendingSize: { width: number; height: number } | null;
 	pendingRotation: number | null;
+	pendingRadius: number | null;
 	groupTransforms: Map<string, { position: { x: number; y: number }; size: { width: number; height: number }; rotation?: number }>;
 }
 
@@ -22,6 +23,7 @@ const initialState: InteractionState = {
 	pendingPosition: null,
 	pendingSize: null,
 	pendingRotation: null,
+	pendingRadius: null,
 	groupTransforms: new Map()
 };
 
