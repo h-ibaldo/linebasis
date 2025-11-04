@@ -698,9 +698,10 @@
 			const initialCursorDistance = dx * diagonalDirX + dy * diagonalDirY;
 
 			// Calculate where the handle is currently positioned
-			// Handle center is at exactly the radius distance from corner
+			// Handle is at (radius, radius) from corner, so its distance along the 45° diagonal is radius * √2
 			const BASE_DISTANCE = 10;
-			const initialHandleDistance = radiusInitialValue > 0 ? radiusInitialValue : BASE_DISTANCE;
+			const radiusValue = radiusInitialValue > 0 ? radiusInitialValue : BASE_DISTANCE;
+			const initialHandleDistance = radiusValue * Math.sqrt(2);
 
 			// Store the offset between cursor and handle
 			// This allows us to maintain the relative position during drag
@@ -1279,12 +1280,15 @@
 			// Calculate max radius (50% of smaller dimension)
 			const maxRadius = Math.min(elementStartCanvas.width, elementStartCanvas.height) / 2;
 
-			// Target handle distance (where cursor is minus the stored offset)
+			// Target handle distance along the diagonal (where cursor is minus the stored offset)
 			const targetHandleDistance = currentCursorDistance - radiusStartDistance;
 
-			// Handle is positioned exactly at the radius distance, so radius = targetHandleDistance
+			// Convert from diagonal distance to radius value
+			// Since handle is at (radius, radius), diagonal distance = radius * √2
+			let newRadius = targetHandleDistance / Math.sqrt(2);
+
 			// Clamp radius to valid range [0, maxRadius]
-			let newRadius = Math.max(0, Math.min(maxRadius, targetHandleDistance));
+			newRadius = Math.max(0, Math.min(maxRadius, newRadius));
 
 			pendingRadius = newRadius;
 		}
