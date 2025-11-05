@@ -67,6 +67,10 @@
 	$: screenHeight = screenBottomRight.y - screenTopLeft.y;
 	$: handleOffset = HANDLE_SIZE / 2;
 
+	// Reactive: Convert radius handle distance to screen coordinates
+	// This ensures handles maintain correct position at all zoom levels
+	$: screenRadiusHandleDistance = radiusHandleDistance * viewport.scale;
+
 	// Calculate center point for rotation
 	$: centerX = screenWidth / 2;
 	$: centerY = screenHeight / 2;
@@ -191,8 +195,8 @@
 			class="radius-handle"
 			style="
 				position: absolute;
-				left: calc({radiusHandleDistance}px - {RADIUS_HANDLE_SIZE / 2}px);
-				top: calc({radiusHandleDistance}px - {RADIUS_HANDLE_SIZE / 2}px);
+				left: calc({screenRadiusHandleDistance}px - {RADIUS_HANDLE_SIZE / 2}px);
+				top: calc({screenRadiusHandleDistance}px - {RADIUS_HANDLE_SIZE / 2}px);
 				width: {RADIUS_HANDLE_SIZE}px;
 				height: {RADIUS_HANDLE_SIZE}px;
 				border-radius: 50%;
@@ -213,8 +217,8 @@
 			class="radius-handle"
 			style="
 				position: absolute;
-				left: calc(100% - {radiusHandleDistance}px - {RADIUS_HANDLE_SIZE / 2}px);
-				top: calc({radiusHandleDistance}px - {RADIUS_HANDLE_SIZE / 2}px);
+				left: calc(100% - {screenRadiusHandleDistance}px - {RADIUS_HANDLE_SIZE / 2}px);
+				top: calc({screenRadiusHandleDistance}px - {RADIUS_HANDLE_SIZE / 2}px);
 				width: {RADIUS_HANDLE_SIZE}px;
 				height: {RADIUS_HANDLE_SIZE}px;
 				border-radius: 50%;
@@ -235,8 +239,8 @@
 			class="radius-handle"
 			style="
 				position: absolute;
-				left: calc(100% - {radiusHandleDistance}px - {RADIUS_HANDLE_SIZE / 2}px);
-				top: calc(100% - {radiusHandleDistance}px - {RADIUS_HANDLE_SIZE / 2}px);
+				left: calc(100% - {screenRadiusHandleDistance}px - {RADIUS_HANDLE_SIZE / 2}px);
+				top: calc(100% - {screenRadiusHandleDistance}px - {RADIUS_HANDLE_SIZE / 2}px);
 				width: {RADIUS_HANDLE_SIZE}px;
 				height: {RADIUS_HANDLE_SIZE}px;
 				border-radius: 50%;
@@ -257,8 +261,8 @@
 			class="radius-handle"
 			style="
 				position: absolute;
-				left: calc({radiusHandleDistance}px - {RADIUS_HANDLE_SIZE / 2}px);
-				top: calc(100% - {radiusHandleDistance}px - {RADIUS_HANDLE_SIZE / 2}px);
+				left: calc({screenRadiusHandleDistance}px - {RADIUS_HANDLE_SIZE / 2}px);
+				top: calc(100% - {screenRadiusHandleDistance}px - {RADIUS_HANDLE_SIZE / 2}px);
 				width: {RADIUS_HANDLE_SIZE}px;
 				height: {RADIUS_HANDLE_SIZE}px;
 				border-radius: 50%;
