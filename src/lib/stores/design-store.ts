@@ -900,8 +900,8 @@ export function setupKeyboardShortcuts(): (() => void) | undefined {
 			e.preventDefault();
 			currentTool.set('text');
 		}
-		// I (switch to Media tool - changed from M to avoid conflict with Move)
-		else if (e.key === 'i' && !isTyping) {
+		// M (switch to Media tool)
+		else if (e.key === 'm' && !isTyping) {
 			e.preventDefault();
 			currentTool.set('media');
 		}
