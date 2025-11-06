@@ -12,6 +12,7 @@
 	 */
 
 	import { onMount, onDestroy } from 'svelte';
+	import type { Element } from '$lib/types/events';
 	import {
 		designState,
 		currentPage,
@@ -23,6 +24,7 @@
 		selectedElements
 	} from '$lib/stores/design-store';
 	import { currentTool } from '$lib/stores/tool-store';
+	import { CANVAS_INTERACTION } from '$lib/constants/canvas';
 	import CanvasElement from './CanvasElement.svelte';
 	import BaselineGrid from './BaselineGrid.svelte';
 	import SelectionOverlay from './SelectionOverlay.svelte';
@@ -33,7 +35,15 @@
 	let isDragging = false;
 	let dragStart = { x: 0, y: 0 };
 	let isPanning = false;
-	let selectionOverlay: any = undefined; // Reference to SelectionOverlay
+	// Reference to SelectionOverlay component
+	let selectionOverlay: {
+		startDrag: (e: MouseEvent, el: Element, handle?: string, selectedElements?: Element[]) => void;
+	} | undefined = undefined;
+
+	// Handler for starting drag operations
+	const handleStartDrag = (e: MouseEvent, el: Element, handle?: string, selectedElems?: Element[]) => {
+		selectionOverlay?.startDrag(e, el, handle, selectedElems);
+	};
 
 	// Update canvas cursor based on tool and state
 	$: if (canvasElement) {
@@ -235,7 +245,6 @@
 		// Finish drawing and create element
 		if (isDrawing && drawPreview) {
 			const tool = $currentTool;
-			const MIN_SIZE = 10; // Minimum size to create element
 			let newElementId: string;
 
 			// Get current page ID
@@ -253,8 +262,8 @@
 				'</svg>'
 			);
 
-			// If dragged less than MIN_SIZE, create default-sized element
-			if (drawPreview.width < MIN_SIZE || drawPreview.height < MIN_SIZE) {
+			// If dragged less than minimum size, create default-sized element
+			if (drawPreview.width < CANVAS_INTERACTION.MIN_ELEMENT_SIZE || drawPreview.height < CANVAS_INTERACTION.MIN_ELEMENT_SIZE) {
 				// Click: create default size centered at click position
 				const defaultSizes = {
 					div: { width: 200, height: 200 },
@@ -412,7 +421,7 @@
 					{element}
 					{isPanning}
 					{isDragging}
-					onStartDrag={selectionOverlay ? (e, el) => selectionOverlay.startDrag(e, el) : undefined}
+					onStartDrag={selectionOverlay ? handleStartDrag : undefined}
 				/>
 			{/each}
 

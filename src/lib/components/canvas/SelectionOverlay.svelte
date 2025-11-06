@@ -15,6 +15,7 @@
 	import { moveElement, resizeElement, rotateElement, moveElementsGroup, resizeElementsGroup, rotateElementsGroup, selectElement, selectElements, clearSelection, addToSelection, removeFromSelection, updateElementStyles } from '$lib/stores/design-store';
 	import { interactionState } from '$lib/stores/interaction-store';
 	import { currentTool } from '$lib/stores/tool-store';
+	import { CANVAS_INTERACTION } from '$lib/constants/canvas';
 	import SelectionUI from './SelectionUI.svelte';
 
 	// Props
@@ -113,14 +114,19 @@
 	// Drag start tracking
 	let dragStartScreen = { x: 0, y: 0 };
 	let elementStartCanvas = { x: 0, y: 0, width: 0, height: 0 };
-	let groupStartElements: Array<{ id: string; x: number; y: number; width: number; height: number }> = [];
+	let groupStartElements: Array<{ id: string; x: number; y: number; width: number; height: number; rotation: number }> = [];
 	let hasMovedPastThreshold = false; // Track if we've moved past the initial dead zone
 	let initialHandlePosition: Point | null = null; // The ideal position of the handle being dragged at start
 	let mouseToHandleOffset: Point = { x: 0, y: 0 }; // Offset from mouse click to ideal handle position
 
-	// Constants
-	const MOVEMENT_THRESHOLD = 2; // px
-	const RESIZE_START_THRESHOLD = 3; // px - dead zone for resize start to avoid initial jump
+	/**
+	 * Normalize rotation angle to -180 to 180 degree range
+	 * Uses modulo operator for efficiency instead of while loops
+	 */
+	function normalizeRotation(rotation: number): number {
+		// Shift to 0-360 range, then back to -180 to 180
+		return ((rotation + 180) % 360) - 180;
+	}
 
 	// Calculate bounding box for multiple elements
 	function getGroupBounds(elements: Element[]): { x: number; y: number; width: number; height: number } {
@@ -551,7 +557,8 @@
 					x: el.position.x,
 					y: el.position.y,
 					width: el.size.width,
-					height: el.size.height
+					height: el.size.height,
+					rotation: el.rotation || 0
 				}));
 
 				// Store group bounds (use unrotated bounds for consistent coordinate system)
@@ -591,7 +598,8 @@
 			x: el.position.x,
 			y: el.position.y,
 			width: el.size.width,
-			height: el.size.height
+			height: el.size.height,
+			rotation: el.rotation || 0
 		}));
 
 		// Store group bounds (use unrotated bounds for resize calculations)
@@ -635,7 +643,7 @@
 	}
 
 	// Expose handleMouseDown for CanvasElement
-	export function startDrag(e: MouseEvent, element: Element, handle?: string) {
+	export function startDrag(e: MouseEvent, element: Element, handle?: string, passedSelectedElements?: Element[]) {
 		const tool = get(currentTool);
 
 		// Don't handle if hand tool or space panning is active - let canvas handle it
@@ -648,9 +656,12 @@
 
 		activeElementId = element.id;
 
+		// Use passed selection if provided (to avoid timing issues), otherwise use store
+		const elementsToUse = passedSelectedElements || selectedElements;
+
 		// Check if we're working with a multi-selection
 		// If multiple elements are selected, this is a group interaction
-		isGroupInteraction = selectedElements.length > 1;
+		isGroupInteraction = elementsToUse.length > 1;
 
 		dragStartScreen = { x: e.clientX, y: e.clientY };
 
@@ -881,17 +892,18 @@
 
 			if (isGroupInteraction) {
 				// Initialize group dragging
-				// Store initial bounds for all selected elements
-				groupStartElements = selectedElements.map(el => ({
+				// Store initial bounds for all selected elements (including rotation)
+				groupStartElements = elementsToUse.map(el => ({
 					id: el.id,
 					x: el.position.x,
 					y: el.position.y,
 					width: el.size.width,
-					height: el.size.height
+					height: el.size.height,
+					rotation: el.rotation || 0
 				}));
 
 				// Store group bounds (use unrotated bounds for consistent coordinate system)
-				const unrotatedBounds = getUnrotatedGroupBounds(selectedElements);
+				const unrotatedBounds = getUnrotatedGroupBounds(elementsToUse);
 				elementStartCanvas = {
 					x: unrotatedBounds.x,
 					y: unrotatedBounds.y,
@@ -903,6 +915,19 @@
 			} else {
 				// Single element drag
 				pendingPosition = { ...pos };
+			}
+
+			// If group interaction, initialize groupPendingTransforms with current positions
+			// so elements display correctly immediately (before first mousemove)
+			if (isGroupInteraction) {
+				groupPendingTransforms = new Map();
+				groupStartElements.forEach(el => {
+					groupPendingTransforms.set(el.id, {
+						position: { x: el.x, y: el.y },
+						size: { width: el.width, height: el.height },
+						rotation: el.rotation
+					});
+				});
 			}
 		}
 
@@ -948,16 +973,13 @@
 
 				groupPendingTransforms = new Map(
 					groupStartElements.map(el => {
-						// Find the original element to preserve its rotation
-						const originalElement = selectedElements.find(e => e.id === el.id);
-						const rotation = originalElement?.rotation || 0;
-
+						// Use rotation stored at drag start (preserves it throughout drag)
 						return [
 							el.id,
 							{
 								position: { x: el.x + deltaX, y: el.y + deltaY },
 								size: { width: el.width, height: el.height },
-								rotation
+								rotation: el.rotation
 							}
 						];
 					})
@@ -986,7 +1008,7 @@
 			// Check if we've moved past the threshold
 			if (!hasMovedPastThreshold) {
 				const deltaScreenDist = Math.sqrt(deltaScreen.x ** 2 + deltaScreen.y ** 2);
-				if (deltaScreenDist < RESIZE_START_THRESHOLD) {
+				if (deltaScreenDist < CANVAS_INTERACTION.RESIZE_START_THRESHOLD) {
 					// Still within dead zone - don't update position/size yet
 					return;
 				}
@@ -1281,11 +1303,7 @@
 			}
 
 			// Calculate new rotation
-			pendingRotation = elementStartRotation + angleDelta;
-
-			// Normalize to -180 to 180 range
-			while (pendingRotation > 180) pendingRotation -= 360;
-			while (pendingRotation < -180) pendingRotation += 360;
+			pendingRotation = normalizeRotation(elementStartRotation + angleDelta);
 
 			// Update pending transforms for all group elements during rotation
 			if (isGroupInteraction) {
@@ -1317,11 +1335,7 @@
 						const newElY = newElCenterY - el.height / 2;
 
 						// Apply rotation delta to element's original rotation
-						let newRotation = originalRotation + rotationDeltaDegrees;
-
-						// Normalize to -180 to 180 range
-						while (newRotation > 180) newRotation -= 360;
-						while (newRotation < -180) newRotation += 360;
+						const newRotation = normalizeRotation(originalRotation + rotationDeltaDegrees);
 
 						return [
 							el.id,
@@ -1479,7 +1493,7 @@
 		if (isGroupInteraction) {
 			// Handle group interaction
 			if (interactionMode === 'dragging' && pendingPosition) {
-				if (movedX > MOVEMENT_THRESHOLD || movedY > MOVEMENT_THRESHOLD) {
+				if (movedX > CANVAS_INTERACTION.MOVEMENT_THRESHOLD || movedY > CANVAS_INTERACTION.MOVEMENT_THRESHOLD) {
 					const deltaX = pendingPosition.x - elementStartCanvas.x;
 					const deltaY = pendingPosition.y - elementStartCanvas.y;
 
@@ -1492,7 +1506,7 @@
 					);
 				}
 			} else if (interactionMode === 'resizing' && pendingSize && pendingPosition) {
-				const sizeChanged = sizeChangedW > MOVEMENT_THRESHOLD || sizeChangedH > MOVEMENT_THRESHOLD;
+				const sizeChanged = sizeChangedW > CANVAS_INTERACTION.MOVEMENT_THRESHOLD || sizeChangedH > CANVAS_INTERACTION.MOVEMENT_THRESHOLD;
 
 				if (sizeChanged) {
 					// Calculate scale ratios
@@ -1554,11 +1568,7 @@
 						const newElY = newElCenterY - el.height / 2;
 
 						// Apply rotation delta to element's original rotation
-						let newRotation = originalRotation + rotationDeltaDegrees;
-
-						// Normalize to -180 to 180 range
-						while (newRotation > 180) newRotation -= 360;
-						while (newRotation < -180) newRotation += 360;
+						const newRotation = normalizeRotation(originalRotation + rotationDeltaDegrees);
 
 						return {
 							elementId: el.id,
@@ -1574,14 +1584,14 @@
 		} else if (activeElementId) {
 			// Handle single element interaction
 			if (interactionMode === 'dragging') {
-				if (movedX > MOVEMENT_THRESHOLD || movedY > MOVEMENT_THRESHOLD) {
+				if (movedX > CANVAS_INTERACTION.MOVEMENT_THRESHOLD || movedY > CANVAS_INTERACTION.MOVEMENT_THRESHOLD) {
 					if (pendingPosition) {
 						await moveElement(activeElementId, pendingPosition);
 					}
 				}
 			} else if (interactionMode === 'resizing') {
-				const sizeChanged = sizeChangedW > MOVEMENT_THRESHOLD || sizeChangedH > MOVEMENT_THRESHOLD;
-				const positionChanged = movedX > MOVEMENT_THRESHOLD || movedY > MOVEMENT_THRESHOLD;
+				const sizeChanged = sizeChangedW > CANVAS_INTERACTION.MOVEMENT_THRESHOLD || sizeChangedH > CANVAS_INTERACTION.MOVEMENT_THRESHOLD;
+				const positionChanged = movedX > CANVAS_INTERACTION.MOVEMENT_THRESHOLD || movedY > CANVAS_INTERACTION.MOVEMENT_THRESHOLD;
 
 				if (sizeChanged || positionChanged) {
 					if (pendingSize) {

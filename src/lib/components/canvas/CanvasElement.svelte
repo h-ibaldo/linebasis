@@ -15,7 +15,7 @@
 	import type { Element } from '$lib/types/events';
 
 	export let element: Element;
-	export let onStartDrag: ((e: MouseEvent, element: Element, handle?: string) => void) | undefined = undefined;
+	export let onStartDrag: ((e: MouseEvent, element: Element, handle?: string, selectedElements?: Element[]) => void) | undefined = undefined;
 	export let isPanning: boolean = false;
 	export let isDragging: boolean = false;
 
@@ -64,11 +64,12 @@
 		// If onStartDrag is provided (from SelectionOverlay), call it
 		if (onStartDrag) {
 			// For scale tool, pass 'se' handle to trigger resize mode with aspect ratio lock
-			if (tool === 'scale') {
-				onStartDrag(e, element, 'se');
-			} else {
-				onStartDrag(e, element);
-			}
+			const handle = tool === 'scale' ? 'se' : undefined;
+
+			// Pass current selection state to avoid timing issues when clicking outside selection
+			const currentSelectedElements = get(selectedElements);
+			const newSelectedElements = !isPartOfMultiSelection ? [element] : currentSelectedElements;
+			onStartDrag(e, element, handle, newSelectedElements);
 		}
 	}
 

@@ -6,6 +6,7 @@
 	 */
 
 	import { currentTool } from '$lib/stores/tool-store';
+	import { CANVAS_UI } from '$lib/constants/canvas';
 	import type { Element } from '$lib/types/events';
 
 	export let element: Element;
@@ -23,12 +24,10 @@
 	// Determine cursor based on tool and panning state
 	$: dragCursor = $currentTool === 'hand' || isPanning ? 'grab' : $currentTool === 'scale' ? 'crosshair' : 'default';
 
-	const HANDLE_SIZE = 8;
 	const BORDER_WIDTH = 2;
 	const ROTATION_ZONE_SIZE = 15; // Size of rotation zone extending from each corner handle
 	const EDGE_RESIZE_ZONE_WIDTH = 6; // Width of the invisible resize zone along each edge (extends inward and outward)
 	const RADIUS_HANDLE_SIZE = 10; // Size of radius handle
-	const RADIUS_HANDLE_BASE_DISTANCE = 10; // Base distance from corner resize handle (10px as requested)
 
 	// Reactive: Get display position/size
 	$: pos = pendingPosition || element.position;
@@ -94,28 +93,28 @@
 				return Math.max(0, Math.min(radius, maxAllowedRadius));
 			}
 			// Not dragging: use radius if > 0, otherwise base distance
-			return radius > 0 ? Math.min(radius, maxAllowedRadius) : RADIUS_HANDLE_BASE_DISTANCE;
+			return radius > 0 ? Math.min(radius, maxAllowedRadius) : CANVAS_UI.RADIUS_HANDLE_BASE_DISTANCE;
 		})(),
 		ne: (() => {
 			const radius = cornerRadii.ne;
 			if (pendingRadius !== null && activeRadiusCorner === 'ne') {
 				return Math.max(0, Math.min(radius, maxAllowedRadius));
 			}
-			return radius > 0 ? Math.min(radius, maxAllowedRadius) : RADIUS_HANDLE_BASE_DISTANCE;
+			return radius > 0 ? Math.min(radius, maxAllowedRadius) : CANVAS_UI.RADIUS_HANDLE_BASE_DISTANCE;
 		})(),
 		se: (() => {
 			const radius = cornerRadii.se;
 			if (pendingRadius !== null && activeRadiusCorner === 'se') {
 				return Math.max(0, Math.min(radius, maxAllowedRadius));
 			}
-			return radius > 0 ? Math.min(radius, maxAllowedRadius) : RADIUS_HANDLE_BASE_DISTANCE;
+			return radius > 0 ? Math.min(radius, maxAllowedRadius) : CANVAS_UI.RADIUS_HANDLE_BASE_DISTANCE;
 		})(),
 		sw: (() => {
 			const radius = cornerRadii.sw;
 			if (pendingRadius !== null && activeRadiusCorner === 'sw') {
 				return Math.max(0, Math.min(radius, maxAllowedRadius));
 			}
-			return radius > 0 ? Math.min(radius, maxAllowedRadius) : RADIUS_HANDLE_BASE_DISTANCE;
+			return radius > 0 ? Math.min(radius, maxAllowedRadius) : CANVAS_UI.RADIUS_HANDLE_BASE_DISTANCE;
 		})()
 	};
 
@@ -138,7 +137,7 @@
 
 	$: screenWidth = screenBottomRight.x - screenTopLeft.x;
 	$: screenHeight = screenBottomRight.y - screenTopLeft.y;
-	$: handleOffset = HANDLE_SIZE / 2;
+	$: handleOffset = CANVAS_UI.HANDLE_SIZE / 2;
 
 	// Reactive: Convert radius handle distances to screen coordinates
 	// This ensures handles maintain correct position at all zoom levels

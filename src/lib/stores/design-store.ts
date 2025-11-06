@@ -933,7 +933,10 @@ export function setupKeyboardShortcuts(): (() => void) | undefined {
 			const selected = get(selectedElements);
 			if (selected.length > 0) {
 				// Delete all selected elements (await all deletions)
-				Promise.all(selected.map((element) => deleteElement(element.id)));
+				Promise.all(selected.map((element) => deleteElement(element.id)))
+					.catch((error) => {
+						console.error('Failed to delete elements:', error);
+					});
 			}
 		}
 	};
