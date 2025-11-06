@@ -85,11 +85,38 @@
 	// Reactive: Calculate handle distances for each corner individually
 	// Position handle center at the border-radius arc along the 45° diagonal
 	// For a circle with radius r, the point on the arc at 45° is exactly at distance r from corner
+	// During drag: clamp to valid range [0, maxAllowedRadius] for better UX
 	$: radiusHandleDistances = {
-		nw: Math.min(cornerRadii.nw, maxAllowedRadius) > 0 ? Math.min(cornerRadii.nw, maxAllowedRadius) : RADIUS_HANDLE_BASE_DISTANCE,
-		ne: Math.min(cornerRadii.ne, maxAllowedRadius) > 0 ? Math.min(cornerRadii.ne, maxAllowedRadius) : RADIUS_HANDLE_BASE_DISTANCE,
-		se: Math.min(cornerRadii.se, maxAllowedRadius) > 0 ? Math.min(cornerRadii.se, maxAllowedRadius) : RADIUS_HANDLE_BASE_DISTANCE,
-		sw: Math.min(cornerRadii.sw, maxAllowedRadius) > 0 ? Math.min(cornerRadii.sw, maxAllowedRadius) : RADIUS_HANDLE_BASE_DISTANCE
+		nw: (() => {
+			const radius = cornerRadii.nw;
+			// During active drag: clamp to [0, max] range
+			if (pendingRadius !== null && activeRadiusCorner === 'nw') {
+				return Math.max(0, Math.min(radius, maxAllowedRadius));
+			}
+			// Not dragging: use radius if > 0, otherwise base distance
+			return radius > 0 ? Math.min(radius, maxAllowedRadius) : RADIUS_HANDLE_BASE_DISTANCE;
+		})(),
+		ne: (() => {
+			const radius = cornerRadii.ne;
+			if (pendingRadius !== null && activeRadiusCorner === 'ne') {
+				return Math.max(0, Math.min(radius, maxAllowedRadius));
+			}
+			return radius > 0 ? Math.min(radius, maxAllowedRadius) : RADIUS_HANDLE_BASE_DISTANCE;
+		})(),
+		se: (() => {
+			const radius = cornerRadii.se;
+			if (pendingRadius !== null && activeRadiusCorner === 'se') {
+				return Math.max(0, Math.min(radius, maxAllowedRadius));
+			}
+			return radius > 0 ? Math.min(radius, maxAllowedRadius) : RADIUS_HANDLE_BASE_DISTANCE;
+		})(),
+		sw: (() => {
+			const radius = cornerRadii.sw;
+			if (pendingRadius !== null && activeRadiusCorner === 'sw') {
+				return Math.max(0, Math.min(radius, maxAllowedRadius));
+			}
+			return radius > 0 ? Math.min(radius, maxAllowedRadius) : RADIUS_HANDLE_BASE_DISTANCE;
+		})()
 	};
 
 	// Reactive: Determine if radius handles should be shown
