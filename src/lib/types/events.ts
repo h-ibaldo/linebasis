@@ -418,6 +418,11 @@ export interface ElementStyles {
 	borderStyle: string;
 	borderColor: string;
 	borderRadius: string;
+	// Individual corner radii (for independent corner editing with Alt key)
+	borderTopLeftRadius?: string;
+	borderTopRightRadius?: string;
+	borderBottomRightRadius?: string;
+	borderBottomLeftRadius?: string;
 	// Effects
 	opacity: number;
 	boxShadow: string;

@@ -99,6 +99,11 @@
 			? `${$interactionState.pendingRadius}px`
 			: element.styles.borderRadius;
 
+	// Get individual corner radii (for independent corner editing during drag)
+	$: displayCornerRadii = $interactionState.activeElementId === element.id && $interactionState.pendingCornerRadii
+		? $interactionState.pendingCornerRadii
+		: null;
+
 	// Generate inline styles from element properties
 	$: elementStyles = (() => {
 		const styles: string[] = [];
@@ -128,7 +133,25 @@
 		if (element.styles.borderWidth) styles.push(`border-width: ${element.styles.borderWidth}`);
 		if (element.styles.borderStyle) styles.push(`border-style: ${element.styles.borderStyle}`);
 		if (element.styles.borderColor) styles.push(`border-color: ${element.styles.borderColor}`);
-		if (displayRadius) styles.push(`border-radius: ${displayRadius}`);
+
+		// Border radius - check pending individual corners first (during independent editing)
+		if (displayCornerRadii) {
+			// Use pending individual corner radii (independent mode during drag)
+			styles.push(`border-top-left-radius: ${displayCornerRadii.nw}px`);
+			styles.push(`border-top-right-radius: ${displayCornerRadii.ne}px`);
+			styles.push(`border-bottom-right-radius: ${displayCornerRadii.se}px`);
+			styles.push(`border-bottom-left-radius: ${displayCornerRadii.sw}px`);
+		} else if (element.styles.borderTopLeftRadius || element.styles.borderTopRightRadius ||
+		    element.styles.borderBottomRightRadius || element.styles.borderBottomLeftRadius) {
+			// Use stored individual corner radii
+			if (element.styles.borderTopLeftRadius) styles.push(`border-top-left-radius: ${element.styles.borderTopLeftRadius}`);
+			if (element.styles.borderTopRightRadius) styles.push(`border-top-right-radius: ${element.styles.borderTopRightRadius}`);
+			if (element.styles.borderBottomRightRadius) styles.push(`border-bottom-right-radius: ${element.styles.borderBottomRightRadius}`);
+			if (element.styles.borderBottomLeftRadius) styles.push(`border-bottom-left-radius: ${element.styles.borderBottomLeftRadius}`);
+		} else if (displayRadius) {
+			// Use uniform radius
+			styles.push(`border-radius: ${displayRadius}`);
+		}
 		if (element.styles.opacity !== undefined) styles.push(`opacity: ${element.styles.opacity}`);
 		if (element.styles.boxShadow) styles.push(`box-shadow: ${element.styles.boxShadow}`);
 		if (element.styles.overflow) styles.push(`overflow: ${element.styles.overflow}`);

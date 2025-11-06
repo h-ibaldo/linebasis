@@ -13,6 +13,9 @@
 	export let pendingPosition: { x: number; y: number } | null;
 	export let pendingSize: { width: number; height: number } | null;
 	export let pendingRadius: number | null = null;
+	export let activeRadiusCorner: 'nw' | 'ne' | 'se' | 'sw' | null = null; // Which corner is being adjusted
+	export let radiusCornersIndependent: boolean = false; // Whether corners are in independent mode
+	export let radiusFrozenValues: { nw: number; ne: number; se: number; sw: number } | null = null; // Frozen values when independent
 	export let rotation: number = 0; // Rotation angle in degrees for the selection UI
 	export let isPanning: boolean = false;
 	export let onMouseDown: (e: MouseEvent, handle?: string) => void;
@@ -32,19 +35,62 @@
 	$: size = pendingSize || element.size;
 
 	// Reactive: Get display radius (use pendingRadius if available, otherwise element's borderRadius)
+	// Note: pendingRadius is set during drag, and applies to the corner being dragged
 	$: displayRadius = pendingRadius !== null ? pendingRadius : (parseFloat(element.styles?.borderRadius as string) || 0);
+
+	// Reactive: Get individual corner radii (for independent corner editing)
+	// When synchronized (independent=false): all corners use pendingRadius during drag
+	// When independent (independent=true): inactive corners use frozen values, active uses pendingRadius
+	// Force reactive dependency on radiusFrozenValues and radiusCornersIndependent
+	$: cornerRadii = (() => {
+		// Reference all dependencies explicitly to ensure reactivity
+		const _ = {radiusFrozenValues, radiusCornersIndependent, activeRadiusCorner, pendingRadius, displayRadius};
+
+		return {
+			nw: (activeRadiusCorner === 'nw' && pendingRadius !== null)
+				? pendingRadius  // Active corner: use pendingRadius
+				: (!radiusCornersIndependent && pendingRadius !== null)
+					? pendingRadius  // Synchronized mode: all corners follow pendingRadius
+					: (radiusCornersIndependent && radiusFrozenValues)
+						? radiusFrozenValues.nw  // Independent mode: use frozen value
+						: (parseFloat(element.styles?.borderTopLeftRadius as string) || displayRadius),
+			ne: (activeRadiusCorner === 'ne' && pendingRadius !== null)
+				? pendingRadius
+				: (!radiusCornersIndependent && pendingRadius !== null)
+					? pendingRadius
+					: (radiusCornersIndependent && radiusFrozenValues)
+						? radiusFrozenValues.ne
+						: (parseFloat(element.styles?.borderTopRightRadius as string) || displayRadius),
+			se: (activeRadiusCorner === 'se' && pendingRadius !== null)
+				? pendingRadius
+				: (!radiusCornersIndependent && pendingRadius !== null)
+					? pendingRadius
+					: (radiusCornersIndependent && radiusFrozenValues)
+						? radiusFrozenValues.se
+						: (parseFloat(element.styles?.borderBottomRightRadius as string) || displayRadius),
+			sw: (activeRadiusCorner === 'sw' && pendingRadius !== null)
+				? pendingRadius
+				: (!radiusCornersIndependent && pendingRadius !== null)
+					? pendingRadius
+					: (radiusCornersIndependent && radiusFrozenValues)
+						? radiusFrozenValues.sw
+						: (parseFloat(element.styles?.borderBottomLeftRadius as string) || displayRadius)
+		};
+	})();
+
 
 	// Reactive: Calculate max allowed radius (50% of smaller dimension)
 	$: maxAllowedRadius = Math.min(size.width, size.height) / 2;
 
-	// Reactive: Clamp display radius to max allowed (ensures handle stops at 50% mark)
-	$: clampedDisplayRadius = Math.min(displayRadius, maxAllowedRadius);
-
-	// Reactive: Calculate radius handle distance based on clamped radius value
+	// Reactive: Calculate handle distances for each corner individually
 	// Position handle center at the border-radius arc along the 45° diagonal
 	// For a circle with radius r, the point on the arc at 45° is exactly at distance r from corner
-	// During drag (pendingRadius !== null), allow handle to go to 0. Otherwise, show BASE_DISTANCE minimum.
-	$: radiusHandleDistance = clampedDisplayRadius > 0 ? clampedDisplayRadius : (pendingRadius !== null ? 0 : RADIUS_HANDLE_BASE_DISTANCE);
+	$: radiusHandleDistances = {
+		nw: Math.min(cornerRadii.nw, maxAllowedRadius) > 0 ? Math.min(cornerRadii.nw, maxAllowedRadius) : RADIUS_HANDLE_BASE_DISTANCE,
+		ne: Math.min(cornerRadii.ne, maxAllowedRadius) > 0 ? Math.min(cornerRadii.ne, maxAllowedRadius) : RADIUS_HANDLE_BASE_DISTANCE,
+		se: Math.min(cornerRadii.se, maxAllowedRadius) > 0 ? Math.min(cornerRadii.se, maxAllowedRadius) : RADIUS_HANDLE_BASE_DISTANCE,
+		sw: Math.min(cornerRadii.sw, maxAllowedRadius) > 0 ? Math.min(cornerRadii.sw, maxAllowedRadius) : RADIUS_HANDLE_BASE_DISTANCE
+	};
 
 	// Reactive: Determine if radius handles should be shown
 	// Hide only if element dimensions are too small (below a minimum size threshold)
@@ -67,9 +113,14 @@
 	$: screenHeight = screenBottomRight.y - screenTopLeft.y;
 	$: handleOffset = HANDLE_SIZE / 2;
 
-	// Reactive: Convert radius handle distance to screen coordinates
+	// Reactive: Convert radius handle distances to screen coordinates
 	// This ensures handles maintain correct position at all zoom levels
-	$: screenRadiusHandleDistance = radiusHandleDistance * viewport.scale;
+	$: screenRadiusHandleDistances = {
+		nw: radiusHandleDistances.nw * viewport.scale,
+		ne: radiusHandleDistances.ne * viewport.scale,
+		se: radiusHandleDistances.se * viewport.scale,
+		sw: radiusHandleDistances.sw * viewport.scale
+	};
 
 	// Calculate center point for rotation
 	$: centerX = screenWidth / 2;
@@ -195,8 +246,8 @@
 			class="radius-handle"
 			style="
 				position: absolute;
-				left: calc({screenRadiusHandleDistance}px - {RADIUS_HANDLE_SIZE / 2}px);
-				top: calc({screenRadiusHandleDistance}px - {RADIUS_HANDLE_SIZE / 2}px);
+				left: calc({screenRadiusHandleDistances.nw}px - {RADIUS_HANDLE_SIZE / 2}px);
+				top: calc({screenRadiusHandleDistances.nw}px - {RADIUS_HANDLE_SIZE / 2}px);
 				width: {RADIUS_HANDLE_SIZE}px;
 				height: {RADIUS_HANDLE_SIZE}px;
 				border-radius: 50%;
@@ -217,8 +268,8 @@
 			class="radius-handle"
 			style="
 				position: absolute;
-				left: calc(100% - {screenRadiusHandleDistance}px - {RADIUS_HANDLE_SIZE / 2}px);
-				top: calc({screenRadiusHandleDistance}px - {RADIUS_HANDLE_SIZE / 2}px);
+				left: calc(100% - {screenRadiusHandleDistances.ne}px - {RADIUS_HANDLE_SIZE / 2}px);
+				top: calc({screenRadiusHandleDistances.ne}px - {RADIUS_HANDLE_SIZE / 2}px);
 				width: {RADIUS_HANDLE_SIZE}px;
 				height: {RADIUS_HANDLE_SIZE}px;
 				border-radius: 50%;
@@ -239,8 +290,8 @@
 			class="radius-handle"
 			style="
 				position: absolute;
-				left: calc(100% - {screenRadiusHandleDistance}px - {RADIUS_HANDLE_SIZE / 2}px);
-				top: calc(100% - {screenRadiusHandleDistance}px - {RADIUS_HANDLE_SIZE / 2}px);
+				left: calc(100% - {screenRadiusHandleDistances.se}px - {RADIUS_HANDLE_SIZE / 2}px);
+				top: calc(100% - {screenRadiusHandleDistances.se}px - {RADIUS_HANDLE_SIZE / 2}px);
 				width: {RADIUS_HANDLE_SIZE}px;
 				height: {RADIUS_HANDLE_SIZE}px;
 				border-radius: 50%;
@@ -261,8 +312,8 @@
 			class="radius-handle"
 			style="
 				position: absolute;
-				left: calc({screenRadiusHandleDistance}px - {RADIUS_HANDLE_SIZE / 2}px);
-				top: calc(100% - {screenRadiusHandleDistance}px - {RADIUS_HANDLE_SIZE / 2}px);
+				left: calc({screenRadiusHandleDistances.sw}px - {RADIUS_HANDLE_SIZE / 2}px);
+				top: calc(100% - {screenRadiusHandleDistances.sw}px - {RADIUS_HANDLE_SIZE / 2}px);
 				width: {RADIUS_HANDLE_SIZE}px;
 				height: {RADIUS_HANDLE_SIZE}px;
 				border-radius: 50%;

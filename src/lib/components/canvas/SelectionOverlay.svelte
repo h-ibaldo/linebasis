@@ -38,10 +38,66 @@
 	let radiusCorner: 'nw' | 'ne' | 'se' | 'sw' | null = null; // Which corner is being adjusted
 	let radiusStartDistance: number = 0; // Initial distance from corner at drag start
 	let radiusInitialValue: number = 0; // Initial radius value at drag start
+	let radiusCornersIndependent: boolean = false; // Track if corners are currently independent (desynchronized)
+	let radiusStartedIndependent: boolean = false; // Track if corners were already independent when drag started
+	let radiusAltKeyPressed: boolean = false; // Track current Alt key state during radius drag
+	let radiusValuesWhenToggled: { nw: number; ne: number; se: number; sw: number } | null = null; // Capture corner values when toggling to independent
+	let radiusFrozenValues: { nw: number; ne: number; se: number; sw: number } | null = null; // Frozen values for visual feedback during independent drag
 	let groupPendingTransforms: Map<string, { position: { x: number; y: number }; size: { width: number; height: number }; rotation?: number }> = new Map();
 
 	// Broadcast state to store for CanvasElement to consume
 	$: {
+		// Calculate pending corner radii for independent mode OR when element has individual corners
+		let cornerRadii: { nw: number; ne: number; se: number; sw: number } | null = null;
+
+		if (radiusCorner && pendingRadius !== null) {
+			const activeElement = selectedElements.find(el => el.id === activeElementId);
+			if (activeElement) {
+				// Check if element has individual corner styles
+				const hasIndividualCorners = !!(
+					activeElement.styles?.borderTopLeftRadius ||
+					activeElement.styles?.borderTopRightRadius ||
+					activeElement.styles?.borderBottomRightRadius ||
+					activeElement.styles?.borderBottomLeftRadius
+				);
+
+				// Only set cornerRadii if we're in independent mode OR element has individual corners
+				if (radiusCornersIndependent || hasIndividualCorners) {
+					if (radiusCornersIndependent) {
+						// Independent mode: update only the active corner, keep others at their current values
+						const getCurrentValue = (corner: 'nw' | 'ne' | 'se' | 'sw'): number => {
+							if (radiusFrozenValues) {
+								return radiusFrozenValues[corner];
+							}
+							// Get from element's individual corner styles
+							const cornerProperty = {
+								'nw': activeElement.styles?.borderTopLeftRadius,
+								'ne': activeElement.styles?.borderTopRightRadius,
+								'se': activeElement.styles?.borderBottomRightRadius,
+								'sw': activeElement.styles?.borderBottomLeftRadius
+							}[corner];
+							return parseFloat(cornerProperty as string) || 0;
+						};
+
+						cornerRadii = {
+							nw: radiusCorner === 'nw' ? pendingRadius : getCurrentValue('nw'),
+							ne: radiusCorner === 'ne' ? pendingRadius : getCurrentValue('ne'),
+							se: radiusCorner === 'se' ? pendingRadius : getCurrentValue('se'),
+							sw: radiusCorner === 'sw' ? pendingRadius : getCurrentValue('sw')
+						};
+					} else {
+						// Synchronized mode but element has individual corners: set all to pendingRadius
+						cornerRadii = {
+							nw: pendingRadius,
+							ne: pendingRadius,
+							se: pendingRadius,
+							sw: pendingRadius
+						};
+					}
+				}
+			}
+		}
+
 		interactionState.set({
 			activeElementId,
 			mode: interactionMode,
@@ -49,6 +105,7 @@
 			pendingSize,
 			pendingRotation,
 			pendingRadius,
+			pendingCornerRadii: cornerRadii,
 			groupTransforms: groupPendingTransforms
 		});
 	}
@@ -632,8 +689,32 @@
 			// Extract corner from handle (e.g., 'radius-nw' -> 'nw')
 			radiusCorner = handle.split('-')[1] as 'nw' | 'ne' | 'se' | 'sw';
 
-			// Store current border radius
-			radiusInitialValue = parseFloat(element.styles?.borderRadius as string) || 0;
+			// Check if corners are already independent (any corner-specific radius is set)
+			const hasIndependentCorners = !!(
+				element.styles?.borderTopLeftRadius ||
+				element.styles?.borderTopRightRadius ||
+				element.styles?.borderBottomRightRadius ||
+				element.styles?.borderBottomLeftRadius
+			);
+			radiusCornersIndependent = hasIndependentCorners;
+			radiusStartedIndependent = hasIndependentCorners;
+			radiusAltKeyPressed = false;
+
+			// Clear frozen values from previous drag
+			radiusFrozenValues = null;
+			radiusValuesWhenToggled = null;
+
+
+			// Store current border radius for this specific corner
+			const cornerProperty = {
+				'nw': element.styles?.borderTopLeftRadius,
+				'ne': element.styles?.borderTopRightRadius,
+				'se': element.styles?.borderBottomRightRadius,
+				'sw': element.styles?.borderBottomLeftRadius
+			}[radiusCorner];
+
+			// Use corner-specific radius if set, otherwise use uniform borderRadius
+			radiusInitialValue = parseFloat(cornerProperty as string) || parseFloat(element.styles?.borderRadius as string) || 0;
 
 			// When starting interaction, if radius is 0, treat it as BASE_DISTANCE for handle positioning
 			// This matches the visual position of the handle in SelectionUI
@@ -1243,6 +1324,51 @@
 				);
 			}
 		} else if (interactionMode === 'radius' && radiusCorner) {
+			// Handle Alt key toggle logic for radius synchronization
+			// Alt key acts as a toggle:
+			// - If corners are synchronized: Alt press breaks synchronization (makes corners independent)
+			// - If corners are already independent: Alt press re-synchronizes them
+			const altKeyCurrentlyPressed = e.altKey;
+
+			// Detect Alt key state change
+			if (altKeyCurrentlyPressed && !radiusAltKeyPressed) {
+				// Alt key was just pressed - toggle the independent state
+				const wasIndependent = radiusCornersIndependent;
+				radiusCornersIndependent = !radiusCornersIndependent;
+
+				// When toggling TO independent mode, freeze the inactive corners at current pendingRadius
+				// When toggling TO synchronized mode, clear frozen values
+				if (radiusCornersIndependent && !wasIndependent) {
+					// Toggled to INDEPENDENT - freeze inactive corners at current value
+					const activeElement = selectedElements.find(el => el.id === activeElementId);
+					if (activeElement && radiusCorner) {
+						// Use pendingRadius (current drag value) for all corners
+						// This freezes them at the value they're currently displaying
+						const currentValue = pendingRadius !== null ? pendingRadius : (parseFloat(activeElement.styles?.borderRadius as string) || 0);
+
+						radiusValuesWhenToggled = {
+							nw: parseFloat(activeElement.styles?.borderTopLeftRadius as string) || currentValue,
+							ne: parseFloat(activeElement.styles?.borderTopRightRadius as string) || currentValue,
+							se: parseFloat(activeElement.styles?.borderBottomRightRadius as string) || currentValue,
+							sw: parseFloat(activeElement.styles?.borderBottomLeftRadius as string) || currentValue
+						};
+
+						// Set frozen values for visual feedback - all corners freeze at current pendingRadius
+						radiusFrozenValues = {
+							nw: currentValue,
+							ne: currentValue,
+							se: currentValue,
+							sw: currentValue
+						};
+
+					}
+				} else if (!radiusCornersIndependent && wasIndependent) {
+					// Toggled to SYNCHRONIZED - clear frozen values
+					radiusFrozenValues = null;
+				}
+			}
+			radiusAltKeyPressed = altKeyCurrentlyPressed;
+
 			// Convert current mouse position to canvas space
 			const mouseCanvasX = (e.clientX - viewport.x) / viewport.scale;
 			const mouseCanvasY = (e.clientY - viewport.y) / viewport.scale;
@@ -1459,10 +1585,54 @@
 				// Apply rotation
 				await rotateElement(activeElementId, pendingRotation);
 			} else if (interactionMode === 'radius' && pendingRadius !== null) {
-				// Apply border radius change
-				await updateElementStyles(activeElementId, {
-					borderRadius: `${pendingRadius}px`
-				});
+				// Apply border radius change based on whether corners are independent
+					if (radiusCornersIndependent && radiusCorner) {
+					// Independent mode: only update the specific corner being dragged
+					// Use the captured values when we toggled to independent, or get current values
+					const activeElement = selectedElements.find(el => el.id === activeElementId);
+					if (activeElement) {
+						const cornerProperty = {
+							'nw': 'borderTopLeftRadius',
+							'ne': 'borderTopRightRadius',
+							'se': 'borderBottomRightRadius',
+							'sw': 'borderBottomLeftRadius'
+						}[radiusCorner] as 'borderTopLeftRadius' | 'borderTopRightRadius' | 'borderBottomRightRadius' | 'borderBottomLeftRadius';
+
+						// Use captured values if we toggled during this drag, otherwise use existing values
+						let cornerValues;
+						if (radiusValuesWhenToggled) {
+							cornerValues = radiusValuesWhenToggled;
+						} else {
+							// Already was independent - use current values
+							const uniformRadius = parseFloat(activeElement.styles?.borderRadius as string) || 0;
+							cornerValues = {
+								nw: parseFloat(activeElement.styles?.borderTopLeftRadius as string) || uniformRadius,
+								ne: parseFloat(activeElement.styles?.borderTopRightRadius as string) || uniformRadius,
+								se: parseFloat(activeElement.styles?.borderBottomRightRadius as string) || uniformRadius,
+								sw: parseFloat(activeElement.styles?.borderBottomLeftRadius as string) || uniformRadius
+							};
+						}
+
+						await updateElementStyles(activeElementId, {
+							borderRadius: undefined, // Clear uniform radius
+							borderTopLeftRadius: `${cornerValues.nw}px`,
+							borderTopRightRadius: `${cornerValues.ne}px`,
+							borderBottomRightRadius: `${cornerValues.se}px`,
+							borderBottomLeftRadius: `${cornerValues.sw}px`,
+							[cornerProperty]: `${pendingRadius}px` // Update only the dragged corner
+						});
+					}
+				} else {
+					// Synchronized mode: update all corners together
+					await updateElementStyles(activeElementId, {
+						borderRadius: `${pendingRadius}px`,
+						// Clear individual corner radii when setting uniform radius
+						borderTopLeftRadius: undefined,
+						borderTopRightRadius: undefined,
+						borderBottomRightRadius: undefined,
+						borderBottomLeftRadius: undefined
+					});
+				}
 			}
 
 			// Keep element selected after interaction
@@ -1481,6 +1651,10 @@
 		radiusCorner = null;
 		radiusStartDistance = 0;
 		radiusInitialValue = 0;
+		radiusCornersIndependent = false;
+		radiusStartedIndependent = false;
+		radiusAltKeyPressed = false;
+		radiusValuesWhenToggled = null;
 		groupStartElements = [];
 		groupPendingTransforms = new Map();
 		hasMovedPastThreshold = false;
@@ -1508,6 +1682,9 @@
 		pendingPosition={activeElementId === selectedElements[0].id ? pendingPosition : null}
 		pendingSize={activeElementId === selectedElements[0].id ? pendingSize : null}
 		pendingRadius={activeElementId === selectedElements[0].id ? pendingRadius : null}
+		activeRadiusCorner={activeElementId === selectedElements[0].id ? radiusCorner : null}
+		radiusCornersIndependent={activeElementId === selectedElements[0].id ? radiusCornersIndependent : false}
+		radiusFrozenValues={activeElementId === selectedElements[0].id ? radiusFrozenValues : null}
 		rotation={commonRotation || 0}
 		onMouseDown={(e, handle) => handleMouseDown(e, selectedElements[0], handle)}
 	/>

@@ -14,6 +14,8 @@ export interface InteractionState {
 	pendingSize: { width: number; height: number } | null;
 	pendingRotation: number | null;
 	pendingRadius: number | null;
+	// Individual corner radii for independent corner editing
+	pendingCornerRadii: { nw: number; ne: number; se: number; sw: number } | null;
 	groupTransforms: Map<string, { position: { x: number; y: number }; size: { width: number; height: number }; rotation?: number }>;
 }
 
@@ -24,6 +26,7 @@ const initialState: InteractionState = {
 	pendingSize: null,
 	pendingRotation: null,
 	pendingRadius: null,
+	pendingCornerRadii: null,
 	groupTransforms: new Map()
 };
 
