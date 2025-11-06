@@ -190,10 +190,22 @@
 		}
 		return styles.join('; ');
 	})();
+
+	// Check if this element is selected
+	$: isSelected = $selectedElements.some(el => el.id === element.id);
 </script>
 
 <!-- Canvas element - absolutely positioned, clickable for selection -->
 <div class="canvas-element" data-element-id={element.id} style={elementStyles} on:mousedown={handleMouseDown} role="button" tabindex="0">
+	<!-- Selection indicator - blue outline overlay (Figma/Illustrator style) -->
+	{#if isSelected}
+		<div
+			class="selection-indicator"
+			style="border-radius: inherit;"
+			aria-hidden="true"
+		></div>
+	{/if}
+
 	<!-- Render element content based on type -->
 	{#if element.type === 'img'}
 		<img src={element.src || ''} alt={element.alt || ''} style={imageStyles} />
@@ -224,5 +236,18 @@
 		user-select: none;
 		box-sizing: border-box;
 		pointer-events: auto; /* Allow clicks for selection */
+	}
+
+	/* Selection indicator - blue outline overlay (Figma/Illustrator style) */
+	.selection-indicator {
+		position: absolute;
+		top: 0;
+		left: 0;
+		width: 100%;
+		height: 100%;
+		border: 2px solid #3b82f6;
+		pointer-events: none;
+		box-sizing: border-box;
+		z-index: 9999; /* Ensure it's on top of element content */
 	}
 </style>
