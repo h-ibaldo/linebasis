@@ -4,11 +4,14 @@
 	 *
 	 * Click and drag on canvas to create a selection box
 	 * that selects all elements within the box.
+	 * Hold SHIFT while dragging to add/remove from existing selection:
+	 * - Elements not selected → add to selection
+	 * - Elements already selected → remove from selection
 	 */
 
 	import { onMount, onDestroy } from 'svelte';
 	import { get } from 'svelte/store';
-	import { designState, selectElements, clearSelection } from '$lib/stores/design-store';
+	import { designState, selectElements, clearSelection, selectedElements } from '$lib/stores/design-store';
 	import { currentTool } from '$lib/stores/tool-store';
 
 	export let canvasElement: HTMLElement;
@@ -19,6 +22,8 @@
 	let selectionStart = { x: 0, y: 0 };
 	let selectionEnd = { x: 0, y: 0 };
 	let box = { x: 0, y: 0, width: 0, height: 0 };
+	let shiftKeyPressed = false; // Track if SHIFT was pressed when starting drag
+	let initialSelection: string[] = []; // Store initial selection when starting drag with SHIFT
 
 	onMount(() => {
 		canvasElement.addEventListener('mousedown', handleMouseDown);
@@ -46,6 +51,14 @@
 
 		if (isCanvasBackground) {
 			isSelecting = true;
+			shiftKeyPressed = e.shiftKey; // Store SHIFT key state at drag start
+
+			// If SHIFT is held and there's an existing selection, store it
+			if (shiftKeyPressed) {
+				initialSelection = get(selectedElements).map(el => el.id);
+			} else {
+				initialSelection = [];
+			}
 
 			const rect = canvasElement.getBoundingClientRect();
 			selectionStart = {
@@ -90,7 +103,7 @@
 	function handleMouseUp() {
 		if (isSelecting) {
 			// Find elements within selection box
-			const selectedIds: string[] = [];
+			const newlySelectedIds: string[] = [];
 
 			Object.values($designState.elements).forEach((element) => {
 				const elementRect = {
@@ -107,18 +120,57 @@
 					box.y < elementRect.y + elementRect.height &&
 					box.y + box.height > elementRect.y
 				) {
-					selectedIds.push(element.id);
+					newlySelectedIds.push(element.id);
 				}
 			});
 
-			if (selectedIds.length > 0) {
-				selectElements(selectedIds);
+			// If SHIFT was held during drag, toggle selection (add/remove)
+			if (shiftKeyPressed) {
+				// Toggle selection for each newly selected element:
+				// - If element was already in initial selection → remove it
+				// - If element was not in initial selection → add it
+				const initialSet = new Set(initialSelection);
+				const toAdd: string[] = [];
+				const toRemove: string[] = [];
+
+				newlySelectedIds.forEach(id => {
+					if (initialSet.has(id)) {
+						// Element was already selected → remove it
+						toRemove.push(id);
+					} else {
+						// Element was not selected → add it
+						toAdd.push(id);
+					}
+				});
+
+				// Start with initial selection
+				let finalSelection = [...initialSelection];
+
+				// Remove elements that should be deselected
+				finalSelection = finalSelection.filter(id => !toRemove.includes(id));
+
+				// Add elements that should be selected
+				finalSelection = [...new Set([...finalSelection, ...toAdd])];
+
+				if (finalSelection.length > 0) {
+					selectElements(finalSelection);
+				} else {
+					clearSelection();
+				}
+				// If no drag occurred (no newlySelectedIds), initial selection is preserved
 			} else {
-				clearSelection();
+				// Normal behavior: replace selection
+				if (newlySelectedIds.length > 0) {
+					selectElements(newlySelectedIds);
+				} else {
+					clearSelection();
+				}
 			}
 
 			isSelecting = false;
 			box = { x: 0, y: 0, width: 0, height: 0 };
+			shiftKeyPressed = false;
+			initialSelection = [];
 		}
 
 		document.removeEventListener('mousemove', handleMouseMove);

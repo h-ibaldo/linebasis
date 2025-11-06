@@ -181,9 +181,13 @@
 		// Only handle clicks on the canvas background for other tools
 		if (e.target !== e.currentTarget) return;
 
-		// Move tool: Clear selection when clicking empty canvas, SelectionBox handles drag selection
+		// Move tool: Clear selection when clicking empty canvas (unless SHIFT is held for additive selection)
+		// SelectionBox handles drag selection and will merge with existing selection if SHIFT is held
 		if (tool === 'move') {
-			clearSelection();
+			// Don't clear selection if SHIFT is held - let SelectionBox handle it
+			if (!e.shiftKey) {
+				clearSelection();
+			}
 			return;
 		}
 
