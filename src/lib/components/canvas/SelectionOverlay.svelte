@@ -716,10 +716,21 @@
 			// Use corner-specific radius if set, otherwise use uniform borderRadius
 			radiusInitialValue = parseFloat(cornerProperty as string) || parseFloat(element.styles?.borderRadius as string) || 0;
 
-			// When starting interaction, if radius is 0, treat it as BASE_DISTANCE for handle positioning
-			// This matches the visual position of the handle in SelectionUI
+			// Calculate max allowed radius (50% of smaller dimension)
+			const maxAllowedRadius = Math.min(size.width, size.height) / 2;
+
+			// Clamp the initial radius to match the visual position of the handle
+			// When radius exceeds max, handle is shown at max position
+			// When radius is 0, handle is shown at BASE_DISTANCE
 			const BASE_DISTANCE = 10;
-			const visualRadius = radiusInitialValue > 0 ? radiusInitialValue : BASE_DISTANCE;
+			let visualRadius: number;
+			if (radiusInitialValue > 0) {
+				// Clamp to max allowed radius to match visual position
+				visualRadius = Math.min(radiusInitialValue, maxAllowedRadius);
+			} else {
+				// If radius is 0, handle shows at base distance
+				visualRadius = BASE_DISTANCE;
+			}
 
 			// Set pendingRadius to visualRadius to prevent jump on mousedown
 			// This keeps the handle at its current visual position when drag starts
