@@ -127,13 +127,16 @@ This document details the key user workflows and journeys through the LineBasis 
 
    **Add Text**:
    - Click "Text" button in toolbar
-   - Click inside Div to place Text
-   - Text appears: "Click to edit"
-   - Double-click text to edit: "Welcome to My Site"
+   - Click or drag on canvas to place Text
+   - Clicking will create a text element with auto width
+   - Draggin will create a text element with fixed width and height
+   - The caret appears, blinking
+   - User can start typing
+   - If user clicks outside a selected EMPTY text element, delete the element
    - In Properties window:
-     - Style Preset: Heading 1
-     - Alignment: Center
-     - Color: Primary
+     - Style Preset: paragraph
+     - Alignment: Start
+     - Color default: #000000
 
    **Add Media**:
    - Click "Media" button in toolbar

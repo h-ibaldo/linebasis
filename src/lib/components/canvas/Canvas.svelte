@@ -24,6 +24,7 @@
 		selectedElements
 	} from '$lib/stores/design-store';
 	import { currentTool } from '$lib/stores/tool-store';
+	import { interactionState, startEditingText } from '$lib/stores/interaction-store';
 	import { CANVAS_INTERACTION } from '$lib/constants/canvas';
 	import CanvasElement from './CanvasElement.svelte';
 	import BaselineGrid from './BaselineGrid.svelte';
@@ -50,7 +51,9 @@
 		canvasElement.style.cursor =
 			isDragging && ($currentTool === 'hand' || isPanning) ? 'grabbing' :
 			$currentTool === 'hand' || isPanning ? 'grab' :
-			$currentTool === 'scale' ? 'crosshair' : 'default';
+			$currentTool === 'text' ? 'text' :
+			$currentTool === 'div' || $currentTool === 'media' ? 'crosshair' :
+			'default';
 	}
 
 	// Drawing state (for creating new elements)
@@ -126,20 +129,27 @@
 	}
 
 	function handleKeyDown(e: KeyboardEvent) {
+		// ESC key: switch to move tool when text tool is active
+		if (e.key === 'Escape' && $currentTool === 'text') {
+			e.preventDefault();
+			currentTool.set('move');
+			return;
+		}
+
 		// Space key for panning
 		if (e.code === 'Space' && !isPanning) {
 			e.preventDefault();
 			e.stopPropagation();
-			
+
 			// Blur any focused select elements to prevent dropdown toggle
 			if (document.activeElement && document.activeElement.tagName === 'SELECT') {
 				(document.activeElement as HTMLElement).blur();
 			}
-			
+
 			isPanning = true;
 			return;
 		}
-		
+
 		// Zoom shortcuts: Cmd/Ctrl + Plus/Minus/0
 		if (e.metaKey || e.ctrlKey) {
 			if (e.code === 'Equal' || e.code === 'NumpadAdd') {
@@ -180,6 +190,23 @@
 
 		// Only handle clicks on the canvas background for other tools
 		if (e.target !== e.currentTarget) return;
+
+		// If we're in text editing mode, blur the active element first to save content
+		// Then clear selection on the next event loop to allow blur to complete
+		if ($interactionState.mode === 'editing-text') {
+			const editingElementId = $interactionState.editingElementId;
+			if (editingElementId) {
+				const el = document.querySelector(`[data-element-id="${editingElementId}"]`);
+				if (el instanceof HTMLElement) {
+					el.blur();
+					// Clear selection after a small delay to allow blur event to process
+					setTimeout(() => {
+						clearSelection();
+					}, 0);
+					return;
+				}
+			}
+		}
 
 		// Move tool: Clear selection when clicking empty canvas (unless SHIFT is held for additive selection)
 		// SelectionBox handles drag selection and will merge with existing selection if SHIFT is held
@@ -269,37 +296,75 @@
 			// If dragged less than minimum size, create default-sized element
 			if (drawPreview.width < CANVAS_INTERACTION.MIN_ELEMENT_SIZE || drawPreview.height < CANVAS_INTERACTION.MIN_ELEMENT_SIZE) {
 				// Click: create default size centered at click position
-				const defaultSizes = {
-					div: { width: 200, height: 200 },
-					text: { width: 300, height: 100 },
-					media: { width: 200, height: 200 }
-				};
 
-				const size = defaultSizes[tool as 'div' | 'text' | 'media'] || { width: 200, height: 200 };
-
-				// Center element at click position
-				newElementId = await createElement({
-					pageId,
-					parentId: null,
-					elementType: tool === 'text' ? 'p' : tool === 'media' ? 'img' : 'div',
-					position: {
-						x: drawStart.x - size.width / 2,
-						y: drawStart.y - size.height / 2
-					},
-					size,
-					content: tool === 'text' ? 'Text' : '',
-					styles: {
-						backgroundColor: tool === 'div' ? '#f5f5f5' : undefined,
-						color: '#000000'
-					}
-				});
-
-				// Add placeholder image for media elements
-				if (tool === 'media') {
-					await updateElement(newElementId, {
-						src: placeholderSVG,
-						alt: 'Click to select image'
+				if (tool === 'text') {
+					// Text tool with click (no drag): Create text with AUTO width
+					// Start editing immediately so user can type
+					newElementId = await createElement({
+						pageId,
+						parentId: null,
+						elementType: 'p',
+						position: {
+							x: drawStart.x,
+							y: drawStart.y
+						},
+						size: { width: 200, height: 40 }, // Initial size, will auto-expand
+						content: 'Text',
+						styles: {
+							color: '#000000',
+							display: 'inline-block' // Allow width to shrink-wrap content
+						}
 					});
+
+					// Automatically start editing the text element
+					setTimeout(() => {
+						startEditingText(newElementId);
+						// Focus after a brief delay to ensure element is rendered
+						setTimeout(() => {
+							const el = document.querySelector(`[data-element-id="${newElementId}"]`);
+							if (el instanceof HTMLElement) {
+								el.focus();
+								// Select all text for easy replacement
+								const selection = window.getSelection();
+								const range = document.createRange();
+								range.selectNodeContents(el);
+								selection?.removeAllRanges();
+								selection?.addRange(range);
+							}
+						}, 50);
+					}, 0);
+				} else {
+					// Div and media tools: use fixed default sizes
+					const defaultSizes = {
+						div: { width: 200, height: 200 },
+						media: { width: 200, height: 200 }
+					};
+
+					const size = defaultSizes[tool as 'div' | 'media'] || { width: 200, height: 200 };
+
+					// Center element at click position
+					newElementId = await createElement({
+						pageId,
+						parentId: null,
+						elementType: tool === 'media' ? 'img' : 'div',
+						position: {
+							x: drawStart.x - size.width / 2,
+							y: drawStart.y - size.height / 2
+						},
+						size,
+						content: '',
+						styles: {
+							backgroundColor: tool === 'div' ? '#f5f5f5' : undefined
+						}
+					});
+
+					// Add placeholder image for media elements
+					if (tool === 'media') {
+						await updateElement(newElementId, {
+							src: placeholderSVG,
+							alt: 'Click to select image'
+						});
+					}
 				}
 			} else {
 				// Drag: create element with drawn size
@@ -315,6 +380,24 @@
 						color: '#000000'
 					}
 				});
+
+				if (tool === 'text') {
+					// Automatically start editing the text element on mouse up
+					setTimeout(() => {
+						startEditingText(newElementId);
+						setTimeout(() => {
+							const el = document.querySelector(`[data-editor-for=\"${newElementId}\"]`);
+							if (el instanceof HTMLElement) {
+								el.focus();
+								const selection = window.getSelection();
+								const range = document.createRange();
+								range.selectNodeContents(el);
+								selection?.removeAllRanges();
+								selection?.addRange(range);
+							}
+						}, 50);
+					}, 0);
+				}
 
 				// Add placeholder image for media elements
 				if (tool === 'media') {
@@ -406,6 +489,9 @@
 	<!-- STYLE: Canvas - infinite scrollable area, dark background -->
 	<div
 		class="canvas"
+		class:cursor-text={$currentTool === 'text'}
+		class:cursor-crosshair={$currentTool === 'div' || $currentTool === 'media'}
+		class:cursor-grab={$currentTool === 'hand' || isPanning}
 		bind:this={canvasElement}
 		on:mousedown={handleMouseDown}
 		on:mousemove={handleMouseMove}
@@ -532,6 +618,18 @@
 		height: 100%;
 		position: relative;
 		cursor: default;
+	}
+
+	.canvas.cursor-text {
+		cursor: text;
+	}
+
+	.canvas.cursor-crosshair {
+		cursor: crosshair;
+	}
+
+	.canvas.cursor-grab {
+		cursor: grab;
 	}
 
 	.canvas-viewport {

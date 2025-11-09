@@ -11,12 +11,16 @@
 	import { selectedElements } from '$lib/stores/design-store';
 	import FloatingWindow from '$lib/components/ui/FloatingWindow.svelte';
 	import DivProperties from './properties/DivProperties.svelte';
+	import TextProperties from './properties/TextProperties.svelte';
 	import MediaProperties from './properties/MediaProperties.svelte';
 	import MultiSelectionProperties from './properties/MultiSelectionProperties.svelte';
 
 	$: selectedElement = $selectedElements.length === 1 ? $selectedElements[0] : null;
 	$: elementType = selectedElement?.type;
 	$: isMultiSelection = $selectedElements.length > 1;
+
+	// Check if element is a text element
+	$: isTextElement = elementType && ['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'span', 'a', 'button', 'label'].includes(elementType);
 </script>
 
 <FloatingWindow title="Properties" defaultX={-320} defaultY={-400} storageKey="properties-window-pos">
@@ -30,11 +34,8 @@
 			</div>
 		{:else if elementType === 'div'}
 			<DivProperties element={selectedElement} />
-		{:else if elementType === 'p' || elementType?.startsWith('h')}
-			<div class="coming-soon">
-				<p>Text Properties</p>
-				<p class="hint">Coming soon</p>
-			</div>
+		{:else if isTextElement}
+			<TextProperties element={selectedElement} />
 		{:else if elementType === 'img'}
 			<MediaProperties element={selectedElement} />
 		{:else}

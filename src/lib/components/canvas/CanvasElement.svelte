@@ -8,8 +8,13 @@
 	 * - NO selection or interaction logic (handled by SelectionOverlay)
 	 */
 
-	import { designState, selectElement, selectedElements, addToSelection, removeFromSelection } from '$lib/stores/design-store';
-	import { interactionState } from '$lib/stores/interaction-store';
+	import { designState, selectElement, selectedElements, addToSelection, removeFromSelection, updateElement } from '$lib/stores/design-store';
+import { interactionState, startEditingText, stopEditingText } from '$lib/stores/interaction-store';
+
+type DocumentWithCaret = Document & {
+	caretRangeFromPoint?: (x: number, y: number) => Range | null;
+	caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
+};
 	import { currentTool } from '$lib/stores/tool-store';
 	import { get } from 'svelte/store';
 	import type { Element } from '$lib/types/events';
@@ -19,15 +24,24 @@
 	export let isPanning: boolean = false;
 	export let isDragging: boolean = false;
 
+	// Check if this element is a text element (used for cursor and editing)
+	$: isTextElement = ['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'span', 'a', 'button', 'label'].includes(element.type);
+
 	// Determine cursor based on tool, panning state, and dragging state
 	$: elementCursor =
 		isDragging && ($currentTool === 'hand' || isPanning) ? 'grabbing' :
 		$currentTool === 'hand' || isPanning ? 'grab' :
+		$currentTool === 'text' && isTextElement ? 'text' :
 		$currentTool === 'scale' ? 'crosshair' :
 		'default';
 
 	// Handle mousedown - select element and potentially start drag
 	function handleMouseDown(e: MouseEvent) {
+		// If we're in text editing mode, don't handle mousedown
+		if ($interactionState.mode === 'editing-text') {
+			return;
+		}
+
 		const tool = get(currentTool);
 
 		// Don't stop propagation if hand tool or space panning is active - let canvas handle it
@@ -36,6 +50,16 @@
 		}
 
 		e.stopPropagation();
+
+		// Text tool: start editing text element immediately on click
+		if (tool === 'text' && isTextElement) {
+			// Capture click position for caret placement once editor mounts
+			textToolClickPosition = { x: e.clientX, y: e.clientY };
+			// Start editing mode
+			startEditingText(element.id);
+			focusTextEditor(textToolClickPosition);
+			return;
+		}
 
 		// Handle selection based on Shift key
 		if (e.shiftKey) {
@@ -70,6 +94,88 @@
 			const currentSelectedElements = get(selectedElements);
 			const newSelectedElements = !isPartOfMultiSelection ? [element] : currentSelectedElements;
 			onStartDrag(e, element, handle, newSelectedElements);
+		}
+	}
+
+	// Handle double-click - enter text editing mode for text elements
+	function handleDoubleClick(e: MouseEvent) {
+		e.stopPropagation();
+
+		// Only text-based elements can be edited
+		const textElements = ['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'span', 'a', 'button', 'label'];
+		if (textElements.includes(element.type)) {
+			startEditingText(element.id);
+			focusTextEditor({ x: e.clientX, y: e.clientY });
+			// Attempt to mimic native double-click word selection
+			requestAnimationFrame(() => {
+				const selection = window.getSelection();
+				const modify = selection?.modify?.bind(selection);
+				if (selection && modify) {
+					modify('move', 'backward', 'word');
+					modify('extend', 'forward', 'word');
+				}
+			});
+		}
+	}
+
+	// Handle blur - exit text editing mode and save content
+	function handleBlur(e: FocusEvent) {
+		if ($interactionState.editingElementId === element.id) {
+			// Prevent blur if clicking on the properties panel or other UI
+			// This allows users to change text properties without losing focus
+			const relatedTarget = e.relatedTarget as HTMLElement;
+			if (relatedTarget && relatedTarget.closest('.properties-panel, .floating-window')) {
+				return;
+			}
+
+			const target = e.target as HTMLElement;
+			// Use innerHTML to preserve formatting (bold, paragraphs, etc.)
+			let newContent = target.innerHTML || '';
+
+			// Normalize the HTML to remove browser inconsistencies
+			// This helps with comparison and prevents unnecessary updates
+			newContent = newContent
+				.replace(/\s+/g, ' ') // Normalize whitespace
+				.replace(/<br\s*\/?>/gi, '<br>') // Normalize br tags
+				.trim();
+
+			// Set flag to prevent reactive updates during transition
+			justExitedEditing = true;
+
+			// Exit editing mode FIRST - this triggers the {#key} block to destroy/recreate
+			stopEditingText();
+
+			// Normalize the existing content for comparison
+			const normalizedExisting = (element.content || '')
+				.replace(/\s+/g, ' ')
+				.replace(/<br\s*\/?>/gi, '<br>')
+				.trim();
+
+			// THEN update the content via event sourcing if it actually changed
+			if (newContent !== normalizedExisting) {
+				// Use requestAnimationFrame to ensure the update happens after the DOM settles
+				requestAnimationFrame(() => {
+					updateElement(element.id, { content: newContent });
+				});
+			}
+		}
+	}
+
+	// Handle keydown in text editing mode
+	function handleKeyDown(e: KeyboardEvent) {
+		if ($interactionState.editingElementId === element.id) {
+			// Exit editing on Escape
+			if (e.key === 'Escape') {
+				e.preventDefault();
+				(e.target as HTMLElement).blur();
+			}
+			// Exit editing on Enter (for single-line text elements)
+			else if (e.key === 'Enter' && !['textarea', 'p', 'div'].includes(element.type)) {
+				e.preventDefault();
+				(e.target as HTMLElement).blur();
+			}
+			// Stop propagation for all keys when editing to prevent canvas shortcuts
+			e.stopPropagation();
 		}
 	}
 
@@ -113,8 +219,16 @@
 		styles.push(`position: absolute`);
 		styles.push(`left: ${displayPosition.x}px`);
 		styles.push(`top: ${displayPosition.y}px`);
-		styles.push(`width: ${displaySize.width}px`);
-		styles.push(`height: ${displaySize.height}px`);
+
+		// Width and height: use 'auto' for inline-block text elements, otherwise use fixed dimensions
+		if (element.styles.display === 'inline-block') {
+			styles.push(`width: auto`);
+			styles.push(`height: auto`);
+			styles.push(`min-width: 20px`); // Minimum width for empty text
+		} else {
+			styles.push(`width: ${displaySize.width}px`);
+			styles.push(`height: ${displaySize.height}px`);
+		}
 		styles.push(`cursor: ${elementCursor}`);
 
 		// Z-index for stacking order
@@ -129,6 +243,7 @@
 		}
 
 		// Element styles
+		if (element.styles.display) styles.push(`display: ${element.styles.display}`);
 		if (element.styles.backgroundColor) styles.push(`background-color: ${element.styles.backgroundColor}`);
 		if (element.styles.color) styles.push(`color: ${element.styles.color}`);
 		if (element.styles.borderWidth) styles.push(`border-width: ${element.styles.borderWidth}`);
@@ -193,41 +308,149 @@
 
 	// Check if this element is selected
 	$: isSelected = $selectedElements.some(el => el.id === element.id);
+
+	// Check if this element is being edited
+	$: isEditing = $interactionState.editingElementId === element.id;
+
+// Ref to the editable element for manual content management
+let textEditorElement: HTMLDivElement | null = null;
+
+	// Track if we just exited editing to prevent reactive updates during transition
+	let justExitedEditing = false;
+
+// Track pointer position for text tool caret placement
+let textToolClickPosition: { x: number; y: number } | null = null;
+
+// Ensure we focus once per editing session
+let hasFocusedEditor = false;
+
+// Ensure text editor shows current content on entry
+$: if (textEditorElement && isEditing && isTextElement && element.children.length === 0) {
+	if (!justExitedEditing) {
+		textEditorElement.innerHTML = element.content || '';
+	}
+}
+
+// Reset flags when leaving editing mode
+$: if (!isEditing) {
+	textToolClickPosition = null;
+	justExitedEditing = false;
+	hasFocusedEditor = false;
+}
+
+function focusTextEditor(position?: { x: number; y: number } | null) {
+	hasFocusedEditor = true;
+	requestAnimationFrame(() => {
+		const editor =
+			textEditorElement || document.querySelector(`[data-editor-for="${element.id}"]`);
+		if (!(editor instanceof HTMLElement)) {
+			return;
+		}
+
+		editor.focus();
+
+		if (!position) {
+			return;
+		}
+
+		const selection = window.getSelection();
+		if (!selection) {
+			return;
+		}
+
+		const doc = document as DocumentWithCaret;
+		const rangeFromPoint = doc.caretRangeFromPoint?.(position.x, position.y);
+		const range =
+			rangeFromPoint ||
+			(() => {
+				const caretPosition = doc.caretPositionFromPoint?.(position.x, position.y);
+				if (!caretPosition) return null;
+				const r = document.createRange();
+				r.setStart(caretPosition.offsetNode, caretPosition.offset);
+				r.collapse(true);
+				return r;
+			})();
+
+		if (range) {
+			selection.removeAllRanges();
+			selection.addRange(range);
+		} else {
+			// Fallback: place caret at end
+			selection.removeAllRanges();
+			const fallbackRange = document.createRange();
+			fallbackRange.selectNodeContents(editor);
+			fallbackRange.collapse(false);
+			selection.addRange(fallbackRange);
+		}
+
+		textToolClickPosition = null;
+	});
+}
+
+$: if (isEditing && textEditorElement && !hasFocusedEditor) {
+	focusTextEditor(textToolClickPosition);
+}
 </script>
 
 <!-- Canvas element - absolutely positioned, clickable for selection -->
-<div class="canvas-element" data-element-id={element.id} style={elementStyles} on:mousedown={handleMouseDown} role="button" tabindex="0">
-	<!-- Selection indicator - blue outline overlay (Figma/Illustrator style) -->
-	{#if isSelected}
-		<div
-			class="selection-indicator"
-			style="border-radius: inherit;"
-			aria-hidden="true"
-		></div>
-	{/if}
-
-	<!-- Render element content based on type -->
-	{#if element.type === 'img'}
-		<img src={element.src || ''} alt={element.alt || ''} style={imageStyles} />
-	{:else if element.type === 'a'}
-		<a href={element.href || '#'}>{element.content || 'Link'}</a>
-	{:else if element.type === 'button'}
-		<button type="button">{element.content || 'Button'}</button>
-	{:else if element.type === 'input'}
-		<input type="text" placeholder={element.content || 'Input'} />
-	{:else if element.type === 'textarea'}
-		<textarea placeholder={element.content || 'Textarea'}></textarea>
-	{:else}
-		<!-- Text content for other elements -->
-		{element.content || ''}
-	{/if}
-
-	<!-- Render children recursively -->
-	{#each element.children as childId}
-		{#if $designState.elements[childId]}
-			<svelte:self element={$designState.elements[childId]} {isPanning} {isDragging} {onStartDrag} />
+<div
+	class="canvas-element"
+	class:editing-text={isEditing && isTextElement && element.children.length === 0}
+	class:text-element={isTextElement && element.children.length === 0}
+	data-element-id={element.id}
+	style={elementStyles}
+	on:mousedown={handleMouseDown}
+	on:dblclick={handleDoubleClick}
+	role="button"
+	tabindex={isEditing ? -1 : 0}
+>
+		<!-- Selection indicator - blue outline overlay (Figma/Illustrator style) -->
+		{#if isSelected && !isEditing}
+			<div
+				class="selection-indicator"
+				style="border-radius: inherit;"
+				aria-hidden="true"
+			></div>
 		{/if}
-	{/each}
+
+		{#if isEditing && isTextElement && element.children.length === 0}
+			<div
+				class="text-editor"
+				bind:this={textEditorElement}
+				data-editor-for={element.id}
+				contenteditable="true"
+				role="textbox"
+				aria-multiline={element.type === 'span' || element.type === 'label' ? 'false' : 'true'}
+				spellcheck="true"
+				on:blur={handleBlur}
+				on:keydown={handleKeyDown}
+			></div>
+		{:else}
+			<!-- Render element content based on type -->
+			{#if element.type === 'img'}
+			<img src={element.src || ''} alt={element.alt || ''} style={imageStyles} />
+		{:else if element.type === 'a'}
+			<a href={element.href || '#'}>{@html element.content || 'Link'}</a>
+		{:else if element.type === 'button'}
+			<button type="button">{@html element.content || 'Button'}</button>
+		{:else if element.type === 'input'}
+			<input type="text" placeholder={element.content || 'Input'} />
+		{:else if element.type === 'textarea'}
+			<textarea placeholder={element.content || 'Textarea'}></textarea>
+		{:else if isTextElement && element.children.length === 0}
+			<!-- Render text content for leaf text elements (p, h1-h6, span with no children) -->
+			<div class="text-content" data-display-for={element.id}>
+				{@html element.content || ''}
+			</div>
+		{/if}
+		{/if}
+
+		<!-- Render children recursively -->
+		{#each element.children as childId}
+			{#if $designState.elements[childId]}
+				<svelte:self element={$designState.elements[childId]} {isPanning} {isDragging} {onStartDrag} />
+			{/if}
+		{/each}
 </div>
 
 <style>
@@ -237,6 +460,39 @@
 		box-sizing: border-box;
 		pointer-events: auto; /* Allow clicks for selection */
 	}
+
+	/* Allow text selection when in editing mode */
+.canvas-element.editing-text {
+	cursor: text;
+}
+
+.text-editor,
+.text-content {
+	display: block;
+	white-space: pre-wrap;
+	word-break: break-word;
+	overflow-wrap: anywhere;
+	width: 100%;
+	box-sizing: border-box;
+}
+
+.text-content {
+	pointer-events: none;
+}
+
+.text-editor {
+	min-width: 20px;
+	box-sizing: border-box;
+	cursor: text;
+	user-select: text;
+	outline: 2px solid #3b82f6;
+	outline-offset: 2px;
+	white-space: pre-wrap;
+}
+
+.text-editor:focus {
+	outline: 2px solid #3b82f6;
+}
 
 	/* Selection indicator - blue outline overlay (Figma/Illustrator style) */
 	.selection-indicator {

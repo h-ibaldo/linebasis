@@ -46,6 +46,29 @@
 	let radiusFrozenValues: { nw: number; ne: number; se: number; sw: number } | null = null; // Frozen values for visual feedback during independent drag
 	let groupPendingTransforms: Map<string, { position: { x: number; y: number }; size: { width: number; height: number }; rotation?: number }> = new Map();
 
+	// Get actual rendered size for auto-sized elements (inline-block text)
+	function getActualSize(element: Element): { width: number; height: number } {
+		// If element has display: inline-block, get actual rendered size from DOM
+		if (element.styles?.display === 'inline-block') {
+			const domElement = document.querySelector(`[data-element-id="${element.id}"]`);
+			if (domElement) {
+				const rect = domElement.getBoundingClientRect();
+				// Account for viewport scale
+				return {
+					width: rect.width / viewport.scale,
+					height: rect.height / viewport.scale
+				};
+			}
+		}
+		// Otherwise use stored size
+		return element.size;
+	}
+
+	// Get display size for SelectionUI (actual rendered size for auto elements)
+	$: displaySizeForSelection = selectedElements.length === 1
+		? getActualSize(selectedElements[0])
+		: null;
+
 	// Broadcast state to store for CanvasElement to consume
 	$: {
 		// Calculate pending corner radii for independent mode OR when element has individual corners
@@ -107,7 +130,8 @@
 			pendingRotation,
 			pendingRadius,
 			pendingCornerRadii: cornerRadii,
-			groupTransforms: groupPendingTransforms
+			groupTransforms: groupPendingTransforms,
+			editingElementId: null // SelectionOverlay doesn't handle text editing
 		});
 	}
 
@@ -827,6 +851,22 @@
 			// Resize mode
 			interactionMode = 'resizing';
 			resizeHandle = handle;
+
+			// Convert auto-sized (inline-block) text elements to fixed size before resizing
+			if (element.styles?.display === 'inline-block') {
+				const actualSize = getActualSize(element);
+				// Update element to fixed size and remove inline-block
+				updateElementStyles(element.id, { display: undefined });
+				resizeElement(element.id, actualSize, element.position);
+				// Update local state to reflect the new fixed size
+				elementStartCanvas = {
+					x: pos.x,
+					y: pos.y,
+					width: actualSize.width,
+					height: actualSize.height
+				};
+			}
+
 			// Don't set pending values yet - wait until mouse actually moves
 			// This prevents initial jump from coordinate calculation differences
 			pendingSize = null;
@@ -1693,48 +1733,53 @@
 	});
 </script>
 
-<!-- Render selection UI -->
-{#if selectedElements.length === 1}
-	<!-- Single element selection -->
-	<SelectionUI
-		element={selectedElements[0]}
-		{viewport}
-		{isPanning}
-		pendingPosition={activeElementId === selectedElements[0].id ? pendingPosition : null}
-		pendingSize={activeElementId === selectedElements[0].id ? pendingSize : null}
-		pendingRadius={activeElementId === selectedElements[0].id ? pendingRadius : null}
-		activeRadiusCorner={activeElementId === selectedElements[0].id ? radiusCorner : null}
-		radiusCornersIndependent={activeElementId === selectedElements[0].id ? radiusCornersIndependent : false}
-		radiusFrozenValues={activeElementId === selectedElements[0].id ? radiusFrozenValues : null}
-		rotation={commonRotation || 0}
-		onMouseDown={(e, handle) => handleMouseDown(e, selectedElements[0], handle)}
-	/>
-{:else if selectedElements.length > 1 && groupBounds}
-	<!-- Multi-element selection - single bounding box -->
-	<!-- Note: groupBounds already accounts for rotated elements by calculating their corners -->
-	<!-- groupBounds is reactive to groupPendingTransforms, so it updates in real-time during interactions -->
-	<SelectionUI
-		element={{
-			id: 'group',
-			type: 'div',
-			parentId: null,
-			frameId: '',
-			position: { x: groupBounds.x, y: groupBounds.y },
-			size: { width: groupBounds.width, height: groupBounds.height },
-			styles: {},
-			typography: {},
-			spacing: {},
-			children: [],
-			zIndex: 0
-		}}
-		{viewport}
-		{isPanning}
-		pendingPosition={null}
-		pendingSize={null}
-		pendingRadius={null}
-		rotation={0}
-		onMouseDown={(e, handle) => startGroupInteraction(e, handle)}
-	/>
+<!-- Render selection UI (hide when text is being edited) -->
+{#if $interactionState.mode !== 'editing-text'}
+	{#if selectedElements.length === 1}
+		<!-- Single element selection -->
+		<SelectionUI
+			element={{
+				...selectedElements[0],
+				size: displaySizeForSelection || selectedElements[0].size
+			}}
+			{viewport}
+			{isPanning}
+			pendingPosition={activeElementId === selectedElements[0].id ? pendingPosition : null}
+			pendingSize={activeElementId === selectedElements[0].id ? pendingSize : null}
+			pendingRadius={activeElementId === selectedElements[0].id ? pendingRadius : null}
+			activeRadiusCorner={activeElementId === selectedElements[0].id ? radiusCorner : null}
+			radiusCornersIndependent={activeElementId === selectedElements[0].id ? radiusCornersIndependent : false}
+			radiusFrozenValues={activeElementId === selectedElements[0].id ? radiusFrozenValues : null}
+			rotation={commonRotation || 0}
+			onMouseDown={(e, handle) => handleMouseDown(e, selectedElements[0], handle)}
+		/>
+	{:else if selectedElements.length > 1 && groupBounds}
+		<!-- Multi-element selection - single bounding box -->
+		<!-- Note: groupBounds already accounts for rotated elements by calculating their corners -->
+		<!-- groupBounds is reactive to groupPendingTransforms, so it updates in real-time during interactions -->
+		<SelectionUI
+			element={{
+				id: 'group',
+				type: 'div',
+				parentId: null,
+				frameId: '',
+				position: { x: groupBounds.x, y: groupBounds.y },
+				size: { width: groupBounds.width, height: groupBounds.height },
+				styles: {},
+				typography: {},
+				spacing: {},
+				children: [],
+				zIndex: 0
+			}}
+			{viewport}
+			{isPanning}
+			pendingPosition={null}
+			pendingSize={null}
+			pendingRadius={null}
+			rotation={0}
+			onMouseDown={(e, handle) => startGroupInteraction(e, handle)}
+		/>
+	{/if}
 {/if}
 
 <!-- Rotation angle display -->
