@@ -19,6 +19,7 @@ import {
 } from './event-store';
 import { reduceEvents, getInitialState } from './event-reducer';
 import { currentTool } from './tool-store';
+import { interactionState, startEditingText } from './interaction-store';
 
 // ============================================================================
 // Store State
@@ -822,10 +823,110 @@ export function selectAll(): void {
 export function setupKeyboardShortcuts(): (() => void) | undefined {
 	if (typeof window === 'undefined') return;
 
+	const textElementTypes = new Set(['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'span', 'a', 'button', 'label']);
+
+	const getTextShortcutCommand = (e: KeyboardEvent):
+		| 'bold'
+		| 'italic'
+		| 'underline'
+		| 'strikeThrough'
+		| 'insertOrderedList'
+		| 'insertUnorderedList'
+		| 'justifyLeft'
+		| 'justifyCenter'
+		| 'justifyRight'
+		| 'justifyFull'
+		| null => {
+		if (!(e.metaKey || e.ctrlKey)) {
+			return null;
+		}
+
+		const key = e.key.toLowerCase();
+		const { shiftKey } = e;
+
+		if (!shiftKey) {
+			if (key === 'b') return 'bold';
+			if (key === 'i') return 'italic';
+			if (key === 'u') return 'underline';
+			return null;
+		}
+
+		if (key === 'x') return 'strikeThrough';
+
+		switch (key) {
+			case 'l':
+				return 'justifyLeft';
+			case 'e':
+				return 'justifyCenter';
+			case 'r':
+				return 'justifyRight';
+			case 'j':
+				return 'justifyFull';
+			default:
+		}
+
+		if (e.code === 'Digit7') return 'insertOrderedList';
+		if (e.code === 'Digit8') return 'insertUnorderedList';
+
+		return null;
+	};
+
+	const applyTextShortcutToSelection = (command: NonNullable<ReturnType<typeof getTextShortcutCommand>>) => {
+		const selected = get(selectedElements);
+		if (selected.length !== 1) return false;
+
+		const [element] = selected;
+		if (!element || !textElementTypes.has(element.type) || element.children.length > 0) {
+			return false;
+		}
+
+		const { editingElementId } = get(interactionState);
+		if (editingElementId) {
+			return false;
+		}
+
+		startEditingText(element.id);
+
+		const execute = () => {
+			const editor = document.querySelector(`[data-editor-for="${element.id}"]`) as HTMLDivElement | null;
+			if (!editor) {
+				requestAnimationFrame(execute);
+				return;
+			}
+
+			editor.focus();
+
+			const selection = window.getSelection();
+			if (selection) {
+				selection.removeAllRanges();
+				const range = document.createRange();
+				range.selectNodeContents(editor);
+				selection.addRange(range);
+			}
+
+			document.execCommand(command);
+
+			editor.blur();
+		};
+
+		requestAnimationFrame(execute);
+		return true;
+	};
+
 	const handleKeyDown = (e: KeyboardEvent) => {
 		// Don't trigger shortcuts if user is typing in an input/textarea
 		const target = e.target as HTMLElement;
 		const isTyping = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA';
+
+		const textCommand = getTextShortcutCommand(e);
+		if (!isTyping && textCommand) {
+			const applied = applyTextShortcutToSelection(textCommand);
+			if (applied) {
+				e.preventDefault();
+				e.stopPropagation();
+				return;
+			}
+		}
 
 		// Cmd+Z (Mac) or Ctrl+Z (Windows/Linux)
 		if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !e.shiftKey) {

@@ -164,6 +164,61 @@ type DocumentWithCaret = Document & {
 	// Handle keydown in text editing mode
 	function handleKeyDown(e: KeyboardEvent) {
 		if ($interactionState.editingElementId === element.id) {
+			const isModifierPressed = e.metaKey || (e.ctrlKey && !e.metaKey);
+
+			if (isModifierPressed) {
+				const key = e.key.toLowerCase();
+				const { shiftKey } = e;
+
+				const executeCommand = (command: string) => {
+					e.preventDefault();
+					document.execCommand(command);
+				};
+
+				if (!shiftKey) {
+					switch (key) {
+						case 'b':
+							executeCommand('bold');
+							break;
+						case 'i':
+							executeCommand('italic');
+							break;
+						case 'u':
+							executeCommand('underline');
+							break;
+						default:
+					}
+				} else {
+					if (key === 'x') {
+						executeCommand('strikeThrough');
+					} else {
+						switch (key) {
+							case 'l':
+								executeCommand('justifyLeft');
+								break;
+							case 'e':
+								executeCommand('justifyCenter');
+								break;
+							case 'r':
+								executeCommand('justifyRight');
+								break;
+							case 'j':
+								executeCommand('justifyFull');
+								break;
+							default:
+						}
+					}
+				}
+
+				if (shiftKey) {
+					if (e.code === 'Digit7') {
+						executeCommand('insertOrderedList');
+					} else if (e.code === 'Digit8') {
+						executeCommand('insertUnorderedList');
+					}
+				}
+			}
+
 			// Exit editing on Escape
 			if (e.key === 'Escape') {
 				e.preventDefault();

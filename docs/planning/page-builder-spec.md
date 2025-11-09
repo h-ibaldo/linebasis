@@ -659,6 +659,19 @@ Appears when user clicks "Publish" button in toolbar.
 - `Cmd+1` - Fit all frames
 - `Cmd+2` - Fit selected frame
 
+### Text Editing
+
+- `Cmd/Ctrl+B` - Toggle bold
+- `Cmd/Ctrl+I` - Toggle italic
+- `Cmd/Ctrl+U` - Toggle underline
+- `Cmd/Ctrl+Shift+X` - Toggle strikethrough
+- `Cmd/Ctrl+Shift+7` - Toggle ordered list
+- `Cmd/Ctrl+Shift+8` - Toggle unordered list
+- `Cmd/Ctrl+Shift+L` - Align left
+- `Cmd/Ctrl+Shift+E` - Align center
+- `Cmd/Ctrl+Shift+R` - Align right
+- `Cmd/Ctrl+Shift+J` - Justify text
+
 ### Layers
 
 - `Cmd+G` - Group selection (wrap in Div)
