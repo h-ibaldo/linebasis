@@ -743,6 +743,14 @@ export async function wrapSelectedElementsInDiv(): Promise<void> {
 	const pageId = state.currentPageId;
 	if (!pageId) return;
 
+	// Find the common parent of all selected elements
+	// If all elements share the same parent, use that parent
+	// Otherwise, use null (root level)
+	const firstParentId = selected[0].parentId;
+	const commonParent = selected.every(el => el.parentId === firstParentId)
+		? firstParentId
+		: null;
+
 	// Calculate bounding box of all selected elements
 	let minX = Infinity;
 	let minY = Infinity;
@@ -759,9 +767,9 @@ export async function wrapSelectedElementsInDiv(): Promise<void> {
 	const wrapperWidth = maxX - minX;
 	const wrapperHeight = maxY - minY;
 
-	// Create the wrapper div
+	// Create the wrapper div with the common parent
 	const wrapperId = await createElement({
-		parentId: null,
+		parentId: commonParent,
 		pageId,
 		elementType: 'div',
 		position: { x: minX, y: minY },
