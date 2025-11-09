@@ -312,13 +312,51 @@ type DocumentWithCaret = Document & {
 		}
 	}
 
+	// Helper: Convert absolute position (from SelectionOverlay) to parent-relative position
+	function absoluteToRelativePosition(absolutePos: { x: number; y: number }): { x: number; y: number } {
+		// If element has no parent, absolute = relative
+		if (!element.parentId) return absolutePos;
+
+		// Get parent element from store
+		const state = get(designState);
+		const parent = state.elements[element.parentId];
+		if (!parent) return absolutePos;
+
+		// Calculate parent's absolute position
+		let parentAbsX = parent.position.x;
+		let parentAbsY = parent.position.y;
+
+		let currentParent = parent;
+		while (currentParent.parentId) {
+			const grandparent = state.elements[currentParent.parentId];
+			if (!grandparent) break;
+			parentAbsX += grandparent.position.x;
+			parentAbsY += grandparent.position.y;
+			currentParent = grandparent;
+		}
+
+		// Subtract parent's absolute position to get relative position
+		return {
+			x: absolutePos.x - parentAbsX,
+			y: absolutePos.y - parentAbsY
+		};
+	}
+
 	// Get display position/size (pending during interaction, or actual)
-	$: displayPosition =
-		$interactionState.groupTransforms.has(element.id)
-			? $interactionState.groupTransforms.get(element.id)!.position
-			: $interactionState.activeElementId === element.id && $interactionState.pendingPosition
-			? $interactionState.pendingPosition
-			: element.position;
+	$: displayPosition = (() => {
+		// Group transforms are already in the correct coordinate space
+		if ($interactionState.groupTransforms.has(element.id)) {
+			return $interactionState.groupTransforms.get(element.id)!.position;
+		}
+
+		// Pending position from SelectionOverlay is in absolute coordinates, convert to relative
+		if ($interactionState.activeElementId === element.id && $interactionState.pendingPosition) {
+			return absoluteToRelativePosition($interactionState.pendingPosition);
+		}
+
+		// Default: use element's stored position (already relative)
+		return element.position;
+	})();
 
 	$: displaySize =
 		$interactionState.groupTransforms.has(element.id)

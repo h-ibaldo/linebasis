@@ -12,7 +12,7 @@
 	import { onDestroy } from 'svelte';
 	import { get } from 'svelte/store';
 	import type { Element } from '$lib/types/events';
-	import { moveElement, resizeElement, rotateElement, moveElementsGroup, resizeElementsGroup, rotateElementsGroup, selectElement, selectElements, clearSelection, addToSelection, removeFromSelection, updateElementStyles } from '$lib/stores/design-store';
+	import { designState, moveElement, resizeElement, rotateElement, moveElementsGroup, resizeElementsGroup, rotateElementsGroup, selectElement, selectElements, clearSelection, addToSelection, removeFromSelection, updateElementStyles } from '$lib/stores/design-store';
 	import { interactionState } from '$lib/stores/interaction-store';
 	import { currentTool } from '$lib/stores/tool-store';
 	import { CANVAS_INTERACTION } from '$lib/constants/canvas';
@@ -462,12 +462,64 @@
 		return { x: newX, y: newY, width: newWidth, height: newHeight };
 	}
 
-	// Helper: Get display position (pending or actual)
+	// Helper: Get absolute position (relative to canvas, not parent)
+	function getAbsolutePosition(element: Element): { x: number; y: number } {
+		let absX = element.position.x;
+		let absY = element.position.y;
+
+		// Traverse up parent chain to calculate absolute position
+		let currentElement = element;
+		const state = get(designState);
+
+		while (currentElement.parentId) {
+			const parent = state.elements[currentElement.parentId];
+			if (!parent) break;
+
+			absX += parent.position.x;
+			absY += parent.position.y;
+			currentElement = parent;
+		}
+
+		return { x: absX, y: absY };
+	}
+
+	// Helper: Convert absolute position to parent-relative position
+	function absoluteToRelativePosition(element: Element, absolutePos: { x: number; y: number }): { x: number; y: number } {
+		const state = get(designState);
+
+		// If element has no parent, absolute = relative
+		if (!element.parentId) {
+			return absolutePos;
+		}
+
+		// Get parent's absolute position
+		const parent = state.elements[element.parentId];
+		if (!parent) {
+			return absolutePos;
+		}
+
+		const parentAbsPos = getAbsolutePosition(parent);
+
+		// Return position relative to parent
+		return {
+			x: absolutePos.x - parentAbsPos.x,
+			y: absolutePos.y - parentAbsPos.y
+		};
+	}
+
+	// Helper: Get display position (pending or actual, in absolute coordinates)
 	function getDisplayPosition(element: Element): { x: number; y: number } {
 		if (isGroupInteraction && groupPendingTransforms.has(element.id)) {
 			return groupPendingTransforms.get(element.id)!.position;
 		}
-		return pendingPosition && activeElementId === element.id ? pendingPosition : element.position;
+
+		// If this element is being interacted with and has pending position, use it
+		// Otherwise calculate absolute position from element hierarchy
+		if (pendingPosition && activeElementId === element.id) {
+			return pendingPosition;
+		}
+
+		return getAbsolutePosition(element);
 	}
 
 	// Helper: Get display size (pending or actual)
@@ -575,15 +627,18 @@
 				isGroupInteraction = true;
 				dragStartScreen = { x: startX, y: startY };
 
-				// Store initial bounds for all elements
-				groupStartElements = selectedElements.map(el => ({
-					id: el.id,
-					x: el.position.x,
-					y: el.position.y,
-					width: el.size.width,
-					height: el.size.height,
-					rotation: el.rotation || 0
-				}));
+				// Store initial bounds for all elements (use absolute positions)
+				groupStartElements = selectedElements.map(el => {
+					const absPos = getAbsolutePosition(el);
+					return {
+						id: el.id,
+						x: absPos.x,
+						y: absPos.y,
+						width: el.size.width,
+						height: el.size.height,
+						rotation: el.rotation || 0
+					};
+				});
 
 				// Store group bounds (use unrotated bounds for consistent coordinate system)
 				const unrotatedBounds = getUnrotatedGroupBounds(selectedElements);
@@ -616,15 +671,18 @@
 		isGroupInteraction = true;
 		dragStartScreen = { x: e.clientX, y: e.clientY };
 
-		// Store initial bounds for all elements
-		groupStartElements = selectedElements.map(el => ({
-			id: el.id,
-			x: el.position.x,
-			y: el.position.y,
-			width: el.size.width,
-			height: el.size.height,
-			rotation: el.rotation || 0
-		}));
+		// Store initial bounds for all elements (use absolute positions)
+		groupStartElements = selectedElements.map(el => {
+			const absPos = getAbsolutePosition(el);
+			return {
+				id: el.id,
+				x: absPos.x,
+				y: absPos.y,
+				width: el.size.width,
+				height: el.size.height,
+				rotation: el.rotation || 0
+			};
+		});
 
 		// Store group bounds (use unrotated bounds for resize calculations)
 		// This ensures consistent coordinate system when scaling
@@ -1623,10 +1681,14 @@
 			selectElements(groupStartElements.map(el => el.id));
 		} else if (activeElementId) {
 			// Handle single element interaction
+			const activeElement = selectedElements.find(el => el.id === activeElementId);
+
 			if (interactionMode === 'dragging') {
 				if (movedX > CANVAS_INTERACTION.MOVEMENT_THRESHOLD || movedY > CANVAS_INTERACTION.MOVEMENT_THRESHOLD) {
-					if (pendingPosition) {
-						await moveElement(activeElementId, pendingPosition);
+					if (pendingPosition && activeElement) {
+						// Convert absolute position to parent-relative position
+						const relativePos = absoluteToRelativePosition(activeElement, pendingPosition);
+						await moveElement(activeElementId, relativePos);
 					}
 				}
 			} else if (interactionMode === 'resizing') {
@@ -1634,11 +1696,16 @@
 				const positionChanged = movedX > CANVAS_INTERACTION.MOVEMENT_THRESHOLD || movedY > CANVAS_INTERACTION.MOVEMENT_THRESHOLD;
 
 				if (sizeChanged || positionChanged) {
-					if (pendingSize) {
+					if (pendingSize && activeElement) {
+						// Convert absolute position to parent-relative position if needed
+						const relativePos = (positionChanged && pendingPosition)
+							? absoluteToRelativePosition(activeElement, pendingPosition)
+							: undefined;
+
 						await resizeElement(
 							activeElementId,
 							pendingSize,
-							positionChanged && pendingPosition ? pendingPosition : undefined
+							relativePos
 						);
 					}
 				}
@@ -1740,6 +1807,7 @@
 		<SelectionUI
 			element={{
 				...selectedElements[0],
+				position: getAbsolutePosition(selectedElements[0]),
 				size: displaySizeForSelection || selectedElements[0].size
 			}}
 			{viewport}

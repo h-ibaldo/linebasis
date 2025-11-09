@@ -313,6 +313,11 @@ export async function createElement(data: {
 	content?: string;
 }): Promise<string> {
 	const elementId = uuidv4();
+	const state = get(designState);
+
+	// Get frameId from currentFrameId or default to empty string
+	// (Elements belong to frames in the new architecture)
+	const frameId = state.currentFrameId || '';
 
 	await dispatch({
 		id: uuidv4(),
@@ -320,7 +325,13 @@ export async function createElement(data: {
 		timestamp: Date.now(),
 		payload: {
 			elementId,
-			...data
+			parentId: data.parentId,
+			frameId,
+			elementType: data.elementType,
+			position: data.position,
+			size: data.size,
+			styles: data.styles,
+			content: data.content
 		}
 	});
 
@@ -721,6 +732,62 @@ let clipboard: Element[] = [];
 /**
  * Copy selected elements to clipboard
  */
+/**
+ * Wrap selected elements in a new div container
+ */
+export async function wrapSelectedElementsInDiv(): Promise<void> {
+	const selected = get(selectedElements);
+	if (selected.length === 0) return;
+
+	const state = get(designState);
+	const pageId = state.currentPageId;
+	if (!pageId) return;
+
+	// Calculate bounding box of all selected elements
+	let minX = Infinity;
+	let minY = Infinity;
+	let maxX = -Infinity;
+	let maxY = -Infinity;
+
+	for (const el of selected) {
+		minX = Math.min(minX, el.position.x);
+		minY = Math.min(minY, el.position.y);
+		maxX = Math.max(maxX, el.position.x + (el.size.width || 0));
+		maxY = Math.max(maxY, el.position.y + (el.size.height || 0));
+	}
+
+	const wrapperWidth = maxX - minX;
+	const wrapperHeight = maxY - minY;
+
+	// Create the wrapper div
+	const wrapperId = await createElement({
+		parentId: null,
+		pageId,
+		elementType: 'div',
+		position: { x: minX, y: minY },
+		size: { width: wrapperWidth, height: wrapperHeight },
+		styles: {
+			display: 'block'
+		}
+	});
+
+	// Reparent each selected element to the wrapper and adjust its position
+	for (let i = 0; i < selected.length; i++) {
+		const el = selected[i];
+
+		// Move element to be a child of the wrapper at index i
+		await reorderElement(el.id, wrapperId, i);
+
+		// Update position to be relative to wrapper
+		const relativeX = el.position.x - minX;
+		const relativeY = el.position.y - minY;
+		await moveElement(el.id, { x: relativeX, y: relativeY });
+	}
+
+	// Select the new wrapper div
+	selectElement(wrapperId);
+}
+
 export function copyElements(): void {
 	const selected = get(selectedElements);
 	if (selected.length === 0) return;
@@ -843,7 +910,7 @@ export function setupKeyboardShortcuts(): (() => void) | undefined {
 					return { type: 'exec', command: 'justifyCenter' };
 				case 'KeyR':
 					return { type: 'exec', command: 'justifyRight' };
-				case 'KeyG':
+				case 'KeyJ':
 					return { type: 'exec', command: 'justifyFull' };
 				default:
 			}
@@ -855,7 +922,7 @@ export function setupKeyboardShortcuts(): (() => void) | undefined {
 					return { type: 'exec', command: 'justifyCenter' };
 				case 'r':
 					return { type: 'exec', command: 'justifyRight' };
-				case 'g':
+				case 'j':
 					return { type: 'exec', command: 'justifyFull' };
 				default:
 			}
@@ -988,6 +1055,19 @@ export function setupKeyboardShortcuts(): (() => void) | undefined {
 				e.stopPropagation();
 				return;
 			}
+		}
+
+		// Cmd+G (Mac) or Ctrl+G (Windows) - Wrap selection in div
+		if (
+			(e.metaKey || e.ctrlKey) &&
+			!e.altKey &&
+			!e.shiftKey &&
+			e.key.toLowerCase() === 'g' &&
+			!isTyping
+		) {
+			e.preventDefault();
+			wrapSelectedElementsInDiv();
+			return;
 		}
 
 		// Cmd+Z (Mac) or Ctrl+Z (Windows/Linux)

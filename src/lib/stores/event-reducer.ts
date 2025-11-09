@@ -343,10 +343,13 @@ function handleReorderElement(state: DesignState, event: ReorderElementEvent): D
 	}
 
 	// Update element parent
+	// When moving to a parent element, clear frameId (element is now nested)
+	// When moving to frame root (parentId = null), keep existing frameId
 	newElements[elementId] = {
 		...element,
 		parentId: newParentId,
-		zIndex: newIndex
+		zIndex: newIndex,
+		...(newParentId !== null && { frameId: '' })
 	};
 
 	// Add to new parent

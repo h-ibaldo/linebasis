@@ -670,9 +670,13 @@ Appears when user clicks "Publish" button in toolbar.
 - Align left: `Opt+Cmd+L` (Mac) / `Alt+Ctrl+L` (Windows)
 - Align center: `Opt+Cmd+T` (Mac) / `Alt+Ctrl+T` (Windows)
 - Align right: `Opt+Cmd+R` (Mac) / `Alt+Ctrl+R` (Windows)
-- Align justified: `Opt+Cmd+G` (Mac) / `Alt+Ctrl+G` (Windows)
+- Align justified: `Opt+Cmd+Shift+J` (Mac) / `Alt+Ctrl+Shift+J` (Windows)
 - Increase font size: `Shift+Cmd+.` or `Shift+Cmd+>` (Mac) / `Shift+Ctrl+.` or `Shift+Ctrl+>` (Windows)
 - Decrease font size: `Shift+Cmd+,` or `Shift+Cmd+<` (Mac) / `Shift+Ctrl+,` or `Shift+Ctrl+<` (Windows)
+
+### Layout & Structure
+
+- Wrap selection in div: `Opt+Cmd+G` (Mac) / `Alt+Ctrl+G` (Windows)
 
 ### Layers
 
