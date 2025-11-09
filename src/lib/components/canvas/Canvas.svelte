@@ -321,13 +321,15 @@
 						startEditingText(newElementId);
 						// Focus after a brief delay to ensure element is rendered
 						setTimeout(() => {
-							const el = document.querySelector(`[data-element-id="${newElementId}"]`);
-							if (el instanceof HTMLElement) {
-								el.focus();
+							const editor = document.querySelector(
+								`[data-editor-for="${newElementId}"]`
+							);
+							if (editor instanceof HTMLElement) {
+								editor.focus();
 								// Select all text for easy replacement
 								const selection = window.getSelection();
 								const range = document.createRange();
-								range.selectNodeContents(el);
+								range.selectNodeContents(editor);
 								selection?.removeAllRanges();
 								selection?.addRange(range);
 							}
