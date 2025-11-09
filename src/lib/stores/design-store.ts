@@ -20,6 +20,7 @@ import {
 import { reduceEvents, getInitialState } from './event-reducer';
 import { currentTool } from './tool-store';
 import { interactionState, startEditingText } from './interaction-store';
+import { viewport, screenToCanvas } from './viewport-store';
 
 // ============================================================================
 // Store State
@@ -728,10 +729,9 @@ export function manualSave(): void {
 
 // Clipboard for storing copied elements (in-memory, not system clipboard)
 let clipboard: Element[] = [];
+// Track if clipboard contains cut elements (vs copied elements)
+let isClipboardFromCut = false;
 
-/**
- * Copy selected elements to clipboard
- */
 /**
  * Wrap selected elements in a new div container
  */
@@ -796,12 +796,31 @@ export async function wrapSelectedElementsInDiv(): Promise<void> {
 	selectElement(wrapperId);
 }
 
+/**
+ * Copy selected elements to clipboard
+ */
 export function copyElements(): void {
 	const selected = get(selectedElements);
 	if (selected.length === 0) return;
 
 	// Clone elements (deep copy)
 	clipboard = selected.map((el) => ({ ...el }));
+	isClipboardFromCut = false;
+}
+
+/**
+ * Cut selected elements (copy to clipboard and delete)
+ */
+export async function cutElements(): Promise<void> {
+	const selected = get(selectedElements);
+	if (selected.length === 0) return;
+
+	// Clone elements (deep copy)
+	clipboard = selected.map((el) => ({ ...el }));
+	isClipboardFromCut = true;
+
+	// Then delete the selected elements
+	await Promise.all(selected.map((element) => deleteElement(element.id)));
 }
 
 /**
@@ -819,15 +838,54 @@ export async function pasteElements(): Promise<void> {
 
 	const newElementIds: string[] = [];
 
-	// Paste each element with a small offset
+	// Calculate position offset based on whether this is a cut or copy operation
+	let offsetX = 0;
+	let offsetY = 0;
+
+	if (isClipboardFromCut) {
+		// For cut elements, paste at the center of the visible screen
+		// Get current viewport state
+		const currentViewport = get(viewport);
+
+		// Get screen dimensions (use window.innerWidth/Height as canvas fills the screen)
+		const screenWidth = typeof window !== 'undefined' ? window.innerWidth : 1920;
+		const screenHeight = typeof window !== 'undefined' ? window.innerHeight : 1080;
+
+		// Calculate the center of the screen in canvas coordinates
+		const centerCanvas = screenToCanvas(
+			screenWidth / 2,
+			screenHeight / 2,
+			currentViewport
+		);
+
+		// Calculate the bounding box of clipboard elements
+		const minX = Math.min(...clipboard.map(el => el.position.x));
+		const minY = Math.min(...clipboard.map(el => el.position.y));
+		const maxX = Math.max(...clipboard.map(el => el.position.x + (el.size.width || 0)));
+		const maxY = Math.max(...clipboard.map(el => el.position.y + (el.size.height || 0)));
+
+		// Calculate the center of the clipboard group
+		const groupCenterX = (minX + maxX) / 2;
+		const groupCenterY = (minY + maxY) / 2;
+
+		// Offset to place group center at screen center
+		offsetX = centerCanvas.x - groupCenterX;
+		offsetY = centerCanvas.y - groupCenterY;
+	} else {
+		// For copied elements, paste with small offset from original
+		offsetX = 20;
+		offsetY = 20;
+	}
+
+	// Paste each element with calculated offset
 	for (const element of clipboard) {
 		const newElementId = await createElement({
 			parentId: element.parentId,
 			pageId,
 			elementType: element.type,
 			position: {
-				x: element.position.x + 20, // Offset by 20px
-				y: element.position.y + 20
+				x: element.position.x + offsetX,
+				y: element.position.y + offsetY
 			},
 			size: element.size,
 			styles: element.styles,
@@ -861,6 +919,10 @@ export async function pasteElements(): Promise<void> {
 
 	// Select the newly pasted elements
 	selectElements(newElementIds);
+
+	// Note: We don't reset isClipboardFromCut here
+	// This allows multiple pastes from a cut operation to all paste at screen center
+	// The flag will only be reset when the user does a new copy (Cmd+C)
 }
 
 /**
@@ -1102,6 +1164,11 @@ export function setupKeyboardShortcuts(): (() => void) | undefined {
 		else if ((e.metaKey || e.ctrlKey) && e.key === 'c' && !isTyping) {
 			e.preventDefault();
 			copyElements();
+		}
+		// Cmd+X (cut)
+		else if ((e.metaKey || e.ctrlKey) && e.key === 'x' && !isTyping) {
+			e.preventDefault();
+			cutElements();
 		}
 		// Cmd+V (paste)
 		else if ((e.metaKey || e.ctrlKey) && e.key === 'v' && !isTyping) {

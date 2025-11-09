@@ -25,6 +25,7 @@
 	} from '$lib/stores/design-store';
 	import { currentTool } from '$lib/stores/tool-store';
 	import { interactionState, startEditingText } from '$lib/stores/interaction-store';
+	import { viewport as viewportStore } from '$lib/stores/viewport-store';
 	import { CANVAS_INTERACTION } from '$lib/constants/canvas';
 	import CanvasElement from './CanvasElement.svelte';
 	import BaselineGrid from './BaselineGrid.svelte';
@@ -33,6 +34,9 @@
 
 	let canvasElement: HTMLDivElement;
 	let viewport = { x: 0, y: 0, scale: 1 };
+
+	// Sync local viewport state with the store
+	$: viewportStore.set(viewport);
 	let isDragging = false;
 	let dragStart = { x: 0, y: 0 };
 	let isPanning = false;
@@ -208,13 +212,8 @@
 			}
 		}
 
-		// Move tool: Clear selection when clicking empty canvas (unless SHIFT is held for additive selection)
-		// SelectionBox handles drag selection and will merge with existing selection if SHIFT is held
+		// Move tool: Let SelectionBox handle all selection logic (drag selection, click selection, etc.)
 		if (tool === 'move') {
-			// Don't clear selection if SHIFT is held - let SelectionBox handle it
-			if (!e.shiftKey) {
-				clearSelection();
-			}
 			return;
 		}
 

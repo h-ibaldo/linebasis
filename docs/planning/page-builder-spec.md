@@ -634,6 +634,7 @@ Appears when user clicks "Publish" button in toolbar.
 - `Cmd+Z` - Undo
 - `Cmd+Shift+Z` - Redo
 - `Cmd+C` - Copy
+- `Cmd+X` - Cut
 - `Cmd+V` - Paste
 - `Cmd+D` - Duplicate
 - `Delete` / `Backspace` - Delete selection
