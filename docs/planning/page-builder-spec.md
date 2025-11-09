@@ -667,10 +667,12 @@ Appears when user clicks "Publish" button in toolbar.
 - `Cmd/Ctrl+Shift+X` - Toggle strikethrough
 - `Cmd/Ctrl+Shift+7` - Toggle ordered list
 - `Cmd/Ctrl+Shift+8` - Toggle unordered list
-- `Cmd/Ctrl+Shift+L` - Align left
-- `Cmd/Ctrl+Shift+E` - Align center
-- `Cmd/Ctrl+Shift+R` - Align right
-- `Cmd/Ctrl+Shift+J` - Justify text
+- Align left: `Opt+Cmd+L` (Mac) / `Alt+Ctrl+L` (Windows)
+- Align center: `Opt+Cmd+T` (Mac) / `Alt+Ctrl+T` (Windows)
+- Align right: `Opt+Cmd+R` (Mac) / `Alt+Ctrl+R` (Windows)
+- Align justified: `Opt+Cmd+G` (Mac) / `Alt+Ctrl+G` (Windows)
+- Increase font size: `Shift+Cmd+.` or `Shift+Cmd+>` (Mac) / `Shift+Ctrl+.` or `Shift+Ctrl+>` (Windows)
+- Decrease font size: `Shift+Cmd+,` or `Shift+Cmd+<` (Mac) / `Shift+Ctrl+,` or `Shift+Ctrl+<` (Windows)
 
 ### Layers
 

@@ -132,7 +132,7 @@ This document details the key user workflows and journeys through the LineBasis 
    - Draggin will create a text element with fixed width and height
    - The caret appears, blinking
    - User can start typing
-   - While editing, verify formatting shortcuts: `Cmd/Ctrl+B` (bold), `Cmd/Ctrl+I` (italic), `Cmd/Ctrl+U` (underline), `Cmd/Ctrl+Shift+X` (strikethrough), `Cmd/Ctrl+Shift+7/8` (ordered/bulleted lists), and `Cmd/Ctrl+Shift+L/E/R/J` (text alignment)
+   - While editing, verify formatting shortcuts: `Cmd/Ctrl+B` (bold), `Cmd/Ctrl+I` (italic), `Cmd/Ctrl+U` (underline), `Cmd/Ctrl+Shift+X` (strikethrough), `Cmd/Ctrl+Shift+7/8` (ordered/bulleted lists), `Opt+Cmd+L/T/R/G` or `Alt+Ctrl+L/T/R/G` (text alignment), and `Shift+Cmd+./>` or `Shift+Ctrl+./>` plus `Shift+Cmd+,/<` or `Shift+Ctrl+,/<` (font size tweaks)
    - If user clicks outside a selected EMPTY text element, delete the element
    - In Properties window:
      - Style Preset: paragraph

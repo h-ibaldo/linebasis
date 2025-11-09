@@ -8,7 +8,15 @@
 	 * - NO selection or interaction logic (handled by SelectionOverlay)
 	 */
 
-	import { designState, selectElement, selectedElements, addToSelection, removeFromSelection, updateElement } from '$lib/stores/design-store';
+	import {
+		designState,
+		selectElement,
+		selectedElements,
+		addToSelection,
+		removeFromSelection,
+		updateElement,
+		updateElementTypography
+	} from '$lib/stores/design-store';
 import { interactionState, startEditingText, stopEditingText } from '$lib/stores/interaction-store';
 
 type DocumentWithCaret = Document & {
@@ -161,62 +169,132 @@ type DocumentWithCaret = Document & {
 		}
 	}
 
+	type ShortcutAction =
+		| { type: 'exec'; command: 'bold' | 'italic' | 'underline' | 'strikeThrough' | 'insertOrderedList' | 'insertUnorderedList' | 'justifyLeft' | 'justifyCenter' | 'justifyRight' | 'justifyFull' }
+		| { type: 'font-size'; delta: number };
+
+	function getShortcutAction(e: KeyboardEvent): ShortcutAction | null {
+		const hasPrimaryModifier = e.metaKey || (e.ctrlKey && !e.metaKey);
+		const code = e.code;
+		const key = e.key.toLowerCase();
+
+		// Alignment: Option/Alt + primary modifier
+		if (e.altKey && hasPrimaryModifier) {
+			switch (code) {
+				case 'KeyL':
+					return { type: 'exec', command: 'justifyLeft' };
+				case 'KeyT':
+					return { type: 'exec', command: 'justifyCenter' };
+				case 'KeyR':
+					return { type: 'exec', command: 'justifyRight' };
+				case 'KeyG':
+					return { type: 'exec', command: 'justifyFull' };
+				default:
+			}
+
+			// Fallback for environments without `code`
+			switch (key) {
+				case 'l':
+					return { type: 'exec', command: 'justifyLeft' };
+				case 't':
+					return { type: 'exec', command: 'justifyCenter' };
+				case 'r':
+					return { type: 'exec', command: 'justifyRight' };
+				case 'g':
+					return { type: 'exec', command: 'justifyFull' };
+				default:
+			}
+		}
+
+		if (!hasPrimaryModifier) {
+			return null;
+		}
+
+		// Font size: Shift + primary modifier (+/-)
+		if (e.shiftKey && !e.altKey) {
+			if (code === 'Period' || key === '>' || key === '.') {
+				return { type: 'font-size', delta: 1 };
+			}
+			if (code === 'Comma' || key === '<' || key === ',') {
+				return { type: 'font-size', delta: -1 };
+			}
+		}
+
+		// Strikethrough
+		if (e.shiftKey && !e.altKey && (code === 'KeyX' || key === 'x')) {
+			return { type: 'exec', command: 'strikeThrough' };
+		}
+
+		// Lists
+		if (e.shiftKey && !e.altKey) {
+			if (e.code === 'Digit7') {
+				return { type: 'exec', command: 'insertOrderedList' };
+			}
+			if (e.code === 'Digit8') {
+				return { type: 'exec', command: 'insertUnorderedList' };
+			}
+		}
+
+		// Basic formatting (no shift/alt)
+		if (!e.shiftKey && !e.altKey) {
+			switch (code) {
+				case 'KeyB':
+					return { type: 'exec', command: 'bold' };
+				case 'KeyI':
+					return { type: 'exec', command: 'italic' };
+				case 'KeyU':
+					return { type: 'exec', command: 'underline' };
+				default:
+			}
+
+			switch (key) {
+				case 'b':
+					return { type: 'exec', command: 'bold' };
+				case 'i':
+					return { type: 'exec', command: 'italic' };
+				case 'u':
+					return { type: 'exec', command: 'underline' };
+				default:
+			}
+		}
+
+		return null;
+	}
+
+	function adjustFontSize(delta: number) {
+		const rawSize = element.typography.fontSize || '16px';
+		const match = rawSize.match(/^(-?\d*\.?\d+)([a-z%]*)$/i);
+		const value = match ? parseFloat(match[1]) : parseFloat(rawSize);
+		const unit = match && match[2] ? match[2] : 'px';
+
+		const baseValue = Number.isNaN(value) ? 16 : value;
+
+		const newValue = Math.max(1, baseValue + delta);
+		const formatted = `${Number(newValue.toFixed(2))}${unit}`;
+
+		updateElementTypography(element.id, { fontSize: formatted });
+
+		if (textEditorElement) {
+			textEditorElement.style.fontSize = formatted;
+		}
+	}
+
 	// Handle keydown in text editing mode
 	function handleKeyDown(e: KeyboardEvent) {
 		if ($interactionState.editingElementId === element.id) {
-			const isModifierPressed = e.metaKey || (e.ctrlKey && !e.metaKey);
+			const action = getShortcutAction(e);
 
-			if (isModifierPressed) {
-				const key = e.key.toLowerCase();
-				const { shiftKey } = e;
+			if (action) {
+				e.preventDefault();
+				e.stopPropagation();
 
-				const executeCommand = (command: string) => {
-					e.preventDefault();
-					document.execCommand(command);
-				};
-
-				if (!shiftKey) {
-					switch (key) {
-						case 'b':
-							executeCommand('bold');
-							break;
-						case 'i':
-							executeCommand('italic');
-							break;
-						case 'u':
-							executeCommand('underline');
-							break;
-						default:
-					}
+				if (action.type === 'exec') {
+					document.execCommand(action.command);
 				} else {
-					if (key === 'x') {
-						executeCommand('strikeThrough');
-					} else {
-						switch (key) {
-							case 'l':
-								executeCommand('justifyLeft');
-								break;
-							case 'e':
-								executeCommand('justifyCenter');
-								break;
-							case 'r':
-								executeCommand('justifyRight');
-								break;
-							case 'j':
-								executeCommand('justifyFull');
-								break;
-							default:
-						}
-					}
+					adjustFontSize(action.delta);
 				}
 
-				if (shiftKey) {
-					if (e.code === 'Digit7') {
-						executeCommand('insertOrderedList');
-					} else if (e.code === 'Digit8') {
-						executeCommand('insertUnorderedList');
-					}
-				}
+				return;
 			}
 
 			// Exit editing on Escape

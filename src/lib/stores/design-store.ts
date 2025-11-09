@@ -825,53 +825,109 @@ export function setupKeyboardShortcuts(): (() => void) | undefined {
 
 	const textElementTypes = new Set(['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'span', 'a', 'button', 'label']);
 
-	const getTextShortcutCommand = (e: KeyboardEvent):
-		| 'bold'
-		| 'italic'
-		| 'underline'
-		| 'strikeThrough'
-		| 'insertOrderedList'
-		| 'insertUnorderedList'
-		| 'justifyLeft'
-		| 'justifyCenter'
-		| 'justifyRight'
-		| 'justifyFull'
-		| null => {
-		if (!(e.metaKey || e.ctrlKey)) {
-			return null;
-		}
+	type TextShortcutAction =
+		| { type: 'exec'; command: 'bold' | 'italic' | 'underline' | 'strikeThrough' | 'insertOrderedList' | 'insertUnorderedList' | 'justifyLeft' | 'justifyCenter' | 'justifyRight' | 'justifyFull' }
+		| { type: 'font-size'; delta: number };
 
+	const getTextShortcutAction = (e: KeyboardEvent): TextShortcutAction | null => {
+		const hasPrimaryModifier = e.metaKey || (e.ctrlKey && !e.metaKey);
+		const code = e.code;
 		const key = e.key.toLowerCase();
-		const { shiftKey } = e;
 
-		if (!shiftKey) {
-			if (key === 'b') return 'bold';
-			if (key === 'i') return 'italic';
-			if (key === 'u') return 'underline';
+		// Alignment: Option/Alt + primary modifier
+		if (e.altKey && hasPrimaryModifier) {
+			switch (code) {
+				case 'KeyL':
+					return { type: 'exec', command: 'justifyLeft' };
+				case 'KeyT':
+					return { type: 'exec', command: 'justifyCenter' };
+				case 'KeyR':
+					return { type: 'exec', command: 'justifyRight' };
+				case 'KeyG':
+					return { type: 'exec', command: 'justifyFull' };
+				default:
+			}
+
+			switch (key) {
+				case 'l':
+					return { type: 'exec', command: 'justifyLeft' };
+				case 't':
+					return { type: 'exec', command: 'justifyCenter' };
+				case 'r':
+					return { type: 'exec', command: 'justifyRight' };
+				case 'g':
+					return { type: 'exec', command: 'justifyFull' };
+				default:
+			}
+		}
+
+		if (!hasPrimaryModifier) {
 			return null;
 		}
 
-		if (key === 'x') return 'strikeThrough';
-
-		switch (key) {
-			case 'l':
-				return 'justifyLeft';
-			case 'e':
-				return 'justifyCenter';
-			case 'r':
-				return 'justifyRight';
-			case 'j':
-				return 'justifyFull';
-			default:
+		// Font size adjustments: Shift + primary modifier (+/-)
+		if (e.shiftKey && !e.altKey) {
+			if (code === 'Period' || key === '>' || key === '.') {
+				return { type: 'font-size', delta: 1 };
+			}
+			if (code === 'Comma' || key === '<' || key === ',') {
+				return { type: 'font-size', delta: -1 };
+			}
 		}
 
-		if (e.code === 'Digit7') return 'insertOrderedList';
-		if (e.code === 'Digit8') return 'insertUnorderedList';
+		// Strikethrough
+		if (e.shiftKey && !e.altKey && (code === 'KeyX' || key === 'x')) {
+			return { type: 'exec', command: 'strikeThrough' };
+		}
+
+		// Lists
+		if (e.shiftKey && !e.altKey) {
+			if (e.code === 'Digit7') {
+				return { type: 'exec', command: 'insertOrderedList' };
+			}
+			if (e.code === 'Digit8') {
+				return { type: 'exec', command: 'insertUnorderedList' };
+			}
+		}
+
+		// Basic formatting (no shift/alt)
+		if (!e.shiftKey && !e.altKey) {
+			switch (code) {
+				case 'KeyB':
+					return { type: 'exec', command: 'bold' };
+				case 'KeyI':
+					return { type: 'exec', command: 'italic' };
+				case 'KeyU':
+					return { type: 'exec', command: 'underline' };
+				default:
+			}
+
+			switch (key) {
+				case 'b':
+					return { type: 'exec', command: 'bold' };
+				case 'i':
+					return { type: 'exec', command: 'italic' };
+				case 'u':
+					return { type: 'exec', command: 'underline' };
+				default:
+			}
+		}
 
 		return null;
 	};
 
-	const applyTextShortcutToSelection = (command: NonNullable<ReturnType<typeof getTextShortcutCommand>>) => {
+	const computeNextFontSize = (rawSize: string | undefined, delta: number): string => {
+		const raw = rawSize || '16px';
+		const match = raw.match(/^(-?\d*\.?\d+)([a-z%]*)$/i);
+		const value = match ? parseFloat(match[1]) : parseFloat(raw);
+		const unit = match && match[2] ? match[2] : 'px';
+		const baseValue = Number.isNaN(value) ? 16 : value;
+		const newValue = Math.max(1, baseValue + delta);
+
+		return `${Number(newValue.toFixed(2))}${unit}`;
+	};
+
+	const applyTextShortcutToSelection = (action: TextShortcutAction) => {
 		const selected = get(selectedElements);
 		if (selected.length !== 1) return false;
 
@@ -883,6 +939,12 @@ export function setupKeyboardShortcuts(): (() => void) | undefined {
 		const { editingElementId } = get(interactionState);
 		if (editingElementId) {
 			return false;
+		}
+
+		if (action.type === 'font-size') {
+			const nextSize = computeNextFontSize(element.typography.fontSize, action.delta);
+			updateElementTypography(element.id, { fontSize: nextSize });
+			return true;
 		}
 
 		startEditingText(element.id);
@@ -904,7 +966,7 @@ export function setupKeyboardShortcuts(): (() => void) | undefined {
 				selection.addRange(range);
 			}
 
-			document.execCommand(command);
+			document.execCommand(action.command);
 
 			editor.blur();
 		};
@@ -918,9 +980,9 @@ export function setupKeyboardShortcuts(): (() => void) | undefined {
 		const target = e.target as HTMLElement;
 		const isTyping = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA';
 
-		const textCommand = getTextShortcutCommand(e);
-		if (!isTyping && textCommand) {
-			const applied = applyTextShortcutToSelection(textCommand);
+		const textAction = getTextShortcutAction(e);
+		if (!isTyping && textAction) {
+			const applied = applyTextShortcutToSelection(textAction);
 			if (applied) {
 				e.preventDefault();
 				e.stopPropagation();
@@ -1049,3 +1111,4 @@ export function setupKeyboardShortcuts(): (() => void) | undefined {
 		window.removeEventListener('keydown', handleKeyDown);
 	};
 }
+
