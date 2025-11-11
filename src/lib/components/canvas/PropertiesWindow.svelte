@@ -23,7 +23,14 @@
 	$: isTextElement = elementType && ['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'span', 'a', 'button', 'label'].includes(elementType);
 </script>
 
-<FloatingWindow title="Properties" defaultX={-320} defaultY={-400} storageKey="properties-window-pos">
+<FloatingWindow
+	title="Properties"
+	defaultX={-320}
+	defaultY={-400}
+	storageKey="properties-window-pos"
+	minWidth={200}
+	maxWidth={250}
+>
 	<div class="properties-panel">
 		{#if isMultiSelection}
 			<MultiSelectionProperties elements={$selectedElements} />
@@ -48,7 +55,9 @@
 
 <style>
 	.properties-panel {
-		min-width: 260px;
+		min-width: 200px;
+		max-width: 250px;
+		width: 100%;
 	}
 
 	.no-selection,

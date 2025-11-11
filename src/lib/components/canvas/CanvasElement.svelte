@@ -386,10 +386,24 @@ type DocumentWithCaret = Document & {
 	$: elementStyles = (() => {
 		const styles: string[] = [];
 
+		// Check if parent has auto layout enabled (and child doesn't ignore it)
+		const parent = element.parentId ? $designState.elements[element.parentId] : null;
+		const parentHasAutoLayout = parent?.autoLayout?.enabled || false;
+		const childIgnoresAutoLayout = element.autoLayout?.ignoreAutoLayout || false;
+		const useRelativePosition = parentHasAutoLayout && !childIgnoresAutoLayout;
+
 		// Position and size - use pending values during interaction
-		styles.push(`position: absolute`);
-		styles.push(`left: ${displayPosition.x}px`);
-		styles.push(`top: ${displayPosition.y}px`);
+		if (useRelativePosition) {
+			// Auto layout: children use relative positioning
+			styles.push(`position: relative`);
+			styles.push(`left: 0`);
+			styles.push(`top: 0`);
+		} else {
+			// Freeform: use absolute positioning with coordinates
+			styles.push(`position: absolute`);
+			styles.push(`left: ${displayPosition.x}px`);
+			styles.push(`top: ${displayPosition.y}px`);
+		}
 
 		// Width and height: use 'auto' for inline-block text elements, otherwise use fixed dimensions
 		if (element.styles.display === 'inline-block') {
@@ -415,6 +429,42 @@ type DocumentWithCaret = Document & {
 
 		// Element styles
 		if (element.styles.display) styles.push(`display: ${element.styles.display}`);
+
+		// Auto Layout (Flexbox)
+		if (element.autoLayout?.enabled) {
+			styles.push(`display: flex`);
+
+			// Flex direction
+			const direction = element.autoLayout.direction || 'row';
+			if (direction === 'row-wrap') {
+				styles.push(`flex-direction: row`);
+				styles.push(`flex-wrap: wrap`);
+			} else {
+				styles.push(`flex-direction: ${direction}`);
+			}
+
+			// Justify content (main axis alignment)
+			if (element.autoLayout.justifyContent) {
+				styles.push(`justify-content: ${element.autoLayout.justifyContent}`);
+			}
+
+			// Align items (cross axis alignment)
+			if (element.autoLayout.alignItems) {
+				styles.push(`align-items: ${element.autoLayout.alignItems}`);
+			}
+
+			// Gap between children
+			if (element.autoLayout.gap) {
+				styles.push(`gap: ${element.autoLayout.gap}`);
+			}
+		}
+
+		// Per-child: Ignore auto layout (absolute positioning override)
+		if (element.autoLayout?.ignoreAutoLayout && element.parentId) {
+			styles.push(`position: absolute`);
+			// Keep the x, y coordinates for absolute positioning
+		}
+
 		if (element.styles.backgroundColor) styles.push(`background-color: ${element.styles.backgroundColor}`);
 		if (element.styles.color) styles.push(`color: ${element.styles.color}`);
 		if (element.styles.borderWidth) styles.push(`border-width: ${element.styles.borderWidth}`);

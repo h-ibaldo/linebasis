@@ -14,7 +14,8 @@
 	export let title: string;
 	export let defaultX = 20;
 	export let defaultY = 80;
-	export let minWidth = 280;
+export let minWidth = 280;
+export let maxWidth: number | undefined = undefined;
 	export let storageKey: string;
 	export let visible = true;
 
@@ -102,7 +103,9 @@
 {#if visible}
 	<div
 		class="floating-window"
-		style="left: {x}px; top: {y}px; min-width: {minWidth}px;"
+		style="left: {x}px; top: {y}px;"
+		style:min-width={`${minWidth}px`}
+		style:max-width={maxWidth ? `${maxWidth}px` : undefined}
 		on:mousedown={handleMouseDown}
 		on:mouseup={handleMouseUp}
 		on:click={handleClick}

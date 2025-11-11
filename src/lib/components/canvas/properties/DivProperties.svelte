@@ -9,7 +9,7 @@
 	 */
 
 	import type { Element } from '$lib/types/events';
-	import { updateElementStyles, toggleFrame } from '$lib/stores/design-store';
+	import { updateElementStyles, toggleFrame, updateElementAutoLayout } from '$lib/stores/design-store';
 
 	export let element: Element;
 
@@ -43,6 +43,22 @@
 	function updateOpacity(e: Event) {
 		const input = e.target as HTMLInputElement;
 		updateElementStyles(element.id, { opacity: parseFloat(input.value) });
+	}
+
+	// Auto Layout
+	$: autoLayoutEnabled = element.autoLayout?.enabled || false;
+	$: direction = element.autoLayout?.direction || 'row';
+	$: justifyContent = element.autoLayout?.justifyContent || 'flex-start';
+	$: alignItems = element.autoLayout?.alignItems || 'flex-start';
+	$: gap = element.autoLayout?.gap || '0px';
+	$: ignoreAutoLayout = element.autoLayout?.ignoreAutoLayout || false;
+
+	async function handleToggleAutoLayout() {
+		await updateElementAutoLayout(element.id, { enabled: !autoLayoutEnabled });
+	}
+
+	async function updateAutoLayoutProperty(property: string, value: string | boolean) {
+		await updateElementAutoLayout(element.id, { [property]: value });
 	}
 </script>
 
@@ -125,6 +141,211 @@
 			</label>
 		</div>
 	</div>
+
+	<!-- Auto Layout -->
+	<div class="property-section">
+		<h3>Auto Layout</h3>
+		<label class="toggle-label">
+			<input type="checkbox" checked={autoLayoutEnabled} on:change={handleToggleAutoLayout} />
+			<span>{autoLayoutEnabled ? 'Enabled (Flex)' : 'Disabled (Freeform)'}</span>
+		</label>
+
+		{#if autoLayoutEnabled}
+			<p class="hint">Children use relative positioning</p>
+
+			<!-- Direction -->
+			<div class="property-row">
+				<span class="property-label">Direction</span>
+				<div class="radio-group">
+					<label class="radio-option">
+						<input
+							type="radio"
+							name="direction"
+							value="row"
+							checked={direction === 'row'}
+							on:change={() => updateAutoLayoutProperty('direction', 'row')}
+						/>
+						<span>Row</span>
+					</label>
+					<label class="radio-option">
+						<input
+							type="radio"
+							name="direction"
+							value="column"
+							checked={direction === 'column'}
+							on:change={() => updateAutoLayoutProperty('direction', 'column')}
+						/>
+						<span>Column</span>
+					</label>
+					<label class="radio-option">
+						<input
+							type="radio"
+							name="direction"
+							value="row-wrap"
+							checked={direction === 'row-wrap'}
+							on:change={() => updateAutoLayoutProperty('direction', 'row-wrap')}
+						/>
+						<span>Wrap</span>
+					</label>
+				</div>
+			</div>
+
+			<!-- Justify Content (main axis) -->
+			<div class="property-row">
+				<span class="property-label">Justify</span>
+				<div class="radio-group">
+					<label class="radio-option">
+						<input
+							type="radio"
+							name="justify"
+							value="flex-start"
+							checked={justifyContent === 'flex-start'}
+							on:change={() => updateAutoLayoutProperty('justifyContent', 'flex-start')}
+						/>
+						<span>Start</span>
+					</label>
+					<label class="radio-option">
+						<input
+							type="radio"
+							name="justify"
+							value="center"
+							checked={justifyContent === 'center'}
+							on:change={() => updateAutoLayoutProperty('justifyContent', 'center')}
+						/>
+						<span>Center</span>
+					</label>
+					<label class="radio-option">
+						<input
+							type="radio"
+							name="justify"
+							value="flex-end"
+							checked={justifyContent === 'flex-end'}
+							on:change={() => updateAutoLayoutProperty('justifyContent', 'flex-end')}
+						/>
+						<span>End</span>
+					</label>
+					<label class="radio-option">
+						<input
+							type="radio"
+							name="justify"
+							value="space-between"
+							checked={justifyContent === 'space-between'}
+							on:change={() => updateAutoLayoutProperty('justifyContent', 'space-between')}
+						/>
+						<span>Between</span>
+					</label>
+					<label class="radio-option">
+						<input
+							type="radio"
+							name="justify"
+							value="space-around"
+							checked={justifyContent === 'space-around'}
+							on:change={() => updateAutoLayoutProperty('justifyContent', 'space-around')}
+						/>
+						<span>Around</span>
+					</label>
+					<label class="radio-option">
+						<input
+							type="radio"
+							name="justify"
+							value="space-evenly"
+							checked={justifyContent === 'space-evenly'}
+							on:change={() => updateAutoLayoutProperty('justifyContent', 'space-evenly')}
+						/>
+						<span>Evenly</span>
+					</label>
+				</div>
+			</div>
+
+			<!-- Align Items (cross axis) -->
+			<div class="property-row">
+				<span class="property-label">Align</span>
+				<div class="radio-group">
+					<label class="radio-option">
+						<input
+							type="radio"
+							name="align"
+							value="flex-start"
+							checked={alignItems === 'flex-start'}
+							on:change={() => updateAutoLayoutProperty('alignItems', 'flex-start')}
+						/>
+						<span>Start</span>
+					</label>
+					<label class="radio-option">
+						<input
+							type="radio"
+							name="align"
+							value="center"
+							checked={alignItems === 'center'}
+							on:change={() => updateAutoLayoutProperty('alignItems', 'center')}
+						/>
+						<span>Center</span>
+					</label>
+					<label class="radio-option">
+						<input
+							type="radio"
+							name="align"
+							value="flex-end"
+							checked={alignItems === 'flex-end'}
+							on:change={() => updateAutoLayoutProperty('alignItems', 'flex-end')}
+						/>
+						<span>End</span>
+					</label>
+					<label class="radio-option">
+						<input
+							type="radio"
+							name="align"
+							value="stretch"
+							checked={alignItems === 'stretch'}
+							on:change={() => updateAutoLayoutProperty('alignItems', 'stretch')}
+						/>
+						<span>Stretch</span>
+					</label>
+					<label class="radio-option">
+						<input
+							type="radio"
+							name="align"
+							value="baseline"
+							checked={alignItems === 'baseline'}
+							on:change={() => updateAutoLayoutProperty('alignItems', 'baseline')}
+						/>
+						<span>Baseline</span>
+					</label>
+				</div>
+			</div>
+
+			<!-- Gap -->
+			<div class="property-row">
+				<label>
+					<span>Gap</span>
+					<input
+						type="text"
+						value={gap}
+						placeholder="0px"
+						on:input={(e) => updateAutoLayoutProperty('gap', e.currentTarget.value)}
+					/>
+				</label>
+			</div>
+		{/if}
+	</div>
+
+	<!-- Per-Child: Ignore Auto Layout -->
+	{#if element.parentId}
+		<div class="property-section">
+			<h3>Positioning</h3>
+			<label class="toggle-label">
+				<input
+					type="checkbox"
+					checked={ignoreAutoLayout}
+					on:change={(e) => updateAutoLayoutProperty('ignoreAutoLayout', e.currentTarget.checked)}
+				/>
+				<span>Ignore parent's auto layout</span>
+			</label>
+			{#if ignoreAutoLayout}
+				<p class="hint">This element uses absolute positioning</p>
+			{/if}
+		</div>
+	{/if}
 
 	<!-- Element Info -->
 	<div class="property-section">
@@ -221,6 +442,53 @@
 
 	.toggle-label input[type='checkbox'] {
 		cursor: pointer;
+	}
+
+	.property-label {
+		color: #666;
+		font-size: 12px;
+		font-weight: 500;
+		margin-bottom: 4px;
+	}
+
+	.radio-group {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 6px;
+	}
+
+	.radio-option {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		padding: 6px 10px;
+		background: #f5f5f5;
+		border: 1px solid #e0e0e0;
+		border-radius: 4px;
+		cursor: pointer;
+		font-size: 12px;
+		transition: all 0.15s ease;
+		user-select: none;
+	}
+
+	.radio-option:hover {
+		background: #e8e8e8;
+		border-color: #d0d0d0;
+	}
+
+	.radio-option input[type='radio'] {
+		cursor: pointer;
+		margin: 0;
+	}
+
+	.radio-option input[type='radio']:checked + span {
+		font-weight: 600;
+		color: #333;
+	}
+
+	.radio-option:has(input[type='radio']:checked) {
+		background: #e0e7ff;
+		border-color: #6366f1;
 	}
 
 	.hint {

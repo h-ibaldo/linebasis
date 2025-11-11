@@ -8,7 +8,7 @@
 import { writable, derived, get } from 'svelte/store';
 import type { Writable, Readable } from 'svelte/store';
 import { v4 as uuidv4 } from 'uuid';
-import type { DesignEvent, DesignState, Element, Page, Component } from '$lib/types/events';
+import type { DesignEvent, DesignState, Element, Page, Component, AutoLayoutStyle } from '$lib/types/events';
 import {
 	initDB,
 	appendEvent,
@@ -553,6 +553,21 @@ export async function updateElementSpacing(
 	});
 }
 
+export async function updateElementAutoLayout(
+	elementId: string,
+	autoLayout: Partial<AutoLayoutStyle>
+): Promise<void> {
+	await dispatch({
+		id: uuidv4(),
+		type: 'UPDATE_AUTO_LAYOUT',
+		timestamp: Date.now(),
+		payload: {
+			elementId,
+			autoLayout
+		}
+	});
+}
+
 export async function toggleFrame(
 	elementId: string,
 	isFrame: boolean,
@@ -797,14 +812,179 @@ export async function wrapSelectedElementsInDiv(): Promise<void> {
 }
 
 /**
- * Copy selected elements to clipboard
+ * Unwrap selected div - move its children out and delete the wrapper
+ */
+export async function unwrapSelectedDiv(): Promise<void> {
+	const selected = get(selectedElements);
+	if (selected.length !== 1) return;
+
+	const wrapper = selected[0];
+	if (wrapper.type !== 'div' || wrapper.children.length === 0) return;
+
+	const state = get(designState);
+	const childrenToSelect: string[] = [];
+
+	// Get wrapper's absolute position
+	const wrapperX = wrapper.position.x;
+	const wrapperY = wrapper.position.y;
+	const parentId = wrapper.parentId;
+
+	// Move each child out of the wrapper
+	for (const childId of wrapper.children) {
+		const child = state.elements[childId];
+		if (!child) continue;
+
+		childrenToSelect.push(childId);
+
+		// Calculate absolute position
+		const absoluteX = wrapperX + child.position.x;
+		const absoluteY = wrapperY + child.position.y;
+
+		// Move child to wrapper's parent
+		await reorderElement(childId, parentId, 0);
+
+		// Update position to absolute
+		await moveElement(childId, { x: absoluteX, y: absoluteY });
+	}
+
+	// Delete the wrapper
+	await deleteElement(wrapper.id);
+
+	// Select the children that were moved out
+	if (childrenToSelect.length > 0) {
+		selectElements(childrenToSelect);
+	}
+}
+
+/**
+ * Toggle auto-layout on selected elements
+ * - If one div is selected: toggle its auto-layout property
+ * - If multiple elements are selected: wrap them in a div with auto-layout enabled
+ */
+export async function toggleAutoLayout(): Promise<void> {
+	const selected = get(selectedElements);
+	if (selected.length === 0) return;
+
+	// Single element selected: toggle auto-layout
+	if (selected.length === 1) {
+		const element = selected[0];
+		if (element.type === 'div') {
+			const currentAutoLayout = element.autoLayout?.enabled || false;
+			await updateElementAutoLayout(element.id, {
+				enabled: !currentAutoLayout,
+				direction: 'row',
+				justifyContent: 'flex-start',
+				alignItems: 'flex-start',
+				gap: '0px'
+			});
+		}
+		return;
+	}
+
+	// Multiple elements selected: wrap in div with auto-layout enabled
+	const state = get(designState);
+	const pageId = state.currentPageId;
+	if (!pageId) return;
+
+	// Find the common parent
+	const firstParentId = selected[0].parentId;
+	const commonParent = selected.every(el => el.parentId === firstParentId)
+		? firstParentId
+		: null;
+
+	// Calculate bounding box
+	let minX = Infinity;
+	let minY = Infinity;
+	let maxX = -Infinity;
+	let maxY = -Infinity;
+
+	for (const el of selected) {
+		minX = Math.min(minX, el.position.x);
+		minY = Math.min(minY, el.position.y);
+		maxX = Math.max(maxX, el.position.x + (el.size.width || 0));
+		maxY = Math.max(maxY, el.position.y + (el.size.height || 0));
+	}
+
+	const wrapperWidth = maxX - minX;
+	const wrapperHeight = maxY - minY;
+
+	// Create wrapper div with auto-layout enabled
+	const wrapperId = await createElement({
+		parentId: commonParent,
+		pageId,
+		elementType: 'div',
+		position: { x: minX, y: minY },
+		size: { width: wrapperWidth, height: wrapperHeight },
+		styles: {
+			display: 'flex'
+		}
+	});
+
+	// Enable auto-layout on the wrapper
+	await updateElementAutoLayout(wrapperId, {
+		enabled: true,
+		direction: 'row',
+		justifyContent: 'flex-start',
+		alignItems: 'flex-start',
+		gap: '0px'
+	});
+
+	// Reparent each selected element to the wrapper and adjust position
+	for (let i = 0; i < selected.length; i++) {
+		const el = selected[i];
+		await reorderElement(el.id, wrapperId, i);
+
+		// Update position to be relative to wrapper
+		const relativeX = el.position.x - minX;
+		const relativeY = el.position.y - minY;
+		await moveElement(el.id, { x: relativeX, y: relativeY });
+	}
+
+	// Select the new wrapper div
+	selectElement(wrapperId);
+}
+
+/**
+ * Helper: Get all descendant elements of a given element
+ */
+function getAllDescendants(elementId: string, state: DesignState): Element[] {
+	const element = state.elements[elementId];
+	if (!element) return [];
+
+	const descendants: Element[] = [];
+
+	// Add direct children
+	for (const childId of element.children) {
+		const child = state.elements[childId];
+		if (child) {
+			descendants.push(child);
+			// Recursively add grandchildren
+			descendants.push(...getAllDescendants(childId, state));
+		}
+	}
+
+	return descendants;
+}
+
+/**
+ * Copy selected elements to clipboard (including their children)
  */
 export function copyElements(): void {
 	const selected = get(selectedElements);
 	if (selected.length === 0) return;
 
+	const state = get(designState);
+	const elementsToCopy = new Set<Element>();
+
+	// Add selected elements and all their descendants
+	for (const el of selected) {
+		elementsToCopy.add(el);
+		const descendants = getAllDescendants(el.id, state);
+		descendants.forEach(desc => elementsToCopy.add(desc));
+	}
+
 	// Clone elements (deep copy)
-	clipboard = selected.map((el) => ({ ...el }));
+	clipboard = Array.from(elementsToCopy).map((el) => ({ ...el }));
 	isClipboardFromCut = false;
 }
 
@@ -815,11 +995,21 @@ export async function cutElements(): Promise<void> {
 	const selected = get(selectedElements);
 	if (selected.length === 0) return;
 
+	const state = get(designState);
+	const elementsToCopy = new Set<Element>();
+
+	// Add selected elements and all their descendants
+	for (const el of selected) {
+		elementsToCopy.add(el);
+		const descendants = getAllDescendants(el.id, state);
+		descendants.forEach(desc => elementsToCopy.add(desc));
+	}
+
 	// Clone elements (deep copy)
-	clipboard = selected.map((el) => ({ ...el }));
+	clipboard = Array.from(elementsToCopy).map((el) => ({ ...el }));
 	isClipboardFromCut = true;
 
-	// Then delete the selected elements
+	// Then delete only the selected elements (children will be deleted automatically)
 	await Promise.all(selected.map((element) => deleteElement(element.id)));
 }
 
@@ -830,13 +1020,21 @@ export async function pasteElements(): Promise<void> {
 	if (clipboard.length === 0) return;
 
 	const state = get(designState);
-	const pageId = state.currentPageId;
-	if (!pageId) return;
+	const currentPageId = state.currentPageId;
+	if (!currentPageId) return;
+
+	// Narrow type for use in nested function
+	const pageId: string = currentPageId;
 
 	// Clear selection first
 	clearSelection();
 
-	const newElementIds: string[] = [];
+	// Create a map from old IDs to new IDs
+	const oldToNewIdMap = new Map<string, string>();
+
+	// Identify root elements (elements whose parent is not in clipboard or is null)
+	const clipboardIds = new Set(clipboard.map(el => el.id));
+	const rootElements = clipboard.filter(el => !el.parentId || !clipboardIds.has(el.parentId));
 
 	// Calculate position offset based on whether this is a cut or copy operation
 	let offsetX = 0;
@@ -858,11 +1056,11 @@ export async function pasteElements(): Promise<void> {
 			currentViewport
 		);
 
-		// Calculate the bounding box of clipboard elements
-		const minX = Math.min(...clipboard.map(el => el.position.x));
-		const minY = Math.min(...clipboard.map(el => el.position.y));
-		const maxX = Math.max(...clipboard.map(el => el.position.x + (el.size.width || 0)));
-		const maxY = Math.max(...clipboard.map(el => el.position.y + (el.size.height || 0)));
+		// Calculate the bounding box of ROOT clipboard elements only
+		const minX = Math.min(...rootElements.map(el => el.position.x));
+		const minY = Math.min(...rootElements.map(el => el.position.y));
+		const maxX = Math.max(...rootElements.map(el => el.position.x + (el.size.width || 0)));
+		const maxY = Math.max(...rootElements.map(el => el.position.y + (el.size.height || 0)));
 
 		// Calculate the center of the clipboard group
 		const groupCenterX = (minX + maxX) / 2;
@@ -877,37 +1075,54 @@ export async function pasteElements(): Promise<void> {
 		offsetY = 20;
 	}
 
-	// Paste each element with calculated offset
-	for (const element of clipboard) {
-		const newElementId = await createElement({
-			parentId: element.parentId,
+	// Recursive function to paste an element and its descendants
+	async function pasteElementTree(element: Element, isRoot: boolean): Promise<string> {
+		// Determine new parent ID
+		let newParentId: string | null;
+		if (element.parentId && oldToNewIdMap.has(element.parentId)) {
+			// Parent is in clipboard, use its new ID
+			newParentId = oldToNewIdMap.get(element.parentId)!;
+		} else if (element.parentId && !clipboardIds.has(element.parentId)) {
+			// Parent is NOT in clipboard, keep original parent reference
+			newParentId = element.parentId;
+		} else {
+			// Parent is null or not applicable
+			newParentId = null;
+		}
+
+		// Apply offset only to root elements
+		const position = isRoot
+			? { x: element.position.x + offsetX, y: element.position.y + offsetY }
+			: { x: element.position.x, y: element.position.y };
+
+		// Create the new element
+		const createData: Parameters<typeof createElement>[0] = {
+			parentId: newParentId,
 			pageId,
 			elementType: element.type,
-			position: {
-				x: element.position.x + offsetX,
-				y: element.position.y + offsetY
-			},
+			position,
 			size: element.size,
 			styles: element.styles,
 			content: element.content
-		});
+		};
+		const newElementId = await createElement(createData);
 
-		newElementIds.push(newElementId);
+		// Map old ID to new ID
+		oldToNewIdMap.set(element.id, newElementId);
 
-		// Copy typography and spacing if they exist
+		// Copy additional properties
 		if (Object.keys(element.typography || {}).length > 0) {
 			await updateElementTypography(newElementId, element.typography);
 		}
 		if (Object.keys(element.spacing || {}).length > 0) {
 			await updateElementSpacing(newElementId, element.spacing);
 		}
-
-		// Copy rotation if it exists
+		if (element.autoLayout && Object.keys(element.autoLayout).length > 0) {
+			await updateElementAutoLayout(newElementId, element.autoLayout);
+		}
 		if (element.rotation && element.rotation !== 0) {
 			await rotateElement(newElementId, element.rotation);
 		}
-
-		// Copy other properties
 		if (element.alt || element.href || element.src) {
 			await updateElement(newElementId, {
 				alt: element.alt,
@@ -915,10 +1130,25 @@ export async function pasteElements(): Promise<void> {
 				src: element.src
 			});
 		}
+
+		// Recursively paste children
+		const children = clipboard.filter(el => el.parentId === element.id);
+		for (const child of children) {
+			await pasteElementTree(child, false);
+		}
+
+		return newElementId;
 	}
 
-	// Select the newly pasted elements
-	selectElements(newElementIds);
+	// Paste all root elements (and their descendants recursively)
+	const newRootElementIds: string[] = [];
+	for (const rootElement of rootElements) {
+		const newId = await pasteElementTree(rootElement, true);
+		newRootElementIds.push(newId);
+	}
+
+	// Select the newly pasted root elements
+	selectElements(newRootElementIds);
 
 	// Note: We don't reset isClipboardFromCut here
 	// This allows multiple pastes from a cut operation to all paste at screen center
@@ -1140,6 +1370,20 @@ export function setupKeyboardShortcuts(): (() => void) | undefined {
 			return;
 		}
 
+		// Shift+A - Toggle auto-layout
+		if (
+			e.shiftKey &&
+			!e.metaKey &&
+			!e.ctrlKey &&
+			!e.altKey &&
+			e.key.toLowerCase() === 'a' &&
+			!isTyping
+		) {
+			e.preventDefault();
+			toggleAutoLayout();
+			return;
+		}
+
 		// Cmd+Z (Mac) or Ctrl+Z (Windows/Linux)
 		if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !e.shiftKey) {
 			e.preventDefault();
@@ -1245,6 +1489,17 @@ export function setupKeyboardShortcuts(): (() => void) | undefined {
 				});
 			}
 		}
+		// Cmd+Backspace (Mac) or Ctrl+Backspace (Windows) - Unwrap selected div
+		if (
+			(e.metaKey || e.ctrlKey) &&
+			(e.key === 'Backspace' || e.key === 'Delete') &&
+			!isTyping
+		) {
+			e.preventDefault();
+			unwrapSelectedDiv();
+			return;
+		}
+
 		// Delete or Backspace - delete selected elements
 		else if ((e.key === 'Delete' || e.key === 'Backspace') && !isTyping) {
 			e.preventDefault();

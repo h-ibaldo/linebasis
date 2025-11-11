@@ -27,6 +27,7 @@ export type EventType =
 	| 'GROUP_UPDATE_STYLES'
 	| 'UPDATE_TYPOGRAPHY'
 	| 'UPDATE_SPACING'
+	| 'UPDATE_AUTO_LAYOUT'
 	// Frame operations
 	| 'CREATE_FRAME'
 	| 'UPDATE_FRAME'
@@ -203,6 +204,14 @@ export interface UpdateSpacingEvent extends BaseEvent {
 	};
 }
 
+export interface UpdateAutoLayoutEvent extends BaseEvent {
+	type: 'UPDATE_AUTO_LAYOUT';
+	payload: {
+		elementId: string;
+		autoLayout: Partial<AutoLayoutStyle>;
+	};
+}
+
 // ============================================================================
 // Frame Events
 // ============================================================================
@@ -350,6 +359,7 @@ export type DesignEvent =
 	| UpdateStylesEvent
 	| UpdateTypographyEvent
 	| UpdateSpacingEvent
+	| UpdateAutoLayoutEvent
 	| CreateFrameEvent
 	| UpdateFrameEvent
 	| DeleteFrameEvent
@@ -455,6 +465,15 @@ export interface SpacingStyle {
 	paddingLeft: string;
 }
 
+export interface AutoLayoutStyle {
+	enabled: boolean; // Toggle between freeform (false) and auto layout (true)
+	direction: 'row' | 'column' | 'row-wrap'; // Flex direction
+	justifyContent: 'flex-start' | 'flex-end' | 'center' | 'space-between' | 'space-around' | 'space-evenly'; // Main axis alignment
+	alignItems: 'flex-start' | 'flex-end' | 'center' | 'stretch' | 'baseline'; // Cross axis alignment
+	gap: string; // Gap between children (e.g., "8px", "16px")
+	ignoreAutoLayout?: boolean; // Per-child property: if true, child uses position: absolute
+}
+
 export interface Element {
 	id: string;
 	type: ElementType;
@@ -466,6 +485,7 @@ export interface Element {
 	styles: Partial<ElementStyles>;
 	typography: Partial<TypographyStyle>;
 	spacing: Partial<SpacingStyle>;
+	autoLayout?: Partial<AutoLayoutStyle>; // Auto layout (flexbox) configuration
 	content?: string;
 	alt?: string;
 	href?: string;

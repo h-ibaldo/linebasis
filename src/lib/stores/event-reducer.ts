@@ -28,6 +28,7 @@ import type {
 	UpdateStylesEvent,
 	UpdateTypographyEvent,
 	UpdateSpacingEvent,
+	UpdateAutoLayoutEvent,
 	CreateFrameEvent,
 	UpdateFrameEvent,
 	DeleteFrameEvent,
@@ -109,6 +110,8 @@ export function reduceEvent(state: DesignState, event: DesignEvent): DesignState
 			return handleUpdateTypography(state, event);
 		case 'UPDATE_SPACING':
 			return handleUpdateSpacing(state, event);
+		case 'UPDATE_AUTO_LAYOUT':
+			return handleUpdateAutoLayout(state, event);
 
 		// Frame operations
 		case 'CREATE_FRAME':
@@ -166,6 +169,7 @@ function handleCreateElement(state: DesignState, event: CreateElementEvent): Des
 		styles: styles || {},
 		typography: {},
 		spacing: {},
+		autoLayout: {},
 		content,
 		children: [],
 		zIndex: maxZIndex + 1
@@ -526,6 +530,27 @@ function handleUpdateSpacing(state: DesignState, event: UpdateSpacingEvent): Des
 				spacing: {
 					...element.spacing,
 					...spacing
+				}
+			}
+		}
+	};
+}
+
+function handleUpdateAutoLayout(state: DesignState, event: UpdateAutoLayoutEvent): DesignState {
+	const { elementId, autoLayout } = event.payload;
+	const element = state.elements[elementId];
+
+	if (!element) return state;
+
+	return {
+		...state,
+		elements: {
+			...state.elements,
+			[elementId]: {
+				...element,
+				autoLayout: {
+					...element.autoLayout,
+					...autoLayout
 				}
 			}
 		}

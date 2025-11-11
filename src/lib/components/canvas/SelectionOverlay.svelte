@@ -46,10 +46,18 @@
 	let radiusFrozenValues: { nw: number; ne: number; se: number; sw: number } | null = null; // Frozen values for visual feedback during independent drag
 	let groupPendingTransforms: Map<string, { position: { x: number; y: number }; size: { width: number; height: number }; rotation?: number }> = new Map();
 
-	// Get actual rendered size for auto-sized elements (inline-block text)
+	// Get actual rendered size for auto-sized elements (inline-block text, auto layout)
 	function getActualSize(element: Element): { width: number; height: number } {
-		// If element has display: inline-block, get actual rendered size from DOM
-		if (element.styles?.display === 'inline-block') {
+		const state = get(designState);
+
+		// Check if element is in auto layout mode
+		const parent = element.parentId ? state.elements[element.parentId] : null;
+		const parentHasAutoLayout = parent?.autoLayout?.enabled || false;
+		const childIgnoresAutoLayout = element.autoLayout?.ignoreAutoLayout || false;
+		const isInAutoLayout = parentHasAutoLayout && !childIgnoresAutoLayout;
+
+		// If element has display: inline-block OR is in auto layout, get actual rendered size from DOM
+		if (element.styles?.display === 'inline-block' || isInAutoLayout) {
 			const domElement = document.querySelector(`[data-element-id="${element.id}"]`);
 			if (domElement) {
 				const rect = domElement.getBoundingClientRect();
@@ -464,13 +472,36 @@
 
 	// Helper: Get absolute position (relative to canvas, not parent)
 	function getAbsolutePosition(element: Element): { x: number; y: number } {
+		const state = get(designState);
+
+		// Check if element is in auto layout mode (parent has auto layout and child doesn't ignore it)
+		const parent = element.parentId ? state.elements[element.parentId] : null;
+		const parentHasAutoLayout = parent?.autoLayout?.enabled || false;
+		const childIgnoresAutoLayout = element.autoLayout?.ignoreAutoLayout || false;
+		const isInAutoLayout = parentHasAutoLayout && !childIgnoresAutoLayout;
+
+		// If in auto layout, get actual rendered position from DOM
+		if (isInAutoLayout) {
+			const domElement = document.querySelector(`[data-element-id="${element.id}"]`);
+			if (domElement) {
+				const rect = domElement.getBoundingClientRect();
+				const canvasElement = document.querySelector('.canvas');
+				if (canvasElement) {
+					const canvasRect = canvasElement.getBoundingClientRect();
+					// Convert screen coordinates to canvas coordinates
+					return {
+						x: (rect.left - canvasRect.left - viewport.x) / viewport.scale,
+						y: (rect.top - canvasRect.top - viewport.y) / viewport.scale
+					};
+				}
+			}
+		}
+
+		// Otherwise, use stored coordinates and traverse parent chain
 		let absX = element.position.x;
 		let absY = element.position.y;
 
-		// Traverse up parent chain to calculate absolute position
 		let currentElement = element;
-		const state = get(designState);
-
 		while (currentElement.parentId) {
 			const parent = state.elements[currentElement.parentId];
 			if (!parent) break;
@@ -527,7 +558,7 @@
 		if (isGroupInteraction && groupPendingTransforms.has(element.id)) {
 			return groupPendingTransforms.get(element.id)!.size;
 		}
-		return pendingSize && activeElementId === element.id ? pendingSize : element.size;
+		return pendingSize && activeElementId === element.id ? pendingSize : getActualSize(element);
 	}
 
 	// Helper: Get display rotation (pending or actual)

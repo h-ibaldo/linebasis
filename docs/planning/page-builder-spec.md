@@ -630,6 +630,7 @@ Appears when user clicks "Publish" button in toolbar.
 
 ### General
 
+- `Cmd+K` - Toggle keyboard shortcuts modal
 - `Cmd+S` - Save
 - `Cmd+Z` - Undo
 - `Cmd+Shift+Z` - Redo
