@@ -10,7 +10,7 @@ import type {
 	DesignEvent,
 	DesignState,
 	Element,
-	Frame,
+	View,
 	Page,
 	Component,
 	CreateElementEvent,
@@ -20,7 +20,7 @@ import type {
 	ResizeElementEvent,
 	RotateElementEvent,
 	ReorderElementEvent,
-	ToggleFrameEvent,
+	ToggleViewEvent,
 	GroupMoveElementsEvent,
 	GroupResizeElementsEvent,
 	GroupRotateElementsEvent,
@@ -29,10 +29,10 @@ import type {
 	UpdateTypographyEvent,
 	UpdateSpacingEvent,
 	UpdateAutoLayoutEvent,
-	CreateFrameEvent,
-	UpdateFrameEvent,
-	DeleteFrameEvent,
-	ResizeFrameEvent,
+	CreateViewEvent,
+	UpdateViewEvent,
+	DeleteViewEvent,
+	ResizeViewEvent,
 	CreatePageEvent,
 	UpdatePageEvent,
 	DeletePageEvent,
@@ -49,12 +49,12 @@ import type {
 export function getInitialState(): DesignState {
 	return {
 		pages: {},
-		frames: {},
+		views: {},
 		elements: {},
 		components: {},
 		pageOrder: [],
 		currentPageId: null,
-		currentFrameId: null,
+		currentViewId: null,
 		selectedElementIds: []
 	};
 }
@@ -92,8 +92,8 @@ export function reduceEvent(state: DesignState, event: DesignEvent): DesignState
 			return handleRotateElement(state, event);
 		case 'REORDER_ELEMENT':
 			return handleReorderElement(state, event);
-		case 'TOGGLE_FRAME':
-			return handleToggleFrame(state, event);
+		case 'TOGGLE_VIEW':
+			return handleToggleView(state, event);
 		case 'GROUP_MOVE_ELEMENTS':
 			return handleGroupMoveElements(state, event);
 		case 'GROUP_RESIZE_ELEMENTS':
@@ -113,15 +113,15 @@ export function reduceEvent(state: DesignState, event: DesignEvent): DesignState
 		case 'UPDATE_AUTO_LAYOUT':
 			return handleUpdateAutoLayout(state, event);
 
-		// Frame operations
-		case 'CREATE_FRAME':
-			return handleCreateFrame(state, event);
-		case 'UPDATE_FRAME':
-			return handleUpdateFrame(state, event);
-		case 'DELETE_FRAME':
-			return handleDeleteFrame(state, event);
-		case 'RESIZE_FRAME':
-			return handleResizeFrame(state, event);
+		// View operations (breakpoint views)
+		case 'CREATE_VIEW':
+			return handleCreateView(state, event);
+		case 'UPDATE_VIEW':
+			return handleUpdateView(state, event);
+		case 'DELETE_VIEW':
+			return handleDeleteView(state, event);
+		case 'RESIZE_VIEW':
+			return handleResizeView(state, event);
 
 		// Page operations
 		case 'CREATE_PAGE':
@@ -153,7 +153,7 @@ export function reduceEvent(state: DesignState, event: DesignEvent): DesignState
 // ============================================================================
 
 function handleCreateElement(state: DesignState, event: CreateElementEvent): DesignState {
-	const { elementId, parentId, frameId, elementType, position, size, styles, content } =
+	const { elementId, parentId, viewId, elementType, position, size, styles, content } =
 		event.payload;
 
 	// Calculate next z-index: find highest z-index among all elements and add 1
@@ -163,7 +163,7 @@ function handleCreateElement(state: DesignState, event: CreateElementEvent): Des
 		id: elementId,
 		type: elementType,
 		parentId,
-		frameId,
+		viewId,
 		position,
 		size,
 		styles: styles || {},
@@ -186,19 +186,19 @@ function handleCreateElement(state: DesignState, event: CreateElementEvent): Des
 		};
 	}
 
-	// Add element to frame's root elements if no parent
-	const newFrames = { ...state.frames };
-	if (!parentId && newFrames[frameId]) {
-		newFrames[frameId] = {
-			...newFrames[frameId],
-			elements: [...newFrames[frameId].elements, elementId]
+	// Add element to view's root elements if no parent
+	const newViews = { ...state.views };
+	if (!parentId && newViews[viewId]) {
+		newViews[viewId] = {
+			...newViews[viewId],
+			elements: [...newViews[viewId].elements, elementId]
 		};
 	}
 
 	return {
 		...state,
 		elements: newElements,
-		frames: newFrames
+		views: newViews
 	};
 }
 
@@ -227,7 +227,7 @@ function handleDeleteElement(state: DesignState, event: DeleteElementEvent): Des
 	if (!element) return state;
 
 	const newElements = { ...state.elements };
-	const newFrames = { ...state.frames };
+	const newViews = { ...state.views };
 
 	// Remove from parent's children
 	if (element.parentId && newElements[element.parentId]) {
@@ -237,11 +237,11 @@ function handleDeleteElement(state: DesignState, event: DeleteElementEvent): Des
 		};
 	}
 
-	// Remove from frame's root elements
-	if (!element.parentId && newFrames[element.frameId]) {
-		newFrames[element.frameId] = {
-			...newFrames[element.frameId],
-			elements: newFrames[element.frameId].elements.filter((id) => id !== elementId)
+	// Remove from view's root elements
+	if (!element.parentId && newViews[element.viewId]) {
+		newViews[element.viewId] = {
+			...newViews[element.viewId],
+			elements: newViews[element.viewId].elements.filter((id) => id !== elementId)
 		};
 	}
 
@@ -263,7 +263,7 @@ function handleDeleteElement(state: DesignState, event: DeleteElementEvent): Des
 	return {
 		...state,
 		elements: newElements,
-		frames: newFrames,
+		views: newViews,
 		selectedElementIds: newSelectedElementIds
 	};
 }
@@ -331,7 +331,7 @@ function handleReorderElement(state: DesignState, event: ReorderElementEvent): D
 	if (!element) return state;
 
 	const newElements = { ...state.elements };
-	const newFrames = { ...state.frames };
+	const newViews = { ...state.views };
 
 	// Remove from old parent
 	if (element.parentId && newElements[element.parentId]) {
@@ -339,21 +339,21 @@ function handleReorderElement(state: DesignState, event: ReorderElementEvent): D
 			...newElements[element.parentId],
 			children: newElements[element.parentId].children.filter((id) => id !== elementId)
 		};
-	} else if (!element.parentId && newFrames[element.frameId]) {
-		newFrames[element.frameId] = {
-			...newFrames[element.frameId],
-			elements: newFrames[element.frameId].elements.filter((id) => id !== elementId)
+	} else if (!element.parentId && newViews[element.viewId]) {
+		newViews[element.viewId] = {
+			...newViews[element.viewId],
+			elements: newViews[element.viewId].elements.filter((id) => id !== elementId)
 		};
 	}
 
 	// Update element parent
-	// When moving to a parent element, clear frameId (element is now nested)
-	// When moving to frame root (parentId = null), keep existing frameId
+	// When moving to a parent element, clear viewId (element is now nested)
+	// When moving to view root (parentId = null), keep existing viewId
 	newElements[elementId] = {
 		...element,
 		parentId: newParentId,
 		zIndex: newIndex,
-		...(newParentId !== null && { frameId: '' })
+		...(newParentId !== null && { viewId: '' })
 	};
 
 	// Add to new parent
@@ -364,11 +364,11 @@ function handleReorderElement(state: DesignState, event: ReorderElementEvent): D
 			...newElements[newParentId],
 			children
 		};
-	} else if (!newParentId && newFrames[element.frameId]) {
-		const elements = [...newFrames[element.frameId].elements];
+	} else if (!newParentId && newViews[element.viewId]) {
+		const elements = [...newViews[element.viewId].elements];
 		elements.splice(newIndex, 0, elementId);
-		newFrames[element.frameId] = {
-			...newFrames[element.frameId],
+		newViews[element.viewId] = {
+			...newViews[element.viewId],
 			elements
 		};
 	}
@@ -376,7 +376,7 @@ function handleReorderElement(state: DesignState, event: ReorderElementEvent): D
 	return {
 		...state,
 		elements: newElements,
-		frames: newFrames
+		views: newViews
 	};
 }
 
@@ -557,8 +557,8 @@ function handleUpdateAutoLayout(state: DesignState, event: UpdateAutoLayoutEvent
 	};
 }
 
-function handleToggleFrame(state: DesignState, event: ToggleFrameEvent): DesignState {
-	const { elementId, isFrame, frameName, breakpointWidth } = event.payload;
+function handleToggleView(state: DesignState, event: ToggleViewEvent): DesignState {
+	const { elementId, isView, viewName, breakpointWidth } = event.payload;
 	const element = state.elements[elementId];
 
 	if (!element) return state;
@@ -569,8 +569,8 @@ function handleToggleFrame(state: DesignState, event: ToggleFrameEvent): DesignS
 			...state.elements,
 			[elementId]: {
 				...element,
-				isFrame,
-				frameName: frameName || element.frameName,
+				isView,
+				viewName: viewName || element.viewName,
 				breakpointWidth: breakpointWidth || element.breakpointWidth || 1440
 			}
 		}
@@ -578,14 +578,14 @@ function handleToggleFrame(state: DesignState, event: ToggleFrameEvent): DesignS
 }
 
 // ============================================================================
-// Frame Handlers
+// View Handlers (Breakpoint Views)
 // ============================================================================
 
-function handleCreateFrame(state: DesignState, event: CreateFrameEvent): DesignState {
-	const { frameId, pageId, name, breakpointWidth, position, height } = event.payload;
+function handleCreateView(state: DesignState, event: CreateViewEvent): DesignState {
+	const { viewId, pageId, name, breakpointWidth, position, height } = event.payload;
 
-	const frame: Frame = {
-		id: frameId,
+	const view: View = {
+		id: viewId,
 		pageId,
 		name,
 		breakpointWidth,
@@ -594,98 +594,98 @@ function handleCreateFrame(state: DesignState, event: CreateFrameEvent): DesignS
 		elements: []
 	};
 
-	// Add frame to state
-	const newFrames = { ...state.frames, [frameId]: frame };
+	// Add view to state
+	const newViews = { ...state.views, [viewId]: view };
 
-	// Add frame to page
+	// Add view to page
 	const newPages = { ...state.pages };
 	if (newPages[pageId]) {
 		newPages[pageId] = {
 			...newPages[pageId],
-			frames: [...newPages[pageId].frames, frameId]
+			views: [...newPages[pageId].views, viewId]
 		};
 	}
 
 	return {
 		...state,
-		frames: newFrames,
+		views: newViews,
 		pages: newPages,
-		currentFrameId: state.currentFrameId || frameId // Set as current if first frame
+		currentViewId: state.currentViewId || viewId // Set as current if first view
 	};
 }
 
-function handleUpdateFrame(state: DesignState, event: UpdateFrameEvent): DesignState {
-	const { frameId, changes } = event.payload;
-	const frame = state.frames[frameId];
+function handleUpdateView(state: DesignState, event: UpdateViewEvent): DesignState {
+	const { viewId, changes } = event.payload;
+	const view = state.views[viewId];
 
-	if (!frame) return state;
+	if (!view) return state;
 
 	return {
 		...state,
-		frames: {
-			...state.frames,
-			[frameId]: {
-				...frame,
+		views: {
+			...state.views,
+			[viewId]: {
+				...view,
 				...changes
 			}
 		}
 	};
 }
 
-function handleDeleteFrame(state: DesignState, event: DeleteFrameEvent): DesignState {
-	const { frameId } = event.payload;
-	const frame = state.frames[frameId];
+function handleDeleteView(state: DesignState, event: DeleteViewEvent): DesignState {
+	const { viewId } = event.payload;
+	const view = state.views[viewId];
 
-	if (!frame) return state;
+	if (!view) return state;
 
-	const newFrames = { ...state.frames };
-	delete newFrames[frameId];
+	const newViews = { ...state.views };
+	delete newViews[viewId];
 
-	// Delete all elements in this frame
+	// Delete all elements in this view
 	const newElements = { ...state.elements };
 	Object.keys(newElements).forEach((elementId) => {
-		if (newElements[elementId].frameId === frameId) {
+		if (newElements[elementId].viewId === viewId) {
 			delete newElements[elementId];
 		}
 	});
 
 	// Remove from page
 	const newPages = { ...state.pages };
-	if (newPages[frame.pageId]) {
-		newPages[frame.pageId] = {
-			...newPages[frame.pageId],
-			frames: newPages[frame.pageId].frames.filter((id) => id !== frameId)
+	if (newPages[view.pageId]) {
+		newPages[view.pageId] = {
+			...newPages[view.pageId],
+			views: newPages[view.pageId].views.filter((id) => id !== viewId)
 		};
 	}
 
-	// Update current frame if deleted
-	let newCurrentFrameId = state.currentFrameId;
-	if (state.currentFrameId === frameId) {
-		const remainingFrames = Object.keys(newFrames);
-		newCurrentFrameId = remainingFrames.length > 0 ? remainingFrames[0] : null;
+	// Update current view if deleted
+	let newCurrentViewId = state.currentViewId;
+	if (state.currentViewId === viewId) {
+		const remainingViews = Object.keys(newViews);
+		newCurrentViewId = remainingViews.length > 0 ? remainingViews[0] : null;
 	}
 
 	return {
 		...state,
-		frames: newFrames,
+		views: newViews,
 		elements: newElements,
 		pages: newPages,
-		currentFrameId: newCurrentFrameId
+		currentViewId: newCurrentViewId
 	};
 }
 
-function handleResizeFrame(state: DesignState, event: ResizeFrameEvent): DesignState {
-	const { frameId, width, height } = event.payload;
-	const frame = state.frames[frameId];
+function handleResizeView(state: DesignState, event: ResizeViewEvent): DesignState {
+	const { viewId, width, height } = event.payload;
+	const view = state.views[viewId];
 
-	if (!frame) return state;
+	if (!view) return state;
 
 	return {
 		...state,
-		frames: {
-			...state.frames,
-			[frameId]: {
-				...frame,
+		views: {
+			...state.views,
+			[viewId]: {
+				...view,
 				breakpointWidth: width,
 				...(height && { height })
 			}
@@ -704,7 +704,7 @@ function handleCreatePage(state: DesignState, event: CreatePageEvent): DesignSta
 		id: pageId,
 		name,
 		slug: slug || name.toLowerCase().replace(/\s+/g, '-'),
-		frames: []
+		views: []
 	};
 
 	return {
@@ -745,17 +745,17 @@ function handleDeletePage(state: DesignState, event: DeletePageEvent): DesignSta
 	const newPages = { ...state.pages };
 	delete newPages[pageId];
 
-	// Delete all frames belonging to this page
-	const newFrames = { ...state.frames };
-	const framesToDelete = Object.keys(newFrames).filter((frameId) => newFrames[frameId].pageId === pageId);
-	framesToDelete.forEach((frameId) => {
-		delete newFrames[frameId];
+	// Delete all views belonging to this page
+	const newViews = { ...state.views };
+	const viewsToDelete = Object.keys(newViews).filter((viewId) => newViews[viewId].pageId === pageId);
+	viewsToDelete.forEach((viewId) => {
+		delete newViews[viewId];
 	});
 
-	// Delete all elements in those frames
+	// Delete all elements in those views
 	const newElements = { ...state.elements };
 	Object.keys(newElements).forEach((elementId) => {
-		if (framesToDelete.includes(newElements[elementId].frameId)) {
+		if (viewsToDelete.includes(newElements[elementId].viewId)) {
 			delete newElements[elementId];
 		}
 	});
@@ -772,7 +772,7 @@ function handleDeletePage(state: DesignState, event: DeletePageEvent): DesignSta
 	return {
 		...state,
 		pages: newPages,
-		frames: newFrames,
+		views: newViews,
 		elements: newElements,
 		pageOrder: newPageOrder,
 		currentPageId: newCurrentPageId
@@ -860,10 +860,10 @@ function handleInstanceComponent(
 	});
 
 	// Second pass: clone elements with updated IDs and references
-	// Note: Component instances need to be assigned to a frame
-	const currentFrame = state.currentFrameId ? state.frames[state.currentFrameId] : null;
-	if (!currentFrame) {
-		// Cannot instance component without a current frame
+	// Note: Component instances need to be assigned to a view
+	const currentView = state.currentViewId ? state.views[state.currentViewId] : null;
+	if (!currentView) {
+		// Cannot instance component without a current view
 		return state;
 	}
 
@@ -878,7 +878,7 @@ function handleInstanceComponent(
 			...oldElement,
 			id: newId,
 			parentId: newParentId,
-			frameId: currentFrame.id,
+			viewId: currentView.id,
 			position: {
 				x: position.x + oldElement.position.x,
 				y: position.y + oldElement.position.y
@@ -887,20 +887,20 @@ function handleInstanceComponent(
 		};
 	});
 
-	// Add root elements to current frame
+	// Add root elements to current view
 	const rootElementIds = component.elementIds
 		.filter((id) => !state.elements[id]?.parentId)
 		.map((id) => idMap.get(id)!);
 
-	const newFrames = { ...state.frames };
-	newFrames[currentFrame.id] = {
-		...currentFrame,
-		elements: [...currentFrame.elements, ...rootElementIds]
+	const newViews = { ...state.views };
+	newViews[currentView.id] = {
+		...currentView,
+		elements: [...currentView.elements, ...rootElementIds]
 	};
 
 	return {
 		...state,
 		elements: newElements,
-		frames: newFrames
+		views: newViews
 	};
 }

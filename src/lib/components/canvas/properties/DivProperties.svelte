@@ -3,21 +3,21 @@
 	 * DivProperties - Properties for Div elements
 	 *
 	 * Features:
-	 * - Frame toggle (converts div to frame)
+	 * - View toggle (converts div to view/breakpoint)
 	 * - Layout properties
 	 * - Background, border, spacing
 	 */
 
 	import type { Element } from '$lib/types/events';
-	import { updateElementStyles, toggleFrame, updateElementAutoLayout } from '$lib/stores/design-store';
+	import { updateElementStyles, toggleView, updateElementAutoLayout } from '$lib/stores/design-store';
 
 	export let element: Element;
 
-	// Frame toggle state (stored in element metadata)
-	$: isFrame = element.isFrame || false;
+	// View toggle state (stored in element metadata)
+	$: isView = element.isView || false;
 
-	async function handleToggleFrame() {
-		await toggleFrame(element.id, !isFrame, `Frame ${element.id.slice(0, 8)}`, 1440);
+	async function handleToggleView() {
+		await toggleView(element.id, !isView, `View ${element.id.slice(0, 8)}`, 1440);
 	}
 
 	// Background color
@@ -63,15 +63,15 @@
 </script>
 
 <div class="div-properties">
-	<!-- Frame Toggle -->
+	<!-- View Toggle -->
 	<div class="property-section">
 		<h3>Type</h3>
 		<label class="toggle-label">
-			<input type="checkbox" checked={isFrame} on:change={handleToggleFrame} />
-			<span>Convert to Frame</span>
+			<input type="checkbox" checked={isView} on:change={handleToggleView} />
+			<span>Convert to View</span>
 		</label>
-		{#if isFrame}
-			<p class="hint">This div is a frame (page/breakpoint)</p>
+		{#if isView}
+			<p class="hint">This div is a view (breakpoint view)</p>
 		{/if}
 	</div>
 

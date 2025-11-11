@@ -316,9 +316,9 @@ export async function createElement(data: {
 	const elementId = uuidv4();
 	const state = get(designState);
 
-	// Get frameId from currentFrameId or default to empty string
-	// (Elements belong to frames in the new architecture)
-	const frameId = state.currentFrameId || '';
+	// Get viewId from currentViewId or default to empty string
+	// (Elements belong to views (breakpoint views) in the new architecture)
+	const viewId = state.currentViewId || '';
 
 	await dispatch({
 		id: uuidv4(),
@@ -327,7 +327,7 @@ export async function createElement(data: {
 		payload: {
 			elementId,
 			parentId: data.parentId,
-			frameId,
+			viewId,
 			elementType: data.elementType,
 			position: data.position,
 			size: data.size,
@@ -568,20 +568,20 @@ export async function updateElementAutoLayout(
 	});
 }
 
-export async function toggleFrame(
+export async function toggleView(
 	elementId: string,
-	isFrame: boolean,
-	frameName?: string,
+	isView: boolean,
+	viewName?: string,
 	breakpointWidth?: number
 ): Promise<void> {
 	await dispatch({
 		id: uuidv4(),
-		type: 'TOGGLE_FRAME',
+		type: 'TOGGLE_VIEW',
 		timestamp: Date.now(),
 		payload: {
 			elementId,
-			isFrame,
-			frameName,
+			isView,
+			viewName,
 			breakpointWidth
 		}
 	});

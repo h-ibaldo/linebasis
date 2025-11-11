@@ -18,7 +18,7 @@ export type EventType =
 	| 'RESIZE_ELEMENT'
 	| 'ROTATE_ELEMENT'
 	| 'REORDER_ELEMENT'
-	| 'TOGGLE_FRAME'
+	| 'TOGGLE_VIEW'
 	| 'GROUP_MOVE_ELEMENTS'
 	| 'GROUP_RESIZE_ELEMENTS'
 	| 'GROUP_ROTATE_ELEMENTS'
@@ -28,11 +28,11 @@ export type EventType =
 	| 'UPDATE_TYPOGRAPHY'
 	| 'UPDATE_SPACING'
 	| 'UPDATE_AUTO_LAYOUT'
-	// Frame operations
-	| 'CREATE_FRAME'
-	| 'UPDATE_FRAME'
-	| 'DELETE_FRAME'
-	| 'RESIZE_FRAME'
+	// View operations (breakpoint views)
+	| 'CREATE_VIEW'
+	| 'UPDATE_VIEW'
+	| 'DELETE_VIEW'
+	| 'RESIZE_VIEW'
 	// Page operations
 	| 'CREATE_PAGE'
 	| 'UPDATE_PAGE'
@@ -60,7 +60,7 @@ export interface CreateElementEvent extends BaseEvent {
 	payload: {
 		elementId: string;
 		parentId: string | null; // null for root elements
-		frameId: string; // Elements belong to frames, not pages
+		viewId: string; // Elements belong to views (breakpoint views), not pages
 		elementType: ElementType;
 		position: Position;
 		size: Size;
@@ -124,12 +124,12 @@ export interface ReorderElementEvent extends BaseEvent {
 	};
 }
 
-export interface ToggleFrameEvent extends BaseEvent {
-	type: 'TOGGLE_FRAME';
+export interface ToggleViewEvent extends BaseEvent {
+	type: 'TOGGLE_VIEW';
 	payload: {
 		elementId: string;
-		isFrame: boolean;
-		frameName?: string;
+		isView: boolean;
+		viewName?: string;
 		breakpointWidth?: number;
 	};
 }
@@ -213,14 +213,14 @@ export interface UpdateAutoLayoutEvent extends BaseEvent {
 }
 
 // ============================================================================
-// Frame Events
+// View Events (Breakpoint Views)
 // ============================================================================
 
-export interface CreateFrameEvent extends BaseEvent {
-	type: 'CREATE_FRAME';
+export interface CreateViewEvent extends BaseEvent {
+	type: 'CREATE_VIEW';
 	payload: {
-		frameId: string;
-		pageId: string; // Frames belong to pages
+		viewId: string;
+		pageId: string; // Views belong to pages
 		name: string;
 		breakpointWidth: number; // e.g., 1920, 768, 375
 		position: Position; // Position on canvas
@@ -228,10 +228,10 @@ export interface CreateFrameEvent extends BaseEvent {
 	};
 }
 
-export interface UpdateFrameEvent extends BaseEvent {
-	type: 'UPDATE_FRAME';
+export interface UpdateViewEvent extends BaseEvent {
+	type: 'UPDATE_VIEW';
 	payload: {
-		frameId: string;
+		viewId: string;
 		changes: {
 			name?: string;
 			breakpointWidth?: number;
@@ -241,17 +241,17 @@ export interface UpdateFrameEvent extends BaseEvent {
 	};
 }
 
-export interface DeleteFrameEvent extends BaseEvent {
-	type: 'DELETE_FRAME';
+export interface DeleteViewEvent extends BaseEvent {
+	type: 'DELETE_VIEW';
 	payload: {
-		frameId: string;
+		viewId: string;
 	};
 }
 
-export interface ResizeFrameEvent extends BaseEvent {
-	type: 'RESIZE_FRAME';
+export interface ResizeViewEvent extends BaseEvent {
+	type: 'RESIZE_VIEW';
 	payload: {
-		frameId: string;
+		viewId: string;
 		width: number;
 		height?: number;
 	};
@@ -351,7 +351,7 @@ export type DesignEvent =
 	| ResizeElementEvent
 	| RotateElementEvent
 	| ReorderElementEvent
-	| ToggleFrameEvent
+	| ToggleViewEvent
 	| GroupMoveElementsEvent
 	| GroupResizeElementsEvent
 	| GroupRotateElementsEvent
@@ -360,10 +360,10 @@ export type DesignEvent =
 	| UpdateTypographyEvent
 	| UpdateSpacingEvent
 	| UpdateAutoLayoutEvent
-	| CreateFrameEvent
-	| UpdateFrameEvent
-	| DeleteFrameEvent
-	| ResizeFrameEvent
+	| CreateViewEvent
+	| UpdateViewEvent
+	| DeleteViewEvent
+	| ResizeViewEvent
 	| CreatePageEvent
 	| UpdatePageEvent
 	| DeletePageEvent
@@ -478,7 +478,7 @@ export interface Element {
 	id: string;
 	type: ElementType;
 	parentId: string | null;
-	frameId: string; // Elements belong to frames
+	viewId: string; // Elements belong to views (breakpoint views)
 	position: Position;
 	size: Size;
 	rotation?: number; // Rotation angle in degrees (default 0)
@@ -492,14 +492,14 @@ export interface Element {
 	src?: string;
 	children: string[]; // Child element IDs
 	zIndex: number;
-	isFrame?: boolean; // Whether this div is a frame (page/breakpoint)
-	frameName?: string; // Name of the frame if isFrame is true
-	breakpointWidth?: number; // Width of the frame if isFrame is true
+	isView?: boolean; // Whether this div is a view (page/breakpoint)
+	viewName?: string; // Name of the view if isView is true
+	breakpointWidth?: number; // Width of the view if isView is true
 }
 
-export interface Frame {
+export interface View {
 	id: string;
-	pageId: string; // Frame belongs to a page
+	pageId: string; // View belongs to a page
 	name: string; // e.g., "Desktop", "Mobile", "Tablet"
 	breakpointWidth: number; // e.g., 1920, 768, 375
 	position: Position; // Position on canvas
@@ -511,7 +511,7 @@ export interface Page {
 	id: string;
 	name: string; // e.g., "Homepage", "About"
 	slug: string; // URL slug
-	frames: string[]; // Frame IDs (different breakpoints)
+	views: string[]; // View IDs (different breakpoints)
 }
 
 export interface Component {
@@ -522,12 +522,12 @@ export interface Component {
 
 export interface DesignState {
 	pages: Record<string, Page>;
-	frames: Record<string, Frame>;
+	views: Record<string, View>;
 	elements: Record<string, Element>;
 	components: Record<string, Component>;
 	pageOrder: string[];
 	currentPageId: string | null;
-	currentFrameId: string | null; // Currently selected frame
+	currentViewId: string | null; // Currently selected view (breakpoint)
 	selectedElementIds: string[];
 }
 

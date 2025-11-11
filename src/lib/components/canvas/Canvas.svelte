@@ -538,23 +538,23 @@
 				</div>
 			{/if}
 
-			<!-- Render frames as visual artboards (breakpoints) -->
-			{#each Object.values($designState.frames) as frame (frame.id)}
+			<!-- Render views as visual artboards (breakpoints) -->
+			{#each Object.values($designState.views) as view (view.id)}
 				<div
-					class="frame-artboard"
+					class="view-artboard"
 					style="
 						position: absolute;
-						left: {frame.position.x}px;
-						top: {frame.position.y}px;
-						width: {frame.breakpointWidth}px;
-						height: {frame.height}px;
+						left: {view.position.x}px;
+						top: {view.position.y}px;
+						width: {view.breakpointWidth}px;
+						height: {view.height}px;
 					"
 				>
-					<!-- Baseline grid per frame -->
+					<!-- Baseline grid per view -->
 					<BaselineGrid />
-					
-					<div class="frame-artboard-label">
-						{frame.name} ({frame.breakpointWidth}px)
+
+					<div class="view-artboard-label">
+						{view.name} ({view.breakpointWidth}px)
 					</div>
 				</div>
 			{/each}
@@ -638,14 +638,14 @@
 		will-change: transform;
 	}
 
-	.frame-artboard {
+	.view-artboard {
 		position: absolute;
 		border: 2px solid rgba(100, 100, 255, 0.3);
 		background: rgba(255, 255, 255, 0.02);
 		pointer-events: none;
 	}
 
-	.frame-artboard-label {
+	.view-artboard-label {
 		position: absolute;
 		top: -30px;
 		left: 0;

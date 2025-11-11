@@ -37,8 +37,8 @@
 			{ keys: ['Cmd', '+'], description: 'Zoom in' },
 			{ keys: ['Cmd', '-'], description: 'Zoom out' },
 			{ keys: ['Cmd', '0'], description: 'Zoom to 100%' },
-			{ keys: ['Cmd', '1'], description: 'Fit all frames' },
-			{ keys: ['Cmd', '2'], description: 'Fit selected frame' }
+			{ keys: ['Cmd', '1'], description: 'Fit all views' },
+			{ keys: ['Cmd', '2'], description: 'Fit selected view' }
 		],
 		text: [
 			{ keys: ['Cmd', 'B'], description: 'Toggle bold' },
