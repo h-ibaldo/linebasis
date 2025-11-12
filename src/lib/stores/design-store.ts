@@ -35,6 +35,12 @@ interface StoreState {
 	lastSavedAt: number | null;
 }
 
+// Transaction batching for undo/redo
+let isInTransaction = false;
+let transactionEvents: DesignEvent[] = [];
+let currentTransactionId: string | null = null;
+const eventTransactionMap = new Map<number, string>(); // Maps event index to transaction ID
+
 const initialStoreState: StoreState = {
 	designState: getInitialState(),
 	events: [],
@@ -139,9 +145,108 @@ export async function reset(): Promise<void> {
 // ============================================================================
 
 /**
+ * Start a transaction - batch multiple events into a single undo/redo step
+ */
+function beginTransaction(): void {
+	if (isInTransaction) {
+		throw new Error('Transaction already in progress');
+	}
+	isInTransaction = true;
+	transactionEvents = [];
+	currentTransactionId = uuidv4();
+}
+
+/**
+ * Commit a transaction - apply all batched events as a single undo/redo step
+ */
+async function commitTransaction(): Promise<void> {
+	if (!isInTransaction) {
+		throw new Error('No transaction in progress');
+	}
+
+	if (transactionEvents.length === 0) {
+		isInTransaction = false;
+		currentTransactionId = null;
+		return;
+	}
+
+	const state = get(storeState);
+
+	// If we're not at the end of the event log, remove future events (they're undone)
+	let newEvents = state.events;
+	if (state.currentEventIndex < state.events.length - 1) {
+		newEvents = state.events.slice(0, state.currentEventIndex + 1);
+		// Clear transaction map for removed events
+		for (let i = state.currentEventIndex + 1; i < state.events.length; i++) {
+			eventTransactionMap.delete(i);
+		}
+	}
+
+	const startIndex = newEvents.length;
+	// Add all transaction events and track their transaction ID
+	newEvents = [...newEvents, ...transactionEvents];
+	for (let i = 0; i < transactionEvents.length; i++) {
+		eventTransactionMap.set(startIndex + i, currentTransactionId!);
+	}
+
+	// Recompute design state
+	const newDesignState = reduceEvents(newEvents);
+
+	// Preserve selection state (selection is not part of event sourcing)
+	newDesignState.selectedElementIds = state.designState.selectedElementIds;
+
+	// Update store - increment index only once for all events
+	storeState.update((s) => ({
+		...s,
+		events: newEvents,
+		designState: newDesignState,
+		currentEventIndex: newEvents.length - 1,
+		isSaving: true
+	}));
+
+	// Persist all events to IndexedDB
+	try {
+		for (const event of transactionEvents) {
+			await appendEvent(event);
+		}
+		storeState.update((s) => ({
+			...s,
+			isSaving: false,
+			lastSavedAt: Date.now()
+		}));
+	} catch (error) {
+		console.error('Failed to save transaction:', error);
+		storeState.update((s) => ({
+			...s,
+			isSaving: false
+		}));
+		throw error;
+	} finally {
+		isInTransaction = false;
+		transactionEvents = [];
+		currentTransactionId = null;
+	}
+}
+
+/**
  * Dispatch a new event and update the design state
  */
 async function dispatch(event: DesignEvent): Promise<void> {
+	// If in transaction, collect events instead of dispatching immediately
+	if (isInTransaction) {
+		transactionEvents.push(event);
+		// Still update design state for live preview during transaction
+		const state = get(storeState);
+		const tempEvents = [...state.events.slice(0, state.currentEventIndex + 1), ...transactionEvents];
+		const newDesignState = reduceEvents(tempEvents);
+		newDesignState.selectedElementIds = state.designState.selectedElementIds;
+		storeState.update((s) => ({
+			...s,
+			designState: newDesignState
+		}));
+		return;
+	}
+
 	const state = get(storeState);
 
 	// If we're not at the end of the event log, remove future events (they're undone)
@@ -191,7 +296,7 @@ async function dispatch(event: DesignEvent): Promise<void> {
 // ============================================================================
 
 /**
- * Undo the last event
+ * Undo the last event (or transaction)
  */
 export function undo(): void {
 	const state = get(storeState);
@@ -200,7 +305,18 @@ export function undo(): void {
 		return; // Nothing to undo
 	}
 
-	const newEventIndex = state.currentEventIndex - 1;
+	// Check if current event is part of a transaction
+	const currentTransactionId = eventTransactionMap.get(state.currentEventIndex);
+	let newEventIndex = state.currentEventIndex - 1;
+
+	// If it's part of a transaction, skip back to before the transaction started
+	if (currentTransactionId) {
+		// Find the first event in this transaction
+		while (newEventIndex >= 0 && eventTransactionMap.get(newEventIndex) === currentTransactionId) {
+			newEventIndex--;
+		}
+	}
+
 	const eventsToApply = state.events.slice(0, newEventIndex + 1);
 	const newDesignState = reduceEvents(eventsToApply);
 
@@ -212,7 +328,7 @@ export function undo(): void {
 }
 
 /**
- * Redo the next event
+ * Redo the next event (or transaction)
  */
 export function redo(): void {
 	const state = get(storeState);
@@ -221,7 +337,20 @@ export function redo(): void {
 		return; // Nothing to redo
 	}
 
-	const newEventIndex = state.currentEventIndex + 1;
+	let newEventIndex = state.currentEventIndex + 1;
+
+	// Check if the next event is part of a transaction
+	const nextTransactionId = eventTransactionMap.get(newEventIndex);
+
+	// If it's part of a transaction, skip forward to the end of the transaction
+	if (nextTransactionId) {
+		// Find the last event in this transaction
+		while (newEventIndex < state.events.length - 1 &&
+		       eventTransactionMap.get(newEventIndex + 1) === nextTransactionId) {
+			newEventIndex++;
+		}
+	}
+
 	const eventsToApply = state.events.slice(0, newEventIndex + 1);
 	const newDesignState = reduceEvents(eventsToApply);
 
@@ -591,44 +720,95 @@ export async function toggleView(
 // Selection
 // ============================================================================
 
-export function selectElement(elementId: string): void {
-	storeState.update((state) => ({
-		...state,
-		designState: {
-			...state.designState,
-			selectedElementIds: [elementId]
+function expandSelectionWithGroups(elementIds: string[], state: DesignState): string[] {
+	const seen = new Set<string>();
+	const expanded: string[] = [];
+
+	for (const id of elementIds) {
+		const element = state.elements[id];
+
+		if (element?.groupId) {
+			const group = state.groups[element.groupId];
+			if (group) {
+				for (const memberId of group.elementIds) {
+					if (!seen.has(memberId) && state.elements[memberId]) {
+						seen.add(memberId);
+						expanded.push(memberId);
+					}
+				}
+				continue;
+			}
 		}
-	}));
+
+		if (!seen.has(id) && state.elements[id]) {
+			seen.add(id);
+			expanded.push(id);
+		}
+	}
+
+	return expanded;
+}
+
+export function selectElement(elementId: string): void {
+	storeState.update((state) => {
+		const expanded = expandSelectionWithGroups([elementId], state.designState);
+		return {
+			...state,
+			designState: {
+				...state.designState,
+				selectedElementIds: expanded
+			}
+		};
+	});
 }
 
 export function selectElements(elementIds: string[]): void {
-	storeState.update((state) => ({
-		...state,
-		designState: {
-			...state.designState,
-			selectedElementIds: elementIds
-		}
-	}));
+	storeState.update((state) => {
+		const expanded = expandSelectionWithGroups(elementIds, state.designState);
+		return {
+			...state,
+			designState: {
+				...state.designState,
+				selectedElementIds: expanded
+			}
+		};
+	});
 }
 
 export function addToSelection(elementId: string): void {
-	storeState.update((state) => ({
-		...state,
-		designState: {
-			...state.designState,
-			selectedElementIds: [...state.designState.selectedElementIds, elementId]
-		}
-	}));
+	storeState.update((state) => {
+		const expanded = expandSelectionWithGroups(
+			[...state.designState.selectedElementIds, elementId],
+			state.designState
+		);
+		return {
+			...state,
+			designState: {
+				...state.designState,
+				selectedElementIds: expanded
+			}
+		};
+	});
 }
 
 export function removeFromSelection(elementId: string): void {
-	storeState.update((state) => ({
-		...state,
-		designState: {
-			...state.designState,
-			selectedElementIds: state.designState.selectedElementIds.filter((id) => id !== elementId)
-		}
-	}));
+	storeState.update((state) => {
+		const element = state.designState.elements[elementId];
+		const groupMemberIds =
+			element?.groupId && state.designState.groups[element.groupId]
+				? new Set(state.designState.groups[element.groupId].elementIds)
+				: new Set([elementId]);
+
+		return {
+			...state,
+			designState: {
+				...state.designState,
+				selectedElementIds: state.designState.selectedElementIds.filter(
+					(id) => !groupMemberIds.has(id)
+				)
+			}
+		};
+	});
 }
 
 export function clearSelection(): void {
@@ -748,6 +928,43 @@ let clipboard: Element[] = [];
 let isClipboardFromCut = false;
 
 /**
+ * Helper: Get the four corners of a rotated rectangle in world space
+ * Returns [topLeft, topRight, bottomRight, bottomLeft]
+ */
+function getRotatedCorners(rect: {
+	x: number;
+	y: number;
+	width: number;
+	height: number;
+	rotation: number;
+}): Array<{ x: number; y: number }> {
+	const { x, y, width, height, rotation } = rect;
+	const angleRad = rotation * (Math.PI / 180);
+	const cos = Math.cos(angleRad);
+	const sin = Math.sin(angleRad);
+
+	// Center of the rectangle
+	const centerX = x + width / 2;
+	const centerY = y + height / 2;
+
+	// Local corners (relative to center)
+	const halfW = width / 2;
+	const halfH = height / 2;
+	const localCorners = [
+		{ x: -halfW, y: -halfH }, // Top-left
+		{ x: halfW, y: -halfH },  // Top-right
+		{ x: halfW, y: halfH },   // Bottom-right
+		{ x: -halfW, y: halfH }   // Bottom-left
+	];
+
+	// Rotate each corner around center and convert to world space
+	return localCorners.map(corner => ({
+		x: centerX + corner.x * cos - corner.y * sin,
+		y: centerY + corner.x * sin + corner.y * cos
+	}));
+}
+
+/**
  * Wrap selected elements in a new div container
  */
 export async function wrapSelectedElementsInDiv(): Promise<void> {
@@ -766,17 +983,39 @@ export async function wrapSelectedElementsInDiv(): Promise<void> {
 		? firstParentId
 		: null;
 
-	// Calculate bounding box of all selected elements
+	// Calculate bounding box of all selected elements (accounting for rotation)
 	let minX = Infinity;
 	let minY = Infinity;
 	let maxX = -Infinity;
 	let maxY = -Infinity;
 
 	for (const el of selected) {
-		minX = Math.min(minX, el.position.x);
-		minY = Math.min(minY, el.position.y);
-		maxX = Math.max(maxX, el.position.x + (el.size.width || 0));
-		maxY = Math.max(maxY, el.position.y + (el.size.height || 0));
+		const rotation = el.rotation || 0;
+
+		if (rotation !== 0) {
+			// For rotated elements, get all four corners and find their bounds
+			const corners = getRotatedCorners({
+				x: el.position.x,
+				y: el.position.y,
+				width: el.size.width || 0,
+				height: el.size.height || 0,
+				rotation
+			});
+
+			// Find min/max across all corners
+			for (const corner of corners) {
+				minX = Math.min(minX, corner.x);
+				minY = Math.min(minY, corner.y);
+				maxX = Math.max(maxX, corner.x);
+				maxY = Math.max(maxY, corner.y);
+			}
+		} else {
+			// For non-rotated elements, use simple bounds
+			minX = Math.min(minX, el.position.x);
+			minY = Math.min(minY, el.position.y);
+			maxX = Math.max(maxX, el.position.x + (el.size.width || 0));
+			maxY = Math.max(maxY, el.position.y + (el.size.height || 0));
+		}
 	}
 
 	const wrapperWidth = maxX - minX;
@@ -857,6 +1096,57 @@ export async function unwrapSelectedDiv(): Promise<void> {
 }
 
 /**
+ * Group selected elements
+ * Grouped elements behave as if they are selected together - property changes affect all group members
+ */
+export async function groupElements(): Promise<void> {
+	const selected = get(selectedElements);
+	if (selected.length < 2) return; // Need at least 2 elements to group
+
+	const groupId = uuidv4();
+	const elementIds = selected.map(el => el.id);
+
+	await dispatch({
+		id: uuidv4(),
+		type: 'GROUP_ELEMENTS',
+		timestamp: Date.now(),
+		payload: {
+			groupId,
+			elementIds
+		}
+	});
+}
+
+/**
+ * Ungroup selected elements
+ * Removes grouping from all selected elements that are in a group
+ */
+export async function ungroupElements(): Promise<void> {
+	const selected = get(selectedElements);
+	if (selected.length === 0) return;
+
+	// Find all unique groups from selected elements
+	const groupIds = new Set<string>();
+	for (const element of selected) {
+		if (element.groupId) {
+			groupIds.add(element.groupId);
+		}
+	}
+
+	// Dispatch ungroup event for each group
+	for (const groupId of groupIds) {
+		await dispatch({
+			id: uuidv4(),
+			type: 'UNGROUP_ELEMENTS',
+			timestamp: Date.now(),
+			payload: {
+				groupId
+			}
+		});
+	}
+}
+
+/**
  * Toggle auto-layout on selected elements
  * - If one div is selected: toggle its auto-layout property
  * - If multiple elements are selected: wrap them in a div with auto-layout enabled
@@ -882,66 +1172,135 @@ export async function toggleAutoLayout(): Promise<void> {
 	}
 
 	// Multiple elements selected: wrap in div with auto-layout enabled
-	const state = get(designState);
-	const pageId = state.currentPageId;
-	if (!pageId) return;
+	// Use transaction to batch all events into a single undo/redo step
+	beginTransaction();
 
-	// Find the common parent
-	const firstParentId = selected[0].parentId;
-	const commonParent = selected.every(el => el.parentId === firstParentId)
-		? firstParentId
-		: null;
-
-	// Calculate bounding box
-	let minX = Infinity;
-	let minY = Infinity;
-	let maxX = -Infinity;
-	let maxY = -Infinity;
-
-	for (const el of selected) {
-		minX = Math.min(minX, el.position.x);
-		minY = Math.min(minY, el.position.y);
-		maxX = Math.max(maxX, el.position.x + (el.size.width || 0));
-		maxY = Math.max(maxY, el.position.y + (el.size.height || 0));
-	}
-
-	const wrapperWidth = maxX - minX;
-	const wrapperHeight = maxY - minY;
-
-	// Create wrapper div with auto-layout enabled
-	const wrapperId = await createElement({
-		parentId: commonParent,
-		pageId,
-		elementType: 'div',
-		position: { x: minX, y: minY },
-		size: { width: wrapperWidth, height: wrapperHeight },
-		styles: {
-			display: 'flex'
+	try {
+		const state = get(designState);
+		const pageId = state.currentPageId;
+		if (!pageId) {
+			await commitTransaction();
+			return;
 		}
-	});
 
-	// Enable auto-layout on the wrapper
-	await updateElementAutoLayout(wrapperId, {
-		enabled: true,
-		direction: 'row',
-		justifyContent: 'flex-start',
-		alignItems: 'flex-start',
-		gap: '0px'
-	});
+		const initialGroupId = selected[0].groupId;
+		const isSingleGroupSelection =
+			Boolean(initialGroupId) &&
+			selected.every((el) => el.groupId === initialGroupId) &&
+			Boolean(initialGroupId && state.groups[initialGroupId]);
 
-	// Reparent each selected element to the wrapper and adjust position
-	for (let i = 0; i < selected.length; i++) {
-		const el = selected[i];
-		await reorderElement(el.id, wrapperId, i);
+		// Find the common parent
+		const firstParentId = selected[0].parentId;
+		const commonParent = selected.every(el => el.parentId === firstParentId)
+			? firstParentId
+			: null;
 
-		// Update position to be relative to wrapper
-		const relativeX = el.position.x - minX;
-		const relativeY = el.position.y - minY;
-		await moveElement(el.id, { x: relativeX, y: relativeY });
+		// Calculate bounding box
+		let minX = Infinity;
+		let minY = Infinity;
+		let maxX = -Infinity;
+		let maxY = -Infinity;
+
+		for (const el of selected) {
+			minX = Math.min(minX, el.position.x);
+			minY = Math.min(minY, el.position.y);
+			maxX = Math.max(maxX, el.position.x + (el.size.width || 0));
+			maxY = Math.max(maxY, el.position.y + (el.size.height || 0));
+		}
+
+		const boundingWidth = maxX - minX;
+		const boundingHeight = maxY - minY;
+
+		// Determine direction based on aspect ratio
+		// If more horizontal (wider than tall) or square, use row; if more vertical, use column
+		const direction = boundingWidth >= boundingHeight ? 'row' : 'column';
+
+		// Helper: Calculate bounding box size for an element (accounting for rotation)
+		const getElementLayoutSize = (el: Element): { width: number; height: number } => {
+			const rotation = el.rotation || 0;
+			if (rotation === 0) {
+				return el.size;
+			}
+			// For rotated elements, calculate bounding box size
+			const angleRad = rotation * (Math.PI / 180);
+			const cos = Math.abs(Math.cos(angleRad));
+			const sin = Math.abs(Math.sin(angleRad));
+			return {
+				width: el.size.width * cos + el.size.height * sin,
+				height: el.size.width * sin + el.size.height * cos
+			};
+		};
+
+		// Calculate wrapper size based on direction and elements aligned with gap=0
+		let wrapperWidth: number;
+		let wrapperHeight: number;
+
+		if (direction === 'row') {
+			// Row: width = sum of element layout widths, height = max element layout height
+			wrapperWidth = selected.reduce((sum, el) => {
+				const layoutSize = getElementLayoutSize(el);
+				return sum + layoutSize.width;
+			}, 0);
+			wrapperHeight = Math.max(...selected.map(el => getElementLayoutSize(el).height));
+		} else {
+			// Column: width = max element layout width, height = sum of element layout heights
+			wrapperWidth = Math.max(...selected.map(el => getElementLayoutSize(el).width));
+			wrapperHeight = selected.reduce((sum, el) => {
+				const layoutSize = getElementLayoutSize(el);
+				return sum + layoutSize.height;
+			}, 0);
+		}
+
+		// Create wrapper div with auto-layout enabled
+		const wrapperId = await createElement({
+			parentId: commonParent,
+			pageId,
+			elementType: 'div',
+			position: { x: minX, y: minY },
+			size: { width: wrapperWidth, height: wrapperHeight },
+			styles: {
+				display: 'flex'
+			}
+		});
+
+		// Enable auto-layout on the wrapper
+		await updateElementAutoLayout(wrapperId, {
+			enabled: true,
+			direction,
+			justifyContent: 'flex-start',
+			alignItems: 'flex-start',
+			gap: '0px'
+		});
+
+		// Reparent each selected element to the wrapper
+		// In auto layout, flexbox handles positioning, so set element positions to (0, 0)
+		for (let i = 0; i < selected.length; i++) {
+			const el = selected[i];
+			await reorderElement(el.id, wrapperId, i);
+
+			// Set position to (0, 0) - flexbox will handle layout
+			await moveElement(el.id, { x: 0, y: 0 });
+		}
+
+		// Select the new wrapper div
+		if (isSingleGroupSelection && initialGroupId) {
+			await dispatch({
+				id: uuidv4(),
+				type: 'UNGROUP_ELEMENTS',
+				timestamp: Date.now(),
+				payload: {
+					groupId: initialGroupId
+				}
+			});
+		}
+
+		await commitTransaction();
+		selectElement(wrapperId);
+	} catch (error) {
+		isInTransaction = false;
+		transactionEvents = [];
+		throw error;
 	}
-
-	// Select the new wrapper div
-	selectElement(wrapperId);
 }
 
 /**
@@ -1009,8 +1368,25 @@ export async function cutElements(): Promise<void> {
 	clipboard = Array.from(elementsToCopy).map((el) => ({ ...el }));
 	isClipboardFromCut = true;
 
-	// Then delete only the selected elements (children will be deleted automatically)
-	await Promise.all(selected.map((element) => deleteElement(element.id)));
+	// Wrap deletion in a transaction for single undo/redo
+	beginTransaction();
+
+	try {
+		// Delete only the selected elements (children will be deleted automatically)
+		for (const element of selected) {
+			await deleteElement(element.id);
+		}
+
+		await commitTransaction();
+	} catch (error) {
+		// If cut fails, still commit transaction to clean up state
+		if (isInTransaction) {
+			isInTransaction = false;
+			transactionEvents = [];
+			currentTransactionId = null;
+		}
+		throw error;
+	}
 }
 
 /**
@@ -1029,12 +1405,16 @@ export async function pasteElements(): Promise<void> {
 	// Clear selection first
 	clearSelection();
 
-	// Create a map from old IDs to new IDs
-	const oldToNewIdMap = new Map<string, string>();
+	// Wrap entire paste operation in a transaction for single undo/redo
+	beginTransaction();
 
-	// Identify root elements (elements whose parent is not in clipboard or is null)
-	const clipboardIds = new Set(clipboard.map(el => el.id));
-	const rootElements = clipboard.filter(el => !el.parentId || !clipboardIds.has(el.parentId));
+	try {
+		// Create a map from old IDs to new IDs
+		const oldToNewIdMap = new Map<string, string>();
+
+		// Identify root elements (elements whose parent is not in clipboard or is null)
+		const clipboardIds = new Set(clipboard.map(el => el.id));
+		const rootElements = clipboard.filter(el => !el.parentId || !clipboardIds.has(el.parentId));
 
 	// Calculate position offset based on whether this is a cut or copy operation
 	let offsetX = 0;
@@ -1082,11 +1462,9 @@ export async function pasteElements(): Promise<void> {
 		if (element.parentId && oldToNewIdMap.has(element.parentId)) {
 			// Parent is in clipboard, use its new ID
 			newParentId = oldToNewIdMap.get(element.parentId)!;
-		} else if (element.parentId && !clipboardIds.has(element.parentId)) {
-			// Parent is NOT in clipboard, keep original parent reference
-			newParentId = element.parentId;
 		} else {
-			// Parent is null or not applicable
+			// Parent is NOT in clipboard or is null - paste as root element
+			// This ensures elements copied from inside a wrapper can be pasted outside
 			newParentId = null;
 		}
 
@@ -1140,19 +1518,31 @@ export async function pasteElements(): Promise<void> {
 		return newElementId;
 	}
 
-	// Paste all root elements (and their descendants recursively)
-	const newRootElementIds: string[] = [];
-	for (const rootElement of rootElements) {
-		const newId = await pasteElementTree(rootElement, true);
-		newRootElementIds.push(newId);
+		// Paste all root elements (and their descendants recursively)
+		const newRootElementIds: string[] = [];
+		for (const rootElement of rootElements) {
+			const newId = await pasteElementTree(rootElement, true);
+			newRootElementIds.push(newId);
+		}
+
+		// Commit the transaction (batches all events into single undo/redo step)
+		await commitTransaction();
+
+		// Select the newly pasted root elements
+		selectElements(newRootElementIds);
+
+		// Note: We don't reset isClipboardFromCut here
+		// This allows multiple pastes from a cut operation to all paste at screen center
+		// The flag will only be reset when the user does a new copy (Cmd+C)
+	} catch (error) {
+		// If paste fails, still commit transaction to clean up state
+		if (isInTransaction) {
+			isInTransaction = false;
+			transactionEvents = [];
+			currentTransactionId = null;
+		}
+		throw error;
 	}
-
-	// Select the newly pasted root elements
-	selectElements(newRootElementIds);
-
-	// Note: We don't reset isClipboardFromCut here
-	// This allows multiple pastes from a cut operation to all paste at screen center
-	// The flag will only be reset when the user does a new copy (Cmd+C)
 }
 
 /**
@@ -1357,12 +1747,13 @@ export function setupKeyboardShortcuts(): (() => void) | undefined {
 			}
 		}
 
-		// Cmd+G (Mac) or Ctrl+G (Windows) - Wrap selection in div
+		// Shift+W - Wrap selection in div
 		if (
-			(e.metaKey || e.ctrlKey) &&
+			e.shiftKey &&
+			!e.metaKey &&
+			!e.ctrlKey &&
 			!e.altKey &&
-			!e.shiftKey &&
-			e.key.toLowerCase() === 'g' &&
+			e.key.toLowerCase() === 'w' &&
 			!isTyping
 		) {
 			e.preventDefault();
@@ -1381,6 +1772,20 @@ export function setupKeyboardShortcuts(): (() => void) | undefined {
 		) {
 			e.preventDefault();
 			toggleAutoLayout();
+			return;
+		}
+
+		// Cmd+G (Mac) or Ctrl+G (Windows/Linux) - Group elements
+		if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'g' && !e.shiftKey && !isTyping) {
+			e.preventDefault();
+			groupElements();
+			return;
+		}
+
+		// Cmd+Shift+G (Mac) or Ctrl+Shift+G (Windows/Linux) - Ungroup elements
+		if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'g' && e.shiftKey && !isTyping) {
+			e.preventDefault();
+			ungroupElements();
 			return;
 		}
 

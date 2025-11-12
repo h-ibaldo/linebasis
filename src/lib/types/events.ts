@@ -22,6 +22,9 @@ export type EventType =
 	| 'GROUP_MOVE_ELEMENTS'
 	| 'GROUP_RESIZE_ELEMENTS'
 	| 'GROUP_ROTATE_ELEMENTS'
+	// Group operations
+	| 'GROUP_ELEMENTS'
+	| 'UNGROUP_ELEMENTS'
 	// Style operations
 	| 'UPDATE_STYLES'
 	| 'GROUP_UPDATE_STYLES'
@@ -173,6 +176,25 @@ export interface GroupUpdateStylesEvent extends BaseEvent {
 			elementId: string;
 			styles: Partial<ElementStyles>;
 		}>;
+	};
+}
+
+// ============================================================================
+// Group Events
+// ============================================================================
+
+export interface GroupElementsEvent extends BaseEvent {
+	type: 'GROUP_ELEMENTS';
+	payload: {
+		groupId: string;
+		elementIds: string[];
+	};
+}
+
+export interface UngroupElementsEvent extends BaseEvent {
+	type: 'UNGROUP_ELEMENTS';
+	payload: {
+		groupId: string;
 	};
 }
 
@@ -356,6 +378,8 @@ export type DesignEvent =
 	| GroupResizeElementsEvent
 	| GroupRotateElementsEvent
 	| GroupUpdateStylesEvent
+	| GroupElementsEvent
+	| UngroupElementsEvent
 	| UpdateStylesEvent
 	| UpdateTypographyEvent
 	| UpdateSpacingEvent
@@ -479,6 +503,7 @@ export interface Element {
 	type: ElementType;
 	parentId: string | null;
 	viewId: string; // Elements belong to views (breakpoint views)
+	groupId?: string | null; // Group ID if element belongs to a group
 	position: Position;
 	size: Size;
 	rotation?: number; // Rotation angle in degrees (default 0)
@@ -514,6 +539,11 @@ export interface Page {
 	views: string[]; // View IDs (different breakpoints)
 }
 
+export interface Group {
+	id: string;
+	elementIds: string[]; // Element IDs that belong to this group
+}
+
 export interface Component {
 	id: string;
 	name: string;
@@ -524,6 +554,7 @@ export interface DesignState {
 	pages: Record<string, Page>;
 	views: Record<string, View>;
 	elements: Record<string, Element>;
+	groups: Record<string, Group>;
 	components: Record<string, Component>;
 	pageOrder: string[];
 	currentPageId: string | null;

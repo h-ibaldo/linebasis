@@ -398,6 +398,9 @@ type DocumentWithCaret = Document & {
 			styles.push(`position: relative`);
 			styles.push(`left: 0`);
 			styles.push(`top: 0`);
+			// Prevent flex children from shrinking or growing - maintain their dimensions
+			styles.push(`flex-shrink: 0`);
+			styles.push(`flex-grow: 0`);
 		} else {
 			// Freeform: use absolute positioning with coordinates
 			styles.push(`position: absolute`);
@@ -413,6 +416,22 @@ type DocumentWithCaret = Document & {
 		} else {
 			styles.push(`width: ${displaySize.width}px`);
 			styles.push(`height: ${displaySize.height}px`);
+
+			// For rotated elements in auto layout, add margin to reserve space for bounding box
+			if (useRelativePosition && displayRotation && displayRotation !== 0) {
+				const angleRad = displayRotation * (Math.PI / 180);
+				const cos = Math.abs(Math.cos(angleRad));
+				const sin = Math.abs(Math.sin(angleRad));
+				const boundingWidth = displaySize.width * cos + displaySize.height * sin;
+				const boundingHeight = displaySize.width * sin + displaySize.height * cos;
+
+				// Calculate margin needed to expand to bounding box
+				const marginX = (boundingWidth - displaySize.width) / 2;
+				const marginY = (boundingHeight - displaySize.height) / 2;
+
+				// Add margin to make flexbox reserve bounding box space
+				styles.push(`margin: ${marginY}px ${marginX}px`);
+			}
 		}
 		styles.push(`cursor: ${elementCursor}`);
 

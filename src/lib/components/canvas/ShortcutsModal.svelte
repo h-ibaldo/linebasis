@@ -54,8 +54,10 @@
 			{ keys: ['Shift', 'Cmd', ','], description: 'Decrease font size' }
 		],
 		layout: [
-			{ keys: ['Cmd', 'G'], description: 'Wrap selection in div' },
+			{ keys: ['Shift', 'W'], description: 'Wrap selection in div' },
 			{ keys: ['Cmd', 'Backspace'], description: 'Unwrap selected div' },
+			{ keys: ['Cmd', 'G'], description: 'Group selected elements' },
+			{ keys: ['Cmd', 'Shift', 'G'], description: 'Ungroup elements' },
 			{ keys: ['Shift', 'A'], description: 'Toggle auto layout' }
 		]
 	};

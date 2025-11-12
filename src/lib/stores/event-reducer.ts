@@ -12,6 +12,7 @@ import type {
 	Element,
 	View,
 	Page,
+	Group,
 	Component,
 	CreateElementEvent,
 	UpdateElementEvent,
@@ -25,6 +26,8 @@ import type {
 	GroupResizeElementsEvent,
 	GroupRotateElementsEvent,
 	GroupUpdateStylesEvent,
+	GroupElementsEvent,
+	UngroupElementsEvent,
 	UpdateStylesEvent,
 	UpdateTypographyEvent,
 	UpdateSpacingEvent,
@@ -51,6 +54,7 @@ export function getInitialState(): DesignState {
 		pages: {},
 		views: {},
 		elements: {},
+		groups: {},
 		components: {},
 		pageOrder: [],
 		currentPageId: null,
@@ -102,6 +106,12 @@ export function reduceEvent(state: DesignState, event: DesignEvent): DesignState
 			return handleGroupRotateElements(state, event);
 		case 'GROUP_UPDATE_STYLES':
 			return handleGroupUpdateStyles(state, event);
+
+		// Group operations
+		case 'GROUP_ELEMENTS':
+			return handleGroupElements(state, event);
+		case 'UNGROUP_ELEMENTS':
+			return handleUngroupElements(state, event);
 
 		// Style operations
 		case 'UPDATE_STYLES':
@@ -465,6 +475,70 @@ function handleGroupUpdateStyles(state: DesignState, event: GroupUpdateStylesEve
 
 	return {
 		...state,
+		elements: newElements
+	};
+}
+
+// ============================================================================
+// Group Handlers
+// ============================================================================
+
+function handleGroupElements(state: DesignState, event: GroupElementsEvent): DesignState {
+	const { groupId, elementIds } = event.payload;
+
+	// Create the group
+	const group: Group = {
+		id: groupId,
+		elementIds
+	};
+
+	// Update elements to reference the group
+	const newElements = { ...state.elements };
+	for (const elementId of elementIds) {
+		const element = newElements[elementId];
+		if (element) {
+			newElements[elementId] = {
+				...element,
+				groupId
+			};
+		}
+	}
+
+	return {
+		...state,
+		groups: {
+			...state.groups,
+			[groupId]: group
+		},
+		elements: newElements
+	};
+}
+
+function handleUngroupElements(state: DesignState, event: UngroupElementsEvent): DesignState {
+	const { groupId } = event.payload;
+	const group = state.groups[groupId];
+
+	if (!group) return state;
+
+	// Remove groupId from all elements in the group
+	const newElements = { ...state.elements };
+	for (const elementId of group.elementIds) {
+		const element = newElements[elementId];
+		if (element) {
+			newElements[elementId] = {
+				...element,
+				groupId: null
+			};
+		}
+	}
+
+	// Delete the group
+	const newGroups = { ...state.groups };
+	delete newGroups[groupId];
+
+	return {
+		...state,
+		groups: newGroups,
 		elements: newElements
 	};
 }

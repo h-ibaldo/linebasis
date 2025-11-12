@@ -9,7 +9,7 @@
 	 * - Future: measurements, angles, distances, alignment guides
 	 */
 
-	import { onDestroy } from 'svelte';
+	import { onDestroy, tick } from 'svelte';
 	import { get } from 'svelte/store';
 	import type { Element } from '$lib/types/events';
 	import { designState, moveElement, resizeElement, rotateElement, moveElementsGroup, resizeElementsGroup, rotateElementsGroup, selectElement, selectElements, clearSelection, addToSelection, removeFromSelection, updateElementStyles } from '$lib/stores/design-store';
@@ -56,8 +56,29 @@
 		const childIgnoresAutoLayout = element.autoLayout?.ignoreAutoLayout || false;
 		const isInAutoLayout = parentHasAutoLayout && !childIgnoresAutoLayout;
 
-		// If element has display: inline-block OR is in auto layout, get actual rendered size from DOM
-		if (element.styles?.display === 'inline-block' || isInAutoLayout) {
+		// IMPORTANT: Don't use getBoundingClientRect for rotated elements
+		// because it returns the bounding box (which is larger), not the actual size
+		const isRotated = element.rotation && element.rotation !== 0;
+
+		// For rotated elements in auto layout, get the intrinsic size from CSS
+		// (flexbox may have resized the element to fit the bounding box)
+		if (isRotated && isInAutoLayout) {
+			const domElement = document.querySelector(`[data-element-id="${element.id}"]`) as HTMLElement;
+			if (domElement) {
+				// Get computed style to see the actual CSS width/height
+				const computedStyle = window.getComputedStyle(domElement);
+				const width = parseFloat(computedStyle.width) / viewport.scale;
+				const height = parseFloat(computedStyle.height) / viewport.scale;
+
+				// Only use computed size if it's valid
+				if (!isNaN(width) && !isNaN(height)) {
+					return { width, height };
+				}
+			}
+		}
+
+		// If element has display: inline-block OR is in auto layout (and not rotated), get actual rendered size from DOM
+		if (!isRotated && (element.styles?.display === 'inline-block' || isInAutoLayout)) {
 			const domElement = document.querySelector(`[data-element-id="${element.id}"]`);
 			if (domElement) {
 				const rect = domElement.getBoundingClientRect();
@@ -479,6 +500,7 @@
 		const parentHasAutoLayout = parent?.autoLayout?.enabled || false;
 		const childIgnoresAutoLayout = element.autoLayout?.ignoreAutoLayout || false;
 		const isInAutoLayout = parentHasAutoLayout && !childIgnoresAutoLayout;
+		const isRotated = element.rotation && element.rotation !== 0;
 
 		// If in auto layout, get actual rendered position from DOM
 		if (isInAutoLayout) {
@@ -488,7 +510,25 @@
 				const canvasElement = document.querySelector('.canvas');
 				if (canvasElement) {
 					const canvasRect = canvasElement.getBoundingClientRect();
-					// Convert screen coordinates to canvas coordinates
+
+					// For rotated elements, getBoundingClientRect gives us the bounding box position
+					// We need to calculate the actual element's top-left from the center
+					if (isRotated) {
+						// Get bounding box center in canvas coordinates
+						const boundingCenterX = (rect.left + rect.width / 2 - canvasRect.left - viewport.x) / viewport.scale;
+						const boundingCenterY = (rect.top + rect.height / 2 - canvasRect.top - viewport.y) / viewport.scale;
+
+						// The bounding box center IS the element's center (rotation doesn't change the center)
+						// Calculate top-left from center using element's actual size (not bounding box size)
+						// IMPORTANT: Use getActualSize to get the same size that the selection UI will use
+						const actualSize = getActualSize(element);
+						return {
+							x: boundingCenterX - actualSize.width / 2,
+							y: boundingCenterY - actualSize.height / 2
+						};
+					}
+
+					// For non-rotated elements, use top-left directly
 					return {
 						x: (rect.left - canvasRect.left - viewport.x) / viewport.scale,
 						y: (rect.top - canvasRect.top - viewport.y) / viewport.scale
@@ -756,7 +796,7 @@
 	}
 
 	// Expose handleMouseDown for CanvasElement
-	export function startDrag(e: MouseEvent, element: Element, handle?: string, passedSelectedElements?: Element[]) {
+	export async function startDrag(e: MouseEvent, element: Element, handle?: string, passedSelectedElements?: Element[]) {
 		const tool = get(currentTool);
 
 		// Don't handle if hand tool or space panning is active - let canvas handle it
@@ -766,6 +806,18 @@
 
 		e.stopPropagation();
 		e.preventDefault();
+
+		// If clicking on a different element while another has pending transforms,
+		// clear the pending state to prevent layout issues
+		if (activeElementId && activeElementId !== element.id) {
+			pendingPosition = null;
+			pendingSize = null;
+			pendingRotation = null;
+			pendingRadius = null;
+			groupPendingTransforms.clear();
+			// Wait for Svelte to update the DOM before calculating positions
+			await tick();
+		}
 
 		activeElementId = element.id;
 
@@ -1363,7 +1415,32 @@
 			}
 
 			pendingSize = { width: newWidth, height: newHeight };
-			pendingPosition = { x: newX, y: newY };
+
+			// For elements in auto layout, read position from DOM (flexbox repositions them)
+			// For other elements, use calculated anchor position
+			if (activeElement) {
+				const state = get(designState);
+				const parent = activeElement.parentId ? state.elements[activeElement.parentId] : null;
+				const parentHasAutoLayout = !!((parent as any)?.autoLayout?.enabled);
+				const childIgnoresAutoLayout = !!((activeElement as any).autoLayout?.ignoreAutoLayout);
+				const isInAutoLayout = parentHasAutoLayout && !childIgnoresAutoLayout;
+
+				if (isInAutoLayout) {
+					// For auto layout: read actual position from DOM (flexbox controls positioning)
+					// Use setTimeout to let Svelte update the DOM first
+					setTimeout(() => {
+						const actualPos = getAbsolutePosition(activeElement);
+						pendingPosition = actualPos;
+					}, 0);
+					// Temporarily use the last known position
+					pendingPosition = pendingPosition || getAbsolutePosition(activeElement);
+				} else {
+					// For non-auto layout: use calculated anchor position
+					pendingPosition = { x: newX, y: newY };
+				}
+			} else {
+				pendingPosition = { x: newX, y: newY };
+			}
 
 			// Update pending transforms for all group elements during resize
 			if (isGroupInteraction) {
@@ -1412,9 +1489,26 @@
 				);
 			}
 		} else if (interactionMode === 'rotating') {
-			// Calculate center point of selection
-			const centerX = elementStartCanvas.x + elementStartCanvas.width / 2;
-			const centerY = elementStartCanvas.y + elementStartCanvas.height / 2;
+			// Get current element to check if in auto layout
+			const activeElement = selectedElements.find(el => el.id === activeElementId);
+			const state = get(designState);
+			const parent = activeElement?.parentId ? state.elements[activeElement.parentId] : null;
+			const parentHasAutoLayout = !!((parent as any)?.autoLayout?.enabled);
+			const childIgnoresAutoLayout = !!((activeElement as any)?.autoLayout?.ignoreAutoLayout);
+			const isInAutoLayout = parentHasAutoLayout && !childIgnoresAutoLayout;
+
+			// For auto layout, read center from DOM (flexbox repositions element as it rotates)
+			// For others, use fixed center calculated at start
+			let centerX: number, centerY: number;
+			if (isInAutoLayout && activeElement) {
+				const currentPos = getAbsolutePosition(activeElement);
+				const currentSize = getActualSize(activeElement);
+				centerX = currentPos.x + currentSize.width / 2;
+				centerY = currentPos.y + currentSize.height / 2;
+			} else {
+				centerX = elementStartCanvas.x + elementStartCanvas.width / 2;
+				centerY = elementStartCanvas.y + elementStartCanvas.height / 2;
+			}
 
 			// Convert current mouse position to canvas space
 			const mouseCanvasX = (e.clientX - viewport.x) / viewport.scale;
@@ -1433,6 +1527,15 @@
 
 			// Calculate new rotation
 			pendingRotation = normalizeRotation(elementStartRotation + angleDelta);
+
+			// For auto layout, update position from DOM (element moves as it rotates)
+			if (isInAutoLayout && activeElement) {
+				setTimeout(() => {
+					const actualPos = getAbsolutePosition(activeElement);
+					pendingPosition = actualPos;
+				}, 0);
+				pendingPosition = getAbsolutePosition(activeElement);
+			}
 
 			// Update pending transforms for all group elements during rotation
 			if (isGroupInteraction) {
