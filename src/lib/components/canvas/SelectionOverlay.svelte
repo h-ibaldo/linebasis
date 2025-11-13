@@ -12,7 +12,7 @@
 	import { onDestroy, tick } from 'svelte';
 	import { get } from 'svelte/store';
 	import type { Element } from '$lib/types/events';
-	import { designState, moveElement, resizeElement, rotateElement, moveElementsGroup, resizeElementsGroup, rotateElementsGroup, selectElement, selectElements, clearSelection, addToSelection, removeFromSelection, updateElementStyles } from '$lib/stores/design-store';
+	import { designState, moveElement, resizeElement, rotateElement, moveElementsGroup, resizeElementsGroup, rotateElementsGroup, selectElement, selectElements, clearSelection, addToSelection, removeFromSelection, updateElementStyles, reorderElement } from '$lib/stores/design-store';
 	import { interactionState } from '$lib/stores/interaction-store';
 	import { currentTool } from '$lib/stores/tool-store';
 	import { CANVAS_INTERACTION } from '$lib/constants/canvas';
@@ -45,6 +45,12 @@
 	let radiusValuesWhenToggled: { nw: number; ne: number; se: number; sw: number } | null = null; // Capture corner values when toggling to independent
 	let radiusFrozenValues: { nw: number; ne: number; se: number; sw: number } | null = null; // Frozen values for visual feedback during independent drag
 	let groupPendingTransforms: Map<string, { position: { x: number; y: number }; size: { width: number; height: number }; rotation?: number }> = new Map();
+
+	// Auto layout reordering state
+	let reorderTargetIndex: number | null = null;
+	let reorderParentId: string | null = null;
+	let reorderOriginalIndex: number | null = null;
+	let lastAppliedIndex: number | null = null;
 
 	// Get actual rendered size for auto-sized elements (inline-block text, auto layout)
 	function getActualSize(element: Element): { width: number; height: number } {
@@ -1096,6 +1102,21 @@
 			} else {
 				// Single element drag
 				pendingPosition = { ...pos };
+
+				// Initialize auto layout reordering state
+				reorderTargetIndex = null;
+				lastAppliedIndex = null;
+
+				// Check if element is in auto layout and can be reordered
+				const state = get(designState);
+				const parent = element.parentId ? state.elements[element.parentId] : null;
+				if (parent?.autoLayout?.enabled && !element.autoLayout?.ignoreAutoLayout) {
+					reorderParentId = parent.id;
+					reorderOriginalIndex = parent.children?.indexOf(element.id) ?? null;
+				} else {
+					reorderParentId = null;
+					reorderOriginalIndex = null;
+				}
 			}
 
 			// If group interaction, initialize groupPendingTransforms with current positions
@@ -1118,6 +1139,184 @@
 		// Add global listeners
 		document.addEventListener('mousemove', handleMouseMove);
 		document.addEventListener('mouseup', handleMouseUp);
+	}
+
+	// Auto layout reordering helper - applies the reorder via design-store
+	async function applyReorder(elementId: string, parentId: string, targetIndex: number): Promise<void> {
+		const state = get(designState);
+		const parent = state.elements[parentId];
+		if (!parent) return;
+
+		const siblings = parent.children || [];
+		const currentIndex = siblings.indexOf(elementId);
+		if (currentIndex === -1 || currentIndex === targetIndex) return;
+
+		// Dispatch the reorder event via design-store
+		await reorderElement(elementId, parentId, targetIndex);
+	}
+
+	function calculateReorderTargetIndex(
+		cursorX: number,
+		cursorY: number,
+		parentId: string,
+		elementId: string
+	): number | null {
+		const state = get(designState);
+		const parent = state.elements[parentId];
+		if (!parent || !parent.children) return null;
+
+		const siblings = parent.children
+			.map(id => state.elements[id])
+			.filter(el => el && el.id !== elementId);
+
+		if (siblings.length === 0) return 0;
+
+		const flexDirection = parent.autoLayout?.direction || 'row';
+
+		// Get DOM positions for siblings (auto layout uses actual rendered positions)
+		const siblingPositions = siblings.map(sibling => {
+			const domElement = document.querySelector(`[data-element-id="${sibling.id}"]`);
+			if (!domElement) return null;
+
+			const rect = domElement.getBoundingClientRect();
+			return {
+				id: sibling.id,
+				x: (rect.left - viewport.x) / viewport.scale,
+				y: (rect.top - viewport.y) / viewport.scale,
+				width: rect.width / viewport.scale,
+				height: rect.height / viewport.scale,
+				centerX: (rect.left - viewport.x) / viewport.scale + rect.width / viewport.scale / 2,
+				centerY: (rect.top - viewport.y) / viewport.scale + rect.height / viewport.scale / 2
+			};
+		}).filter(pos => pos !== null) as Array<{
+			id: string;
+			x: number;
+			y: number;
+			width: number;
+			height: number;
+			centerX: number;
+			centerY: number;
+		}>;
+
+		if (siblingPositions.length === 0) return 0;
+
+		// For row-wrap, we need to handle multi-row layout
+		if (flexDirection === 'row-wrap') {
+			// Group siblings by rows (elements with similar Y positions)
+			const rows: Array<typeof siblingPositions> = [];
+			const rowThreshold = 5; // pixels tolerance for same row
+
+			siblingPositions.forEach(pos => {
+				// Find if this element belongs to an existing row
+				let foundRow = false;
+				for (const row of rows) {
+					if (Math.abs(row[0].centerY - pos.centerY) < rowThreshold) {
+						row.push(pos);
+						foundRow = true;
+						break;
+					}
+				}
+				// If not in existing row, create new row
+				if (!foundRow) {
+					rows.push([pos]);
+				}
+			});
+
+			// Sort rows by Y position (top to bottom)
+			rows.sort((a, b) => a[0].centerY - b[0].centerY);
+
+			// Sort elements within each row by X position (left to right)
+			rows.forEach(row => row.sort((a, b) => a.centerX - b.centerX));
+
+			// Find which row the cursor is in
+			let targetRow: typeof siblingPositions | null = null;
+			let targetRowIndex = 0;
+
+			for (let i = 0; i < rows.length; i++) {
+				const row = rows[i];
+				const rowMinY = Math.min(...row.map(el => el.y));
+				const rowMaxY = Math.max(...row.map(el => el.y + el.height));
+
+				if (cursorY >= rowMinY && cursorY <= rowMaxY) {
+					targetRow = row;
+					targetRowIndex = i;
+					break;
+				}
+			}
+
+			// If cursor is above all rows, use first row
+			if (!targetRow && cursorY < rows[0][0].y) {
+				targetRow = rows[0];
+				targetRowIndex = 0;
+			}
+
+			// If cursor is below all rows, use last row
+			if (!targetRow && cursorY > rows[rows.length - 1][0].y) {
+				targetRow = rows[rows.length - 1];
+				targetRowIndex = rows.length - 1;
+			}
+
+			if (!targetRow) return null;
+
+			// Find insertion point within the row by X position
+			let insertIndexInRow = targetRow.length;
+			for (let i = 0; i < targetRow.length; i++) {
+				if (cursorX < targetRow[i].centerX) {
+					insertIndexInRow = i;
+					break;
+				}
+			}
+
+			// Convert row-local index to global index
+			let globalIndex = 0;
+			for (let i = 0; i < targetRowIndex; i++) {
+				globalIndex += rows[i].length;
+			}
+			globalIndex += insertIndexInRow;
+
+			// No adjustment needed - siblingPositions already excludes the dragged element
+			// and reorderElement removes before inserting at the given index
+			return globalIndex;
+		}
+
+		// For row direction: compare X positions
+		if (flexDirection === 'row') {
+			let targetIndex = siblingPositions.length;
+			for (let i = 0; i < siblingPositions.length; i++) {
+				if (cursorX < siblingPositions[i].centerX) {
+					targetIndex = i;
+					break;
+				}
+			}
+
+			// No adjustment needed - siblingPositions already excludes the dragged element
+			// and reorderElement removes before inserting at the given index
+			return targetIndex;
+		}
+
+		// For column direction: compare Y positions
+		if (flexDirection === 'column') {
+			let targetIndex = siblingPositions.length;
+			for (let i = 0; i < siblingPositions.length; i++) {
+				if (cursorY < siblingPositions[i].centerY) {
+					targetIndex = i;
+					break;
+				}
+			}
+
+			// No adjustment needed - siblingPositions already excludes the dragged element
+			// and reorderElement removes before inserting at the given index
+			return targetIndex;
+		}
+
+		return null;
+	}
+
+	// Live reordering: reorder elements as user drags
+	$: if (interactionMode === 'dragging' && reorderTargetIndex !== null &&
+		reorderTargetIndex !== lastAppliedIndex && reorderParentId && activeElementId) {
+		lastAppliedIndex = reorderTargetIndex;
+		applyReorder(activeElementId, reorderParentId, reorderTargetIndex);
 	}
 
 	// Mouse event handlers
@@ -1164,6 +1363,18 @@
 							}
 						];
 					})
+				);
+			}
+
+			// Calculate reorder target index if in auto layout
+			if (reorderParentId && activeElementId) {
+				const mouseCanvasX = (e.clientX - viewport.x) / viewport.scale;
+				const mouseCanvasY = (e.clientY - viewport.y) / viewport.scale;
+				reorderTargetIndex = calculateReorderTargetIndex(
+					mouseCanvasX,
+					mouseCanvasY,
+					reorderParentId,
+					activeElementId
 				);
 			}
 		} else if (interactionMode === 'resizing' && resizeHandle) {
@@ -1820,9 +2031,12 @@
 			if (interactionMode === 'dragging') {
 				if (movedX > CANVAS_INTERACTION.MOVEMENT_THRESHOLD || movedY > CANVAS_INTERACTION.MOVEMENT_THRESHOLD) {
 					if (pendingPosition && activeElement) {
-						// Convert absolute position to parent-relative position
-						const relativePos = absoluteToRelativePosition(activeElement, pendingPosition);
-						await moveElement(activeElementId, relativePos);
+						// Skip moveElement if in auto layout (reordering already happened live)
+						if (!reorderParentId) {
+							// Convert absolute position to parent-relative position
+							const relativePos = absoluteToRelativePosition(activeElement, pendingPosition);
+							await moveElement(activeElementId, relativePos);
+						}
 					}
 				}
 			} else if (interactionMode === 'resizing') {
@@ -1922,6 +2136,10 @@
 		hasMovedPastThreshold = false;
 		initialHandlePosition = null;
 		mouseToHandleOffset = { x: 0, y: 0 };
+		reorderTargetIndex = null;
+		reorderParentId = null;
+		reorderOriginalIndex = null;
+		lastAppliedIndex = null;
 
 		document.removeEventListener('mousemove', handleMouseMove);
 		document.removeEventListener('mouseup', handleMouseUp);
@@ -1934,10 +2152,10 @@
 	});
 </script>
 
-<!-- Render selection UI (hide when text is being edited) -->
+<!-- Render selection UI (hide when text is being edited or during auto layout reordering) -->
 {#if $interactionState.mode !== 'editing-text'}
-	{#if selectedElements.length === 1}
-		<!-- Single element selection -->
+	{#if selectedElements.length === 1 && !(interactionMode === 'dragging' && reorderParentId)}
+		<!-- Single element selection (hidden during auto layout reordering - ghost shows instead) -->
 		<SelectionUI
 			element={{
 				...selectedElements[0],
@@ -2006,4 +2224,54 @@
 	>
 		{Math.round(pendingRotation)}°
 	</div>
+{/if}
+
+<!-- Auto layout reordering: Ghost element following cursor -->
+{#if interactionMode === 'dragging' && reorderParentId && activeElementId && pendingPosition}
+	{@const draggedElement = selectedElements.find(el => el.id === activeElementId)}
+	{#if draggedElement}
+		{@const ghostSize = displaySizeForSelection || draggedElement.size}
+		{@const ghostPos = pendingPosition}
+
+		<!-- Ghost element with visual preview -->
+		{@const rotation = draggedElement.rotation || 0}
+		{@const rotationRad = rotation * (Math.PI / 180)}
+		{@const cos = Math.cos(rotationRad)}
+		{@const sin = Math.sin(rotationRad)}
+
+		<!-- Calculate rotated position offset -->
+		{@const centerOffsetX = ghostSize.width / 2}
+		{@const centerOffsetY = ghostSize.height / 2}
+		{@const rotatedCenterX = centerOffsetX * cos - centerOffsetY * sin}
+		{@const rotatedCenterY = centerOffsetX * sin + centerOffsetY * cos}
+		{@const adjustX = rotatedCenterX - centerOffsetX}
+		{@const adjustY = rotatedCenterY - centerOffsetY}
+
+		<div
+			style="
+				position: absolute;
+				left: {viewport.x + (ghostPos.x + centerOffsetX) * viewport.scale}px;
+				top: {viewport.y + (ghostPos.y + centerOffsetY) * viewport.scale}px;
+				width: {ghostSize.width * viewport.scale}px;
+				height: {ghostSize.height * viewport.scale}px;
+				background-color: {draggedElement.styles?.backgroundColor || '#f5f5f5'};
+				border: {draggedElement.styles?.borderWidth || '0px'} {draggedElement.styles?.borderStyle || 'solid'} {draggedElement.styles?.borderColor || 'transparent'};
+				border-radius: {draggedElement.styles?.borderRadius || '0px'};
+				opacity: 0.9;
+				pointer-events: none;
+				z-index: 10000;
+				box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+				transform: translate(-50%, -50%) rotate({rotation}deg);
+				transform-origin: center center;
+			"
+		>
+			{#if draggedElement.type === 'img'}
+				<img
+					src={draggedElement.src || ''}
+					alt={draggedElement.alt || ''}
+					style="width: 100%; height: 100%; object-fit: {draggedElement.styles?.objectFit || 'cover'};"
+				/>
+			{/if}
+		</div>
+	{/if}
 {/if}

@@ -382,6 +382,18 @@ type DocumentWithCaret = Document & {
 		? $interactionState.pendingCornerRadii
 		: null;
 
+	// Check if this element is being dragged
+	$: isBeingDragged = $interactionState.mode === 'dragging' &&
+		$interactionState.activeElementId === element.id &&
+		$interactionState.pendingPosition !== null;
+
+	// Check if this is an auto layout child being dragged for reordering
+	$: isAutoLayoutChildDragging = (() => {
+		if (!isBeingDragged) return false;
+		const parent = element.parentId ? $designState.elements[element.parentId] : null;
+		return parent?.autoLayout?.enabled && !element.autoLayout?.ignoreAutoLayout;
+	})();
+
 	// Generate inline styles from element properties
 	$: elementStyles = (() => {
 		const styles: string[] = [];
@@ -393,7 +405,13 @@ type DocumentWithCaret = Document & {
 		const useRelativePosition = parentHasAutoLayout && !childIgnoresAutoLayout;
 
 		// Position and size - use pending values during interaction
-		if (useRelativePosition) {
+		if (isBeingDragged && !isAutoLayoutChildDragging) {
+			// Non-auto-layout element being dragged: use absolute positioning to follow cursor
+			styles.push(`position: absolute`);
+			styles.push(`left: ${displayPosition.x}px`);
+			styles.push(`top: ${displayPosition.y}px`);
+			styles.push(`z-index: 10000`);
+		} else if (useRelativePosition) {
 			// Auto layout: children use relative positioning
 			styles.push(`position: relative`);
 			styles.push(`left: 0`);
@@ -401,6 +419,11 @@ type DocumentWithCaret = Document & {
 			// Prevent flex children from shrinking or growing - maintain their dimensions
 			styles.push(`flex-shrink: 0`);
 			styles.push(`flex-grow: 0`);
+
+			// If being dragged, dim the original (ghost will follow cursor at full opacity)
+			if (isAutoLayoutChildDragging) {
+				styles.push(`opacity: 0.3`);
+			}
 		} else {
 			// Freeform: use absolute positioning with coordinates
 			styles.push(`position: absolute`);
@@ -645,7 +668,7 @@ $: if (isEditing && textEditorElement && !hasFocusedEditor) {
 	tabindex={isEditing ? -1 : 0}
 >
 		<!-- Selection indicator - blue outline overlay (Figma/Illustrator style) -->
-		{#if isSelected && !isEditing}
+		{#if isSelected && !isEditing && !isAutoLayoutChildDragging}
 			<div
 				class="selection-indicator"
 				style="border-radius: inherit;"
