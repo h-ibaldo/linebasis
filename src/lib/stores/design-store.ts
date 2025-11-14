@@ -1402,7 +1402,31 @@ export async function pasteElements(): Promise<void> {
 	// Narrow type for use in nested function
 	const pageId: string = currentPageId;
 
-	// Clear selection first
+	// Determine target parent based on selected element and clipboard
+	const selected = get(selectedElements);
+	let targetParentId: string | null = null;
+
+	if (selected.length === 1) {
+		const selectedElement = selected[0];
+		const clipboardIds = new Set(clipboard.map(el => el.id));
+
+		// Check if selected element is one of the copied elements
+		if (clipboardIds.has(selectedElement.id)) {
+			// Paste as sibling of selected element
+			targetParentId = selectedElement.parentId;
+		} else {
+			// Selected element is NOT in clipboard
+			if (selectedElement.children && selectedElement.children.length > 0) {
+				// Selected element has children -> paste as child
+				targetParentId = selectedElement.id;
+			} else {
+				// Selected element has no children -> paste as sibling
+				targetParentId = selectedElement.parentId;
+			}
+		}
+	}
+
+	// Clear selection
 	clearSelection();
 
 	// Wrap entire paste operation in a transaction for single undo/redo
@@ -1462,16 +1486,46 @@ export async function pasteElements(): Promise<void> {
 		if (element.parentId && oldToNewIdMap.has(element.parentId)) {
 			// Parent is in clipboard, use its new ID
 			newParentId = oldToNewIdMap.get(element.parentId)!;
+		} else if (isRoot) {
+			// For root elements, use the determined target parent
+			// (based on whether selected element is in clipboard and has children)
+			newParentId = targetParentId;
 		} else {
-			// Parent is NOT in clipboard or is null - paste as root element
-			// This ensures elements copied from inside a wrapper can be pasted outside
+			// Non-root elements without parent in clipboard -> paste as root
 			newParentId = null;
 		}
 
-		// Apply offset only to root elements
-		const position = isRoot
-			? { x: element.position.x + offsetX, y: element.position.y + offsetY }
-			: { x: element.position.x, y: element.position.y };
+		// Calculate position based on paste context
+		let position: { x: number; y: number };
+
+		if (isRoot && newParentId === null) {
+			// Pasting at root level with no parent -> apply offset
+			position = {
+				x: element.position.x + offsetX,
+				y: element.position.y + offsetY
+			};
+		} else if (isRoot && newParentId !== null) {
+			// Pasting as child of a parent element
+			const currentState = get(designState);
+			const parentElement = currentState.elements[newParentId];
+
+			if (parentElement?.autoLayout?.enabled) {
+				// Parent has auto layout -> paste as last child in queue
+				// Position doesn't matter, auto layout will handle it
+				position = { x: 0, y: 0 };
+			} else if (parentElement) {
+				// Parent doesn't have auto layout -> paste at center of parent
+				const centerX = parentElement.size.width / 2 - element.size.width / 2;
+				const centerY = parentElement.size.height / 2 - element.size.height / 2;
+				position = { x: centerX, y: centerY };
+			} else {
+				// Fallback if parent not found
+				position = { x: element.position.x, y: element.position.y };
+			}
+		} else {
+			// Non-root elements -> maintain their relative position
+			position = { x: element.position.x, y: element.position.y };
+		}
 
 		// Create the new element
 		const createData: Parameters<typeof createElement>[0] = {
