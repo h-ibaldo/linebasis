@@ -52,7 +52,46 @@
 	let reorderOriginalIndex: number | null = null;
 	let lastAppliedIndex: number | null = null;
 	let reorderGhostOffset: { x: number; y: number } = { x: 0, y: 0 }; // Offset from cursor to element top-left
+	let reorderElementRotation: number = 0; // Rotation of element being reordered
+	let reorderElementSize: { width: number; height: number } = { width: 0, height: 0 }; // Size of element being reordered
 	let currentMouseScreen: { x: number; y: number } = { x: 0, y: 0 }; // Current mouse position for debug
+
+	/**
+	 * Calculate the actual top-left position for a rotated element in screen space
+	 * For non-rotated elements, this is just the bounding box top-left
+	 * For rotated elements with transform-origin: center center, the element's center stays fixed
+	 * and we need to calculate where the top-left corner is
+	 */
+	function calculateActualTopLeftForRotated(
+		boundingRect: DOMRect,
+		elementSize: { width: number; height: number },
+		rotation: number,
+		scale: number
+	): { left: number; top: number } {
+		if (rotation === 0) {
+			return { left: boundingRect.left, top: boundingRect.top };
+		}
+
+		// Get the element's unrotated size in screen pixels
+		const width = elementSize.width * scale;
+		const height = elementSize.height * scale;
+
+		// For elements with transform-origin: center center (which CanvasElement uses):
+		// The center of the element stays at the same position
+		// The bounding box center IS the element's rotation center
+		const elementCenterX = boundingRect.left + boundingRect.width / 2;
+		const elementCenterY = boundingRect.top + boundingRect.height / 2;
+
+		// The top-left corner is offset from center by half the dimensions
+		// Since the element is NOT rotated around top-left, we just offset from center
+		const topLeftX = elementCenterX - width / 2;
+		const topLeftY = elementCenterY - height / 2;
+
+		return {
+			left: topLeftX,
+			top: topLeftY
+		};
+	}
 
 	// Get actual rendered size for auto-sized elements (inline-block text, auto layout)
 	function getActualSize(element: Element): { width: number; height: number } {
@@ -74,9 +113,11 @@
 			const domElement = document.querySelector(`[data-element-id="${element.id}"]`) as HTMLElement;
 			if (domElement) {
 				// Get computed style to see the actual CSS width/height
+				// computedStyle returns CSS pixel values (canvas units), NOT screen pixels
+				// So we DON'T divide by viewport.scale here
 				const computedStyle = window.getComputedStyle(domElement);
-				const width = parseFloat(computedStyle.width) / viewport.scale;
-				const height = parseFloat(computedStyle.height) / viewport.scale;
+				const width = parseFloat(computedStyle.width);
+				const height = parseFloat(computedStyle.height);
 
 				// Only use computed size if it's valid
 				if (!isNaN(width) && !isNaN(height)) {
@@ -1122,43 +1163,24 @@
 					if (domElement) {
 						const rect = domElement.getBoundingClientRect();
 
-						// For rotated elements, getBoundingClientRect() returns the bounding box,
-						// not the actual top-left corner. We need to calculate the actual position
-						// of the element's top-left corner (transform-origin: top left)
-						let actualLeft = rect.left;
-						let actualTop = rect.top;
+						// Store element rotation and size for recalculation during drag
+						// Use displaySizeForSelection which accounts for auto-sized elements
+						reorderElementRotation = element.rotation || 0;
+						const elementDisplaySize = displaySizeForSelection || element.size;
+						reorderElementSize = { ...elementDisplaySize };
 
-						// If element is rotated, calculate the actual top-left position
-						const rotation = element.rotation || 0;
-						if (rotation !== 0) {
-							// Get the element's unrotated size
-							const width = element.size.width * viewport.scale;
-							const height = element.size.height * viewport.scale;
-
-							// The bounding box center
-							const boxCenterX = rect.left + rect.width / 2;
-							const boxCenterY = rect.top + rect.height / 2;
-
-							// For an element rotated around its top-left (transform-origin: top left):
-							// Calculate where the center of the unrotated element would be
-							const rad = (rotation * Math.PI) / 180;
-							const centerX = width / 2;
-							const centerY = height / 2;
-
-							// After rotation around top-left (0,0), the center moves to:
-							const rotatedCenterX = centerX * Math.cos(rad) - centerY * Math.sin(rad);
-							const rotatedCenterY = centerX * Math.sin(rad) + centerY * Math.cos(rad);
-
-							// The bounding box center is at the rotated center position, so:
-							// actualTopLeft = boxCenter - rotatedCenter
-							actualLeft = boxCenterX - rotatedCenterX;
-							actualTop = boxCenterY - rotatedCenterY;
-						}
+						// Calculate actual top-left position accounting for rotation
+						const actualPos = calculateActualTopLeftForRotated(
+							rect,
+							elementDisplaySize,
+							reorderElementRotation,
+							viewport.scale
+						);
 
 						// Offset from mouse to element's actual top-left (rotation origin) in screen pixels
 						reorderGhostOffset = {
-							x: actualLeft - e.clientX,
-							y: actualTop - e.clientY
+							x: actualPos.left - e.clientX,
+							y: actualPos.top - e.clientY
 						};
 
 						// Get all children positions at start
@@ -1179,9 +1201,9 @@
 						console.log('║ === DRAG START DEBUG ===');
 						console.log('╠════════════════════════════════════════════');
 						console.log('🎯 Dragged element rect (bounding box):', { left: rect.left.toFixed(0), top: rect.top.toFixed(0), width: rect.width.toFixed(0), height: rect.height.toFixed(0) });
-						if (rotation !== 0) {
-							console.log('🔄 Element rotation:', rotation + '°');
-							console.log('📍 Actual top-left (after rotation correction):', { left: actualLeft.toFixed(2), top: actualTop.toFixed(2) });
+						if (reorderElementRotation !== 0) {
+							console.log('🔄 Element rotation:', reorderElementRotation + '°');
+							console.log('📍 Actual top-left (after rotation correction):', { left: actualPos.left.toFixed(2), top: actualPos.top.toFixed(2) });
 						}
 						console.log('🖱️  Mouse click:', { x: e.clientX, y: e.clientY });
 						console.log('📏 Offset:', reorderGhostOffset);
@@ -1429,8 +1451,8 @@
 				const mouseCanvasX = (e.clientX - viewport.x) / viewport.scale;
 				const mouseCanvasY = (e.clientY - viewport.y) / viewport.scale;
 
-				// For auto layout reordering, calculate ghost position in screen space first
-				// then convert to canvas space
+				// For auto layout reordering, calculate ghost position using the stored offset
+				// The offset accounts for rotation and was calculated at drag start
 				const ghostScreenX = e.clientX + reorderGhostOffset.x;
 				const ghostScreenY = e.clientY + reorderGhostOffset.y;
 
@@ -2265,6 +2287,8 @@
 		reorderOriginalIndex = null;
 		lastAppliedIndex = null;
 		reorderGhostOffset = { x: 0, y: 0 };
+		reorderElementRotation = 0;
+		reorderElementSize = { width: 0, height: 0 };
 
 		document.removeEventListener('mousemove', handleMouseMove);
 		document.removeEventListener('mouseup', handleMouseUp);
@@ -2380,7 +2404,7 @@
 				z-index: 10000;
 				box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 				transform: rotate({rotation}deg);
-				transform-origin: top left;
+				transform-origin: center center;
 			"
 		>
 			{#if draggedElement.type === 'img'}
