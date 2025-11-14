@@ -51,6 +51,7 @@
 	let reorderParentId: string | null = null;
 	let reorderOriginalIndex: number | null = null;
 	let lastAppliedIndex: number | null = null;
+	let reorderGhostOffset: { x: number; y: number } = { x: 0, y: 0 }; // Offset from cursor to element top-left
 
 	// Get actual rendered size for auto-sized elements (inline-block text, auto layout)
 	function getActualSize(element: Element): { width: number; height: number } {
@@ -1113,6 +1114,14 @@
 				if (parent?.autoLayout?.enabled && !element.autoLayout?.ignoreAutoLayout) {
 					reorderParentId = parent.id;
 					reorderOriginalIndex = parent.children?.indexOf(element.id) ?? null;
+
+					// Calculate offset from cursor to element position for ghost positioning
+					const mouseCanvasX = (e.clientX - viewport.x) / viewport.scale;
+					const mouseCanvasY = (e.clientY - viewport.y) / viewport.scale;
+					reorderGhostOffset = {
+						x: pos.x - mouseCanvasX,
+						y: pos.y - mouseCanvasY
+					};
 				} else {
 					reorderParentId = null;
 					reorderOriginalIndex = null;
@@ -1228,35 +1237,22 @@
 			// Sort elements within each row by X position (left to right)
 			rows.forEach(row => row.sort((a, b) => a.centerX - b.centerX));
 
-			// Find which row the cursor is in
-			let targetRow: typeof siblingPositions | null = null;
+			// Find the nearest row based on Y distance (better for horizontal dragging)
+			let targetRow: typeof siblingPositions = rows[0];
 			let targetRowIndex = 0;
+			let minDistance = Infinity;
 
 			for (let i = 0; i < rows.length; i++) {
 				const row = rows[i];
-				const rowMinY = Math.min(...row.map(el => el.y));
-				const rowMaxY = Math.max(...row.map(el => el.y + el.height));
+				const rowCenterY = row[0].centerY; // All elements in row have similar centerY
+				const distance = Math.abs(cursorY - rowCenterY);
 
-				if (cursorY >= rowMinY && cursorY <= rowMaxY) {
+				if (distance < minDistance) {
+					minDistance = distance;
 					targetRow = row;
 					targetRowIndex = i;
-					break;
 				}
 			}
-
-			// If cursor is above all rows, use first row
-			if (!targetRow && cursorY < rows[0][0].y) {
-				targetRow = rows[0];
-				targetRowIndex = 0;
-			}
-
-			// If cursor is below all rows, use last row
-			if (!targetRow && cursorY > rows[rows.length - 1][0].y) {
-				targetRow = rows[rows.length - 1];
-				targetRowIndex = rows.length - 1;
-			}
-
-			if (!targetRow) return null;
 
 			// Find insertion point within the row by X position
 			let insertIndexInRow = targetRow.length;
@@ -1340,42 +1336,49 @@
 		};
 
 		if (interactionMode === 'dragging') {
-			// Update pending position for bounding box
-			pendingPosition = {
-				x: elementStartCanvas.x + deltaCanvas.x,
-				y: elementStartCanvas.y + deltaCanvas.y
-			};
-
-			// Update pending transforms for all group elements
-			if (isGroupInteraction) {
-				const deltaX = deltaCanvas.x;
-				const deltaY = deltaCanvas.y;
-
-				groupPendingTransforms = new Map(
-					groupStartElements.map(el => {
-						// Use rotation stored at drag start (preserves it throughout drag)
-						return [
-							el.id,
-							{
-								position: { x: el.x + deltaX, y: el.y + deltaY },
-								size: { width: el.width, height: el.height },
-								rotation: el.rotation
-							}
-						];
-					})
-				);
-			}
-
 			// Calculate reorder target index if in auto layout
 			if (reorderParentId && activeElementId) {
 				const mouseCanvasX = (e.clientX - viewport.x) / viewport.scale;
 				const mouseCanvasY = (e.clientY - viewport.y) / viewport.scale;
+
+				// For auto layout reordering, position ghost at cursor with offset
+				pendingPosition = {
+					x: mouseCanvasX + reorderGhostOffset.x,
+					y: mouseCanvasY + reorderGhostOffset.y
+				};
+
 				reorderTargetIndex = calculateReorderTargetIndex(
 					mouseCanvasX,
 					mouseCanvasY,
 					reorderParentId,
 					activeElementId
 				);
+			} else {
+				// Normal drag: update position based on delta from start
+				pendingPosition = {
+					x: elementStartCanvas.x + deltaCanvas.x,
+					y: elementStartCanvas.y + deltaCanvas.y
+				};
+
+				// Update pending transforms for all group elements
+				if (isGroupInteraction) {
+					const deltaX = deltaCanvas.x;
+					const deltaY = deltaCanvas.y;
+
+					groupPendingTransforms = new Map(
+						groupStartElements.map(el => {
+							// Use rotation stored at drag start (preserves it throughout drag)
+							return [
+								el.id,
+								{
+									position: { x: el.x + deltaX, y: el.y + deltaY },
+									size: { width: el.width, height: el.height },
+									rotation: el.rotation
+								}
+							];
+						})
+					);
+				}
 			}
 		} else if (interactionMode === 'resizing' && resizeHandle) {
 			// Check if scale tool is active OR shift key is held - if so, maintain aspect ratio
@@ -2140,6 +2143,7 @@
 		reorderParentId = null;
 		reorderOriginalIndex = null;
 		lastAppliedIndex = null;
+		reorderGhostOffset = { x: 0, y: 0 };
 
 		document.removeEventListener('mousemove', handleMouseMove);
 		document.removeEventListener('mouseup', handleMouseUp);
@@ -2227,10 +2231,11 @@
 {/if}
 
 <!-- Auto layout reordering: Ghost element following cursor -->
-{#if interactionMode === 'dragging' && reorderParentId && activeElementId && pendingPosition}
+{#if interactionMode === 'dragging' && reorderParentId && activeElementId}
 	{@const draggedElement = selectedElements.find(el => el.id === activeElementId)}
-	{#if draggedElement}
+	{#if draggedElement && pendingPosition}
 		{@const ghostSize = displaySizeForSelection || draggedElement.size}
+		<!-- Use pendingPosition which is already being updated to follow cursor during reordering -->
 		{@const ghostPos = pendingPosition}
 
 		<!-- Ghost element with visual preview -->
