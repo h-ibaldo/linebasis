@@ -52,6 +52,7 @@
 	let reorderOriginalIndex: number | null = null;
 	let lastAppliedIndex: number | null = null;
 	let reorderGhostOffset: { x: number; y: number } = { x: 0, y: 0 }; // Offset from cursor to element top-left
+	let currentMouseScreen: { x: number; y: number } = { x: 0, y: 0 }; // Current mouse position for debug
 
 	// Get actual rendered size for auto-sized elements (inline-block text, auto layout)
 	function getActualSize(element: Element): { width: number; height: number } {
@@ -1115,13 +1116,98 @@
 					reorderParentId = parent.id;
 					reorderOriginalIndex = parent.children?.indexOf(element.id) ?? null;
 
-					// Calculate offset from cursor to element position for ghost positioning
-					const mouseCanvasX = (e.clientX - viewport.x) / viewport.scale;
-					const mouseCanvasY = (e.clientY - viewport.y) / viewport.scale;
-					reorderGhostOffset = {
-						x: pos.x - mouseCanvasX,
-						y: pos.y - mouseCanvasY
-					};
+					// Store the offset from cursor to element's top-left in SCREEN space
+					// We'll use screen coordinates for ghost positioning to avoid coordinate conversion issues
+					const domElement = document.querySelector(`[data-element-id="${element.id}"]`);
+					if (domElement) {
+						const rect = domElement.getBoundingClientRect();
+
+						// For rotated elements, getBoundingClientRect() returns the bounding box,
+						// not the actual top-left corner. We need to calculate the actual position
+						// of the element's top-left corner (transform-origin: top left)
+						let actualLeft = rect.left;
+						let actualTop = rect.top;
+
+						// If element is rotated, calculate the actual top-left position
+						const rotation = element.rotation || 0;
+						if (rotation !== 0) {
+							// Get the element's unrotated size
+							const width = element.size.width * viewport.scale;
+							const height = element.size.height * viewport.scale;
+
+							// The bounding box center
+							const boxCenterX = rect.left + rect.width / 2;
+							const boxCenterY = rect.top + rect.height / 2;
+
+							// For an element rotated around its top-left (transform-origin: top left):
+							// Calculate where the center of the unrotated element would be
+							const rad = (rotation * Math.PI) / 180;
+							const centerX = width / 2;
+							const centerY = height / 2;
+
+							// After rotation around top-left (0,0), the center moves to:
+							const rotatedCenterX = centerX * Math.cos(rad) - centerY * Math.sin(rad);
+							const rotatedCenterY = centerX * Math.sin(rad) + centerY * Math.cos(rad);
+
+							// The bounding box center is at the rotated center position, so:
+							// actualTopLeft = boxCenter - rotatedCenter
+							actualLeft = boxCenterX - rotatedCenterX;
+							actualTop = boxCenterY - rotatedCenterY;
+						}
+
+						// Offset from mouse to element's actual top-left (rotation origin) in screen pixels
+						reorderGhostOffset = {
+							x: actualLeft - e.clientX,
+							y: actualTop - e.clientY
+						};
+
+						// Get all children positions at start
+						const allChildren = parent?.children?.map(childId => {
+							const child = state.elements[childId];
+							const domEl = document.querySelector(`[data-element-id="${childId}"]`);
+							if (!domEl || !child) return null;
+							const childRect = domEl.getBoundingClientRect();
+							return {
+								id: childId,
+								isBeingDragged: childId === element.id,
+								screenPos: { left: childRect.left, top: childRect.top },
+								size: { width: childRect.width, height: childRect.height }
+							};
+						}).filter(Boolean) || [];
+
+						console.log('╔════════════════════════════════════════════');
+						console.log('║ === DRAG START DEBUG ===');
+						console.log('╠════════════════════════════════════════════');
+						console.log('🎯 Dragged element rect (bounding box):', { left: rect.left.toFixed(0), top: rect.top.toFixed(0), width: rect.width.toFixed(0), height: rect.height.toFixed(0) });
+						if (rotation !== 0) {
+							console.log('🔄 Element rotation:', rotation + '°');
+							console.log('📍 Actual top-left (after rotation correction):', { left: actualLeft.toFixed(2), top: actualTop.toFixed(2) });
+						}
+						console.log('🖱️  Mouse click:', { x: e.clientX, y: e.clientY });
+						console.log('📏 Offset:', reorderGhostOffset);
+
+						// Calculate initial ghost position at drag start
+						const initialGhostScreenX = e.clientX + reorderGhostOffset.x;
+						const initialGhostScreenY = e.clientY + reorderGhostOffset.y;
+						const initialGhostCanvasX = (initialGhostScreenX - viewport.x) / viewport.scale;
+						const initialGhostCanvasY = (initialGhostScreenY - viewport.y) / viewport.scale;
+
+						console.log('👻 Initial ghost screen:', { x: initialGhostScreenX.toFixed(2), y: initialGhostScreenY.toFixed(2) });
+						console.log('👻 Initial ghost canvas:', { x: initialGhostCanvasX.toFixed(2), y: initialGhostCanvasY.toFixed(2) });
+						console.log('🗺️  Viewport:', viewport);
+						console.log('📦 Initial children order:');
+						allChildren.forEach((child, idx) => {
+							console.log(`  [${idx}] ${child.isBeingDragged ? '🔴 THIS' : '⚪'} screen: (${child.screenPos.left.toFixed(0)}, ${child.screenPos.top.toFixed(0)})`);
+						});
+						console.log('╚════════════════════════════════════════════');
+
+						// Initialize pendingPosition to the actual DOM position in canvas coordinates
+						// This ensures the ghost starts at the element's visual position
+						pendingPosition = {
+							x: initialGhostCanvasX,
+							y: initialGhostCanvasY
+						};
+					}
 				} else {
 					reorderParentId = null;
 					reorderOriginalIndex = null;
@@ -1338,14 +1424,49 @@
 		if (interactionMode === 'dragging') {
 			// Calculate reorder target index if in auto layout
 			if (reorderParentId && activeElementId) {
+				currentMouseScreen = { x: e.clientX, y: e.clientY }; // Store for debug
+
 				const mouseCanvasX = (e.clientX - viewport.x) / viewport.scale;
 				const mouseCanvasY = (e.clientY - viewport.y) / viewport.scale;
 
-				// For auto layout reordering, position ghost at cursor with offset
+				// For auto layout reordering, calculate ghost position in screen space first
+				// then convert to canvas space
+				const ghostScreenX = e.clientX + reorderGhostOffset.x;
+				const ghostScreenY = e.clientY + reorderGhostOffset.y;
+
+				// Convert to canvas coordinates
 				pendingPosition = {
-					x: mouseCanvasX + reorderGhostOffset.x,
-					y: mouseCanvasY + reorderGhostOffset.y
+					x: (ghostScreenX - viewport.x) / viewport.scale,
+					y: (ghostScreenY - viewport.y) / viewport.scale
 				};
+
+				// Get all children positions for debugging
+				const state = get(designState);
+				const parent = state.elements[reorderParentId];
+				const childrenPositions = parent?.children?.map(childId => {
+					const child = state.elements[childId];
+					const domEl = document.querySelector(`[data-element-id="${childId}"]`);
+					if (!domEl || !child) return null;
+					const rect = domEl.getBoundingClientRect();
+					return {
+						id: childId,
+						isBeingDragged: childId === activeElementId,
+						screenPos: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom },
+						size: { width: rect.width, height: rect.height }
+					};
+				}).filter(Boolean) || [];
+
+				console.log('=== DURING DRAG ===');
+				console.log('🖱️  Cursor screen:', { x: e.clientX, y: e.clientY });
+				console.log('👻 Ghost screen:', { x: ghostScreenX, y: ghostScreenY });
+				console.log('📐 Ghost canvas:', pendingPosition);
+				console.log('🎯 Target index:', reorderTargetIndex);
+				console.log('📦 All children positions:');
+				childrenPositions.forEach((child, idx) => {
+					console.log(`  [${idx}] ${child.isBeingDragged ? '🔴 DRAGGING' : '⚪'} id: ${child.id.slice(0, 8)}... screen: (${child.screenPos.left.toFixed(0)}, ${child.screenPos.top.toFixed(0)}) size: ${child.size.width.toFixed(0)}x${child.size.height.toFixed(0)}`);
+				});
+				console.log('🗺️  Viewport:', viewport);
+				console.log('---');
 
 				reorderTargetIndex = calculateReorderTargetIndex(
 					mouseCanvasX,
@@ -2240,23 +2361,15 @@
 
 		<!-- Ghost element with visual preview -->
 		{@const rotation = draggedElement.rotation || 0}
-		{@const rotationRad = rotation * (Math.PI / 180)}
-		{@const cos = Math.cos(rotationRad)}
-		{@const sin = Math.sin(rotationRad)}
 
-		<!-- Calculate rotated position offset -->
-		{@const centerOffsetX = ghostSize.width / 2}
-		{@const centerOffsetY = ghostSize.height / 2}
-		{@const rotatedCenterX = centerOffsetX * cos - centerOffsetY * sin}
-		{@const rotatedCenterY = centerOffsetX * sin + centerOffsetY * cos}
-		{@const adjustX = rotatedCenterX - centerOffsetX}
-		{@const adjustY = rotatedCenterY - centerOffsetY}
+		{@const ghostScreenLeft = viewport.x + ghostPos.x * viewport.scale}
+		{@const ghostScreenTop = viewport.y + ghostPos.y * viewport.scale}
 
 		<div
 			style="
-				position: absolute;
-				left: {viewport.x + (ghostPos.x + centerOffsetX) * viewport.scale}px;
-				top: {viewport.y + (ghostPos.y + centerOffsetY) * viewport.scale}px;
+				position: fixed;
+				left: {ghostScreenLeft}px;
+				top: {ghostScreenTop}px;
 				width: {ghostSize.width * viewport.scale}px;
 				height: {ghostSize.height * viewport.scale}px;
 				background-color: {draggedElement.styles?.backgroundColor || '#f5f5f5'};
@@ -2266,8 +2379,8 @@
 				pointer-events: none;
 				z-index: 10000;
 				box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-				transform: translate(-50%, -50%) rotate({rotation}deg);
-				transform-origin: center center;
+				transform: rotate({rotation}deg);
+				transform-origin: top left;
 			"
 		>
 			{#if draggedElement.type === 'img'}
