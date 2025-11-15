@@ -43,9 +43,6 @@ export { db };
 export async function testDatabaseConnection(): Promise<boolean> {
 	try {
 		await db.$queryRaw`SELECT 1`;
-		if (isDev) {
-			console.log('[db] Database connection test successful');
-		}
 		return true;
 	} catch (error) {
 		console.error('[db] Database connection test failed:', error);

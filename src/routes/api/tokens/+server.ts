@@ -10,16 +10,12 @@ import { getTokens, updateTokens } from '$lib/server/services/tokens';
 
 export const GET: RequestHandler = requireAuth(async ({ locals }) => {
 	const user = locals.user;
-	console.log('[GET /api/tokens] User:', user);
 
 	if (!user.teamId) {
-		console.log('[GET /api/tokens] ERROR: User has no teamId');
 		return json({ error: 'User must belong to a team' }, { status: 403 });
 	}
 
-	console.log('[GET /api/tokens] Fetching tokens for team:', user.teamId);
 	const tokens = await getTokens(user.teamId);
-	console.log('[GET /api/tokens] Tokens loaded successfully');
 
 	return json({ tokens });
 });

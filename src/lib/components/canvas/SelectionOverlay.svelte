@@ -103,19 +103,9 @@
 
 			// If still within original parent boundaries, keep the original parent
 			if (isStillWithinOriginalParent) {
-				console.log('🔒 Staying with original parent (still within boundaries):', {
-					originalParentId: originalParentId.slice(0, 8) + '...',
-					elementBounds: { x: elementX, y: elementY, w: elementWidth, h: elementHeight },
-					parentBounds: { x: parentLeft, y: parentTop, w: originalParent.size.width, h: originalParent.size.height }
-				});
 				return originalParentId;
 			}
 
-			console.log('🚀 Element moved beyond original parent boundaries:', {
-				originalParentId: originalParentId.slice(0, 8) + '...',
-				elementBounds: { x: elementX, y: elementY, w: elementWidth, h: elementHeight },
-				parentBounds: { x: parentLeft, y: parentTop, w: originalParent.size.width, h: originalParent.size.height }
-			});
 		}
 
 		// Element has moved beyond its original parent (or had no parent)
@@ -146,15 +136,15 @@
 			const elementTop = elementY;
 			const elementBottom = elementY + elementHeight;
 
-			// Check for overlap (bounding boxes intersect)
-			const hasOverlap = !(
-				elementRight < containerLeft ||
-				elementLeft > containerRight ||
-				elementBottom < containerTop ||
-				elementTop > containerBottom
+			// Check for complete containment (element must be 100% inside container)
+			const isFullyContained = (
+				elementLeft >= containerLeft &&
+				elementRight <= containerRight &&
+				elementTop >= containerTop &&
+				elementBottom <= containerBottom
 			);
 
-			if (hasOverlap) {
+			if (isFullyContained) {
 				overlappingContainers.push(element);
 			}
 		}
@@ -163,12 +153,6 @@
 		overlappingContainers.sort((a, b) => (b.zIndex || 0) - (a.zIndex || 0));
 
 		const result = overlappingContainers.length > 0 ? overlappingContainers[0].id : null;
-		console.log('🎯 findDropParentAtPosition:', {
-			elementBounds: { x: elementX, y: elementY, w: elementWidth, h: elementHeight },
-			overlappingCount: overlappingContainers.length,
-			overlappingIds: overlappingContainers.map(c => c.id.slice(0, 8) + '...'),
-			result: result ? result.slice(0, 8) + '...' : 'null (root)'
-		});
 
 		// Return the topmost overlapping container (or null to drop at root)
 		return result;
@@ -1333,16 +1317,6 @@
 							};
 						}).filter(Boolean) || [];
 
-						console.log('╔════════════════════════════════════════════');
-						console.log('║ === DRAG START DEBUG ===');
-						console.log('╠════════════════════════════════════════════');
-						console.log('🎯 Dragged element rect (bounding box):', { left: rect.left.toFixed(0), top: rect.top.toFixed(0), width: rect.width.toFixed(0), height: rect.height.toFixed(0) });
-						if (reorderElementRotation !== 0) {
-							console.log('🔄 Element rotation:', reorderElementRotation + '°');
-							console.log('📍 Actual top-left (after rotation correction):', { left: actualPos.left.toFixed(2), top: actualPos.top.toFixed(2) });
-						}
-						console.log('🖱️  Mouse click:', { x: e.clientX, y: e.clientY });
-						console.log('📏 Offset:', reorderGhostOffset);
 
 						// Calculate initial ghost position at drag start
 						const initialGhostScreenX = e.clientX + reorderGhostOffset.x;
@@ -1350,14 +1324,6 @@
 						const initialGhostCanvasX = (initialGhostScreenX - viewport.x) / viewport.scale;
 						const initialGhostCanvasY = (initialGhostScreenY - viewport.y) / viewport.scale;
 
-						console.log('👻 Initial ghost screen:', { x: initialGhostScreenX.toFixed(2), y: initialGhostScreenY.toFixed(2) });
-						console.log('👻 Initial ghost canvas:', { x: initialGhostCanvasX.toFixed(2), y: initialGhostCanvasY.toFixed(2) });
-						console.log('🗺️  Viewport:', viewport);
-						console.log('📦 Initial children order:');
-						allChildren.forEach((child, idx) => {
-							console.log(`  [${idx}] ${child.isBeingDragged ? '🔴 THIS' : '⚪'} screen: (${child.screenPos.left.toFixed(0)}, ${child.screenPos.top.toFixed(0)})`);
-						});
-						console.log('╚════════════════════════════════════════════');
 
 						// Initialize pendingPosition to the actual DOM position in canvas coordinates
 						// This ensures the ghost starts at the element's visual position
@@ -1614,17 +1580,6 @@
 					};
 				}).filter(Boolean) || [];
 
-				console.log('=== DURING DRAG ===');
-				console.log('🖱️  Cursor screen:', { x: e.clientX, y: e.clientY });
-				console.log('👻 Ghost screen:', { x: ghostScreenX, y: ghostScreenY });
-				console.log('📐 Ghost canvas:', pendingPosition);
-				console.log('🎯 Target index:', reorderTargetIndex);
-				console.log('📦 All children positions:');
-				childrenPositions.forEach((child, idx) => {
-					console.log(`  [${idx}] ${child.isBeingDragged ? '🔴 DRAGGING' : '⚪'} id: ${child.id.slice(0, 8)}... screen: (${child.screenPos.left.toFixed(0)}, ${child.screenPos.top.toFixed(0)}) size: ${child.size.width.toFixed(0)}x${child.size.height.toFixed(0)}`);
-				});
-				console.log('🗺️  Viewport:', viewport);
-				console.log('---');
 
 				reorderTargetIndex = calculateReorderTargetIndex(
 					mouseCanvasX,
@@ -2332,11 +2287,6 @@
 						// Skip moveElement if in auto layout (reordering already happened live)
 						if (!reorderParentId) {
 							// Check if parent changed during drag (drag out of/into div)
-							console.log('🔍 Parent change detection:', {
-								potentialDropParentId,
-								originalParentId,
-								willReparent: potentialDropParentId !== originalParentId
-							});
 							if (potentialDropParentId !== originalParentId) {
 								// Parent changed - use reorderElement to change parent and position
 								const newParent = potentialDropParentId ? get(designState).elements[potentialDropParentId] : null;
