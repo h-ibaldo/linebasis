@@ -44,7 +44,7 @@
 <svelte:window on:keydown={handleKeyDown} />
 
 <svelte:head>
-	<title>LineBasis - Page Builder</title>
+	<title>Linabasis - Page Builder</title>
 </svelte:head>
 
 <!-- STYLE: Page builder layout - full viewport -->

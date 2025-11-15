@@ -1,4 +1,4 @@
-// LineBasis Database Schema - Phase 1
+// Linabasis Database Schema - Phase 1
 // Core models for page builder, authentication, and teams
 
 generator client {

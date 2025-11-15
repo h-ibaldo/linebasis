@@ -1,6 +1,6 @@
-# Contributing to LineBasis
+# Contributing to Linabasis
 
-**Welcome!** LineBasis aims to be a reference implementation for:
+**Welcome!** Linabasis aims to be a reference implementation for:
 - ✨ Vibe coding (fast, intuitive, flow-state development)
 - 📚 Excellent documentation
 - 🌳 Clean git practices
@@ -8,7 +8,7 @@
 
 ---
 
-## 🎯 The LineBasis Way
+## 🎯 The Linabasis Way
 
 ### Core Principles
 

@@ -54,9 +54,9 @@
 <main class="login-page">
 	<!-- STYLE: Login container - centered card/box on page -->
 	<div class="login-container">
-		<!-- STYLE: Logo/branding area - your LineBasis branding -->
+		<!-- STYLE: Logo/branding area - your Linabasis branding -->
 		<div class="login-header">
-			<h1 class="login-title">LineBasis</h1>
+			<h1 class="login-title">Linabasis</h1>
 			<p class="login-subtitle">Sign in to your account</p>
 		</div>
 

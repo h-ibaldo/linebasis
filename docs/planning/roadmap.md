@@ -1,4 +1,4 @@
-# LineBasis Development Roadmap
+# Linabasis Development Roadmap
 
 **Last Updated**: November 6, 2024
 **Current Phase**: Phase 1 - Core Page Builder MVP
@@ -55,7 +55,7 @@ To complete Phase 1 MVP, we still need:
 
 ## Overview
 
-LineBasis follows a **phased release strategy** to ship faster, validate architecture, and build in public:
+Linabasis follows a **phased release strategy** to ship faster, validate architecture, and build in public:
 
 - **Phase 1**: Core Page Builder MVP (this roadmap)
 - **Phase 2**: Custom Blocks (developer extensibility)
@@ -782,7 +782,7 @@ The following features were implemented during Milestone 5 that go beyond the or
   - [ ] Options: Include media, include unpublished pages
 - [ ] Create `/src/routes/admin/themes/import/+page.svelte`
   - [ ] File upload form (.baseline-theme)
-  - [ ] Remote URL input (import from another LineBasis instance)
+  - [ ] Remote URL input (import from another Linabasis instance)
   - [ ] Import preview (show what will be imported)
   - [ ] Import button (with confirmation)
 
@@ -897,7 +897,7 @@ The following features were implemented during Milestone 5 that go beyond the or
 - [ ] Monitor for errors (Sentry, LogRocket, etc.)
 
 #### 15.3 Launch Preparation
-- [ ] Create demo site (showcase LineBasis features)
+- [ ] Create demo site (showcase Linabasis features)
 - [ ] Write launch blog post
 - [ ] Prepare social media posts
 - [ ] Create GitHub release (v1.0.0)
@@ -910,7 +910,7 @@ The following features were implemented during Milestone 5 that go beyond the or
 - [ ] Monitor analytics and usage
 - [ ] Respond to GitHub issues
 
-**Deliverable**: LineBasis Phase 1 MVP is live!
+**Deliverable**: Linabasis Phase 1 MVP is live!
 
 ---
 

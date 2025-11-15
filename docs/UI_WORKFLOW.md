@@ -50,7 +50,7 @@ src/
 
 <main class="login-page">
   <div class="login-container">
-    <h1 class="login-title">Welcome to LineBasis</h1>
+    <h1 class="login-title">Welcome to Linabasis</h1>
     <form class="login-form" on:submit|preventDefault={handleSubmit}>
       <div class="form-group">
         <label for="email" class="form-label">Email</label>
@@ -111,7 +111,7 @@ Claude will mark styling handoff points with comments:
 
   <!-- STYLE: Logo area - brand colors, spacing -->
   <div class="login-logo">
-    <h1 class="login-title">LineBasis</h1>
+    <h1 class="login-title">Linabasis</h1>
   </div>
 
   <!-- STYLE: Form card - white background, shadow, rounded corners -->

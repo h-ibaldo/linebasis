@@ -1,4 +1,4 @@
-# LineBasis Quick Reference Card
+# Linabasis Quick Reference Card
 
 **Keep this handy while developing!**
 

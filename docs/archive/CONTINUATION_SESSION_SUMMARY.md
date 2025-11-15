@@ -190,7 +190,7 @@ All work from Phase 2.1 + Phase 2.2 is on this branch:
 
 ---
 
-**LineBasis is now a fully functional CMS with:**
+**Linabasis is now a fully functional CMS with:**
 - Designer tool (Phase 1)
 - Authentication & Media (Phase 1.5)
 - Complete Admin Panel (Phase 2.1 + 2.2)

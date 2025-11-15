@@ -8,9 +8,9 @@
 
 ## 🎯 Mission
 
-Transform LineBasis from a monolithic CMS into a **plugin-based architecture** where the blog system becomes the first optional plugin.
+Transform Linabasis from a monolithic CMS into a **plugin-based architecture** where the blog system becomes the first optional plugin.
 
-**Goal**: Launch LineBasis as:
+**Goal**: Launch Linabasis as:
 > **"The designer-first, plugin-based CMS - Start minimal, extend infinitely"**
 
 ---
@@ -235,7 +235,7 @@ linebasis/
 2. **Plugin Marketplace** - Foundation is ready
 3. **Community Plugins** - Anyone can build plugins
 
-### **For LineBasis**
+### **For Linabasis**
 1. **Competitive Edge** - WordPress flexibility + modern DX
 2. **Revenue Model** - Premium plugins possible
 3. **Ecosystem Growth** - Plugin marketplace ready
@@ -310,9 +310,9 @@ Handle existing installations:
 
 ## 📈 Value Proposition
 
-### **LineBasis vs Competitors**
+### **Linabasis vs Competitors**
 
-| Feature | LineBasis | WordPress | Webflow | Craft CMS |
+| Feature | Linabasis | WordPress | Webflow | Craft CMS |
 |---------|-----------|-----------|---------|-----------|
 | Designer Tool | ✅ Baseline Grid | ❌ | ✅ | ❌ |
 | Plugin System | ✅ Modern | ✅ Legacy | ❌ | ✅ |
@@ -321,7 +321,7 @@ Handle existing installations:
 | Modern Stack | ✅ | ❌ | ✅ | ✅ |
 | Type-Safe | ✅ | ❌ | N/A | ❌ |
 
-**LineBasis Position**:
+**Linabasis Position**:
 > "WordPress flexibility + Webflow design experience + Modern tech stack"
 
 ---
@@ -329,7 +329,7 @@ Handle existing installations:
 ## 🎨 Marketing Messaging
 
 ### **Tagline**
-> **LineBasis: Designer-first, Plugin-based CMS**
+> **Linabasis: Designer-first, Plugin-based CMS**
 
 ### **Key Messages**
 1. **Start Minimal** - Core is just Designer + Auth + Pages
@@ -396,7 +396,7 @@ Handle existing installations:
 
 ## 💪 Why This Matters
 
-This architectural change positions LineBasis to:
+This architectural change positions Linabasis to:
 
 1. **Compete with WordPress** - Plugin ecosystem is the killer feature
 2. **Enable Marketplace** - Foundation for revenue

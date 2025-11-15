@@ -1,6 +1,6 @@
-# LineBasis Application Structure
+# Linabasis Application Structure
 
-This document defines the complete application routing, page structure, and UI organization for LineBasis.
+This document defines the complete application routing, page structure, and UI organization for Linabasis.
 
 ## Terminology
 
@@ -14,7 +14,7 @@ This document defines the complete application routing, page structure, and UI o
 ## Public Routes
 
 ### `/` - Homepage
-- **Description**: The root route of the LineBasis website. Shows a default Linebasis homepage until user defines a custom one.
+- **Description**: The root route of the Linabasis website. Shows a default Linebasis homepage until user defines a custom one.
 - **Configuration**: User can define homepage from designer or from `/admin/settings`
 - **Rendering**: SSR rendering from published page design events
 
@@ -464,7 +464,7 @@ This document defines the complete application routing, page structure, and UI o
 ---
 
 ### `/admin/themes` - Theme Management
-- **Description**: Import, export, and manage themes. Themes package pages, blocks, and styles for transfer between LineBasis installations.
+- **Description**: Import, export, and manage themes. Themes package pages, blocks, and styles for transfer between Linabasis installations.
 
 **UI Elements**:
 - **Toolbar**:
@@ -510,7 +510,7 @@ This document defines the complete application routing, page structure, and UI o
     - Button: Cancel
 
 - **Remote Import Tab**:
-  - **Description**: Import theme from another LineBasis installation via API
+  - **Description**: Import theme from another Linabasis installation via API
   - Input: Remote site URL (e.g., `https://example.com`)
   - Input: API key (from remote site)
   - Button: Connect & Preview
@@ -543,7 +543,7 @@ This document defines the complete application routing, page structure, and UI o
   - Button: Generate & Download .baseline-theme file
 
 - **Share via API Tab**:
-  - **Description**: Allow other LineBasis sites to import from this site remotely
+  - **Description**: Allow other Linabasis sites to import from this site remotely
   - **Your API Credentials**:
     - Display: Your site URL (read-only)
     - **API Keys List**:

@@ -1,4 +1,4 @@
-# LineBasis Development Roadmap
+# Linabasis Development Roadmap
 
 ## Current Priority: Page Builder
 

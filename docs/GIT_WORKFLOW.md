@@ -1,4 +1,4 @@
-# LineBasis Git Workflow Guide
+# Linabasis Git Workflow Guide
 
 **The complete guide to maintaining a clean, professional git history.**
 
@@ -8,7 +8,7 @@
 
 > "Every commit should tell a story. Every branch should have a purpose. Every PR should be a joy to review."
 
-LineBasis aims to be a **reference implementation** for:
+Linabasis aims to be a **reference implementation** for:
 - Clean git history
 - Professional workflows
 - Open source best practices

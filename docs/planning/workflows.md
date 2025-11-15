@@ -1,6 +1,6 @@
-# LineBasis User Workflows
+# Linabasis User Workflows
 
-This document details the key user workflows and journeys through the LineBasis application. Each workflow describes step-by-step how users accomplish common tasks.
+This document details the key user workflows and journeys through the Linabasis application. Each workflow describes step-by-step how users accomplish common tasks.
 
 ## Table of Contents
 
@@ -21,7 +21,7 @@ This document details the key user workflows and journeys through the LineBasis 
 
 ## First-Time Setup
 
-**Goal**: Install LineBasis and create the first admin account.
+**Goal**: Install Linabasis and create the first admin account.
 
 ### Prerequisites
 - Server with Node.js installed
@@ -29,7 +29,7 @@ This document details the key user workflows and journeys through the LineBasis 
 
 ### Steps
 
-1. **Install LineBasis**
+1. **Install Linabasis**
    ```bash
    git clone https://github.com/linebasis/linebasis
    cd linebasis
@@ -84,7 +84,7 @@ This document details the key user workflows and journeys through the LineBasis 
    - **Spacing Tab**: Configure baseline grid (default: 8px)
    - Click "Save changes"
 
-**Result**: LineBasis is installed and configured, ready for page design.
+**Result**: Linabasis is installed and configured, ready for page design.
 
 ---
 
@@ -468,7 +468,7 @@ You have a "CTA Section" block used on 5 pages. You want to change the button co
 
 ## Creating and Publishing a Blog Post
 
-**Goal**: Write and publish a blog post using LineBasis's blog system.
+**Goal**: Write and publish a blog post using Linabasis's blog system.
 
 **User**: Editor or above
 
@@ -492,7 +492,7 @@ You have a "CTA Section" block used on 5 pages. You want to change the button co
 
    **Post Title**:
    - Large input field at top
-   - Enter: "How to Build a Website with LineBasis"
+   - Enter: "How to Build a Website with Linabasis"
 
    **Post Content**:
    - Rich text editor with formatting tools
@@ -507,17 +507,17 @@ You have a "CTA Section" block used on 5 pages. You want to change the button co
    ```
    # Introduction
    
-   LineBasis is a powerful CMS that makes website building easy.
+   Linabasis is a powerful CMS that makes website building easy.
    
    ## Getting Started
    
-   First, install LineBasis on your server...
+   First, install Linabasis on your server...
    
    ![Screenshot](/media/screenshot.png)
    
    ## Conclusion
    
-   With LineBasis, you can...
+   With Linabasis, you can...
    ```
 
 4. **Configure Post Settings** (Right Sidebar)
@@ -701,7 +701,7 @@ Blog templates are regular pages marked with special template types. They use th
 ### Scenario
 You've designed a complete website and want to:
 - Share it with a client
-- Use it on another LineBasis installation
+- Use it on another Linabasis installation
 - Create a backup
 - Publish it in the theme marketplace (future)
 
@@ -793,7 +793,7 @@ modern-business-theme.baseline-theme (ZIP)
    **Instructions Display**:
    ```
    To import this theme remotely:
-   1. Go to their LineBasis site
+   1. Go to their Linabasis site
    2. Navigate to Themes → Import
    3. Select "Remote Import (API)" tab
    4. Enter:
@@ -811,13 +811,13 @@ modern-business-theme.baseline-theme (ZIP)
 
 **Use Cases**:
 - **.zip file**: Send to client, publish in marketplace, backup
-- **API sharing**: Quick transfer between your own LineBasis installations
+- **API sharing**: Quick transfer between your own Linabasis installations
 
 ---
 
 ## Importing a Theme
 
-**Goal**: Import a theme (pages, blocks, tokens) into your LineBasis site.
+**Goal**: Import a theme (pages, blocks, tokens) into your Linabasis site.
 
 **User**: Manager or above
 
@@ -1305,7 +1305,7 @@ background: { color: "var(--color-primary)" }
 
 ## Summary
 
-These workflows cover the essential user journeys in LineBasis:
+These workflows cover the essential user journeys in Linabasis:
 
 1. **Setup**: First-time installation and configuration
 2. **Design**: Creating and publishing pages with responsive breakpoints

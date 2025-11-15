@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**LineBasis** is an open-source design and CMS platform to replace WordPress, Figma (for web), and Webflow.
+**Linabasis** is an open-source design and CMS platform to replace WordPress, Figma (for web), and Webflow.
 
 **Architecture**: All app pages are built using the page builder itself. The only exception is the page builder interface, which is designed externally by Ibaldo.
 
@@ -58,7 +58,7 @@ npm run check:watch
 
 ### Database Management
 
-**IMPORTANT**: LineBasis uses a **plugin-based schema composition system**. The main schema is split into:
+**IMPORTANT**: Linabasis uses a **plugin-based schema composition system**. The main schema is split into:
 - `prisma/schema.core.prisma` - Core CMS models
 - `plugins/*/prisma/schema.prisma` - Plugin-specific models
 

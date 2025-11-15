@@ -51,7 +51,7 @@ All blog-related code has been successfully removed from the core codebase, as i
 
 ## Current Core Architecture
 
-After cleanup, LineBasis core now contains only essential features:
+After cleanup, Linabasis core now contains only essential features:
 
 ### Core Features
 1. **Designer Tool** - Visual page builder
@@ -172,7 +172,7 @@ feat: complete Step 4 - Core Cleanup (remove blog from core)
 ## Architecture Diagram
 
 ```
-LineBasis Core (Clean)
+Linabasis Core (Clean)
 ├── Designer Tool
 ├── Auth System
 ├── Pages (CMS)

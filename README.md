@@ -1,4 +1,4 @@
-# LineBasis
+# Linabasis
 
 **A self-hosted visual website builder with professional design tools and modern technology.**
 
@@ -20,7 +20,7 @@ And here's what really bugs me: graphic designers figured out typography and lay
 
 ## The Solution
 
-LineBasis is the tool I wish existed:
+Linabasis is the tool I wish existed:
 
 ✅ **Visual website builder** with polished, modern UX
 ✅ **Self-hosted and 100% open source** - Install once, use forever
@@ -90,7 +90,7 @@ Build sites for friends, side projects, product landing pages—whatever you nee
 
 **🚀 Phase 1 Development - Milestone 5 Nearly Complete (47% Overall)**
 
-LineBasis has made significant progress from design-focused planning to a working, professional-grade page builder.
+Linabasis has made significant progress from design-focused planning to a working, professional-grade page builder.
 
 ### ✅ Completed (Nov 2024)
 
@@ -381,7 +381,7 @@ See **[architecture.md](docs/planning/architecture.md)** for complete technical 
 - **[workflows.md](docs/planning/workflows.md)** - User workflows and journeys (1,321 lines)
 - **[component-properties.md](docs/planning/components-properties.md)** - Component property specs (667 lines)
 - **[custom-blocks.md](docs/planning/custom-blocks.md)** - Custom block developer guide (Phase 2)
-- **[project-vision.md](docs/planning/project-vision.md)** - Why LineBasis exists
+- **[project-vision.md](docs/planning/project-vision.md)** - Why Linabasis exists
 
 ### Developer Docs
 - **[CLAUDE.md](CLAUDE.md)** - Development guidelines and project overview
@@ -404,7 +404,7 @@ It's ambitious. It's early. But after shipping multiple successful products, I k
 
 **Not accepting external contributions at this time.**
 
-LineBasis is in active early development with frequent architectural changes. External contributions would create coordination overhead that slows progress.
+Linabasis is in active early development with frequent architectural changes. External contributions would create coordination overhead that slows progress.
 
 Once the core foundation is stable and well-tested, contributions will be welcome. Watch the repository for updates.
 
@@ -420,7 +420,7 @@ Once the core foundation is stable and well-tested, contributions will be welcom
 
 MIT License - See [LICENSE](LICENSE) for details.
 
-**You own everything you create with LineBasis.** The platform is yours to modify, extend, or fork.
+**You own everything you create with Linabasis.** The platform is yours to modify, extend, or fork.
 
 ---
 

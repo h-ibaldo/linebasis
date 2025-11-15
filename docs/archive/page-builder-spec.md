@@ -2,7 +2,7 @@
 
 ## Overview
 
-The page builder is the core interface where users design and build all pages (admin, blog, landing pages). It's the only part of LineBasis NOT built with itself.
+The page builder is the core interface where users design and build all pages (admin, blog, landing pages). It's the only part of Linabasis NOT built with itself.
 
 **Design**: Based on Ibaldo's designs
 **Route**: `/builder` (or main `/`)

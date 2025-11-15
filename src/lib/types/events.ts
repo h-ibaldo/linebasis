@@ -1,5 +1,5 @@
 /**
- * Event Sourcing Types for LineBasis Page Builder
+ * Event Sourcing Types for Linabasis Page Builder
  *
  * All design changes are stored as append-only events.
  * The current design state is computed by reducing events.

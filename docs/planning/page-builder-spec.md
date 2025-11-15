@@ -1,6 +1,6 @@
 # Page Builder Specification
 
-This document defines the complete specification for the LineBasis page builder interface - the core design tool where users create and edit pages.
+This document defines the complete specification for the Linabasis page builder interface - the core design tool where users create and edit pages.
 
 ## Terminology
 
@@ -826,7 +826,7 @@ Breakpoints generate media queries:
 
 ## Summary
 
-The LineBasis page builder is a **professional design tool** combining:
+The Linabasis page builder is a **professional design tool** combining:
 - **Simplicity**: Only 3 atomic components (Div, Text, Media)
 - **Power**: Blocks, frames, responsive breakpoints, design tokens
 - **Flexibility**: Floating windows, customizable toolbar, keyboard shortcuts

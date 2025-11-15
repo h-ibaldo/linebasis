@@ -1,4 +1,4 @@
-# Why LineBasis Exists
+# Why Linabasis Exists
 
 I've shipped frontend and UX for TidyCal, SendFox, BreezeDoc, and other products at AppSumo Originals. I've built websites for friends, for side projects, for things I care about.
 

@@ -1,6 +1,6 @@
 # Component Properties Specification
 
-This document defines the **user-controllable properties** for all components in the LineBasis page builder. These properties represent what users can adjust in the design interface, not the underlying technical implementation.
+This document defines the **user-controllable properties** for all components in the Linabasis page builder. These properties represent what users can adjust in the design interface, not the underlying technical implementation.
 
 ## Design Principles
 
@@ -632,7 +632,7 @@ This component properties specification has been designed from a **user interfac
 
 ### Core Components
 
-LineBasis uses a minimal, powerful component set:
+Linabasis uses a minimal, powerful component set:
 
 1. **Div** - Layout container with Framer-style controls, link behavior, and semantic HTML options
 2. **Text** - Rich text with typography presets and inline formatting
@@ -665,4 +665,4 @@ LineBasis uses a minimal, powerful component set:
 - **Reduced Complexity**: Fewer components with more capabilities
 - **Future-Proof**: Technical implementation can evolve without changing user interface
 
-*This specification aligns with the TypeScript types defined in `src/lib/types/components.ts` and supports the LineBasis page builder architecture.*
+*This specification aligns with the TypeScript types defined in `src/lib/types/components.ts` and supports the Linabasis page builder architecture.*

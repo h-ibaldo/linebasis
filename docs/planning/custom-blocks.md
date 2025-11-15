@@ -2,7 +2,7 @@
 
 **Status**: Phase 2 Feature (Planned)
 
-This guide explains how to create custom coded blocks for LineBasis - Svelte components that appear in the designer with editable properties.
+This guide explains how to create custom coded blocks for Linabasis - Svelte components that appear in the designer with editable properties.
 
 ## Table of Contents
 
@@ -21,7 +21,7 @@ This guide explains how to create custom coded blocks for LineBasis - Svelte com
 
 ## Overview
 
-Custom blocks enable developers to extend LineBasis with coded Svelte components while maintaining the visual editing experience for users.
+Custom blocks enable developers to extend Linabasis with coded Svelte components while maintaining the visual editing experience for users.
 
 ### Use Cases
 

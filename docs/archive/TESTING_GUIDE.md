@@ -1,4 +1,4 @@
-# LineBasis - Complete Testing Guide
+# Linabasis - Complete Testing Guide
 
 ## 🚀 Server Status
 

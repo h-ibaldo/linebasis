@@ -2,7 +2,7 @@
 
 ## Overview
 
-LineBasis is a page builder-first CMS where **everything is built using the page builder** (admin pages, blog pages, landing pages) except the page builder itself, which is designed by Ibaldo.
+Linabasis is a page builder-first CMS where **everything is built using the page builder** (admin pages, blog pages, landing pages) except the page builder itself, which is designed by Ibaldo.
 
 ## Technology Stack
 
