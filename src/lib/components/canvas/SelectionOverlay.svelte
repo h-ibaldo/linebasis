@@ -2437,25 +2437,33 @@
 </script>
 
 <!-- Render selection UI (hide when text is being edited or during auto layout reordering) -->
-{#if $interactionState.mode !== 'editing-text'}
+	{#if $interactionState.mode !== 'editing-text'}
 	{#if selectedElements.length === 1 && !(interactionMode === 'dragging' && reorderParentId)}
 		<!-- Single element selection (hidden during auto layout reordering - ghost shows instead) -->
+		{@const selectedElement = selectedElements[0]}
+		{@const state = get(designState)}
+		{@const parent = selectedElement.parentId ? state.elements[selectedElement.parentId] : null}
+		{@const parentTransform = parent ? {
+			position: getAbsolutePosition(parent),
+			rotation: getDisplayRotation(parent),
+			size: getDisplaySize(parent)
+		} : null}
+		{@const relativePendingPosition = (activeElementId === selectedElement.id && pendingPosition && parent)
+			? absoluteToRelativePosition(selectedElement, pendingPosition)
+			: (activeElementId === selectedElement.id ? pendingPosition : null)}
 		<SelectionUI
-			element={{
-				...selectedElements[0],
-				position: getAbsolutePosition(selectedElements[0]),
-				size: displaySizeForSelection || selectedElements[0].size
-			}}
+			element={selectedElement}
 			{viewport}
 			{isPanning}
-			pendingPosition={activeElementId === selectedElements[0].id ? pendingPosition : null}
-			pendingSize={activeElementId === selectedElements[0].id ? pendingSize : null}
-			pendingRadius={activeElementId === selectedElements[0].id ? pendingRadius : null}
-			activeRadiusCorner={activeElementId === selectedElements[0].id ? radiusCorner : null}
-			radiusCornersIndependent={activeElementId === selectedElements[0].id ? radiusCornersIndependent : false}
-			radiusFrozenValues={activeElementId === selectedElements[0].id ? radiusFrozenValues : null}
-			rotation={commonRotation || 0}
-			onMouseDown={(e, handle) => handleMouseDown(e, selectedElements[0], handle)}
+			pendingPosition={relativePendingPosition}
+			pendingSize={activeElementId === selectedElement.id ? pendingSize : null}
+			pendingRadius={activeElementId === selectedElement.id ? pendingRadius : null}
+			activeRadiusCorner={activeElementId === selectedElement.id ? radiusCorner : null}
+			radiusCornersIndependent={activeElementId === selectedElement.id ? radiusCornersIndependent : false}
+			radiusFrozenValues={activeElementId === selectedElement.id ? radiusFrozenValues : null}
+			rotation={getDisplayRotation(selectedElement)}
+			{parentTransform}
+			onMouseDown={(e, handle) => handleMouseDown(e, selectedElement, handle)}
 		/>
 	{:else if selectedElements.length > 1 && groupBounds}
 		<!-- Multi-element selection - single bounding box -->

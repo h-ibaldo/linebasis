@@ -17,7 +17,8 @@
 	export let activeRadiusCorner: 'nw' | 'ne' | 'se' | 'sw' | null = null; // Which corner is being adjusted
 	export let radiusCornersIndependent: boolean = false; // Whether corners are in independent mode
 	export let radiusFrozenValues: { nw: number; ne: number; se: number; sw: number } | null = null; // Frozen values when independent
-	export let rotation: number = 0; // Rotation angle in degrees for the selection UI
+	export let rotation: number = 0; // Element's own rotation angle in degrees
+	export let parentTransform: { position: { x: number; y: number }; rotation: number; size: { width: number; height: number } } | null = null; // Parent's transform (position, rotation, and size) if element has a parent
 	export let isPanning: boolean = false;
 	export let onMouseDown: (e: MouseEvent, handle?: string) => void;
 
@@ -30,8 +31,28 @@
 	const RADIUS_HANDLE_SIZE = 10; // Size of radius handle
 
 	// Reactive: Get display position/size
+	// If element has a parent, pos is relative to parent. Otherwise, it's absolute.
 	$: pos = pendingPosition || element.position;
 	$: size = pendingSize || element.size;
+	
+	// Calculate positions for parent wrapper and child selection container
+	// If there's a parent transform, we need to wrap the selection container
+	$: hasParent = parentTransform !== null;
+	
+	// Parent wrapper position (absolute position in canvas space)
+	$: parentWrapperScreenPos = hasParent ? {
+		x: viewport.x + parentTransform.position.x * viewport.scale,
+		y: viewport.y + parentTransform.position.y * viewport.scale
+	} : null;
+	
+	// Child selection container position (relative to parent if has parent, absolute otherwise)
+	$: childScreenPos = hasParent ? {
+		x: pos.x * viewport.scale,
+		y: pos.y * viewport.scale
+	} : {
+		x: viewport.x + pos.x * viewport.scale,
+		y: viewport.y + pos.y * viewport.scale
+	};
 
 	// Reactive: Get display radius (use pendingRadius if available, otherwise element's borderRadius)
 	// Note: pendingRadius is set during drag, and applies to the corner being dragged
@@ -125,14 +146,12 @@
 	$: showRadiusHandles = size.width >= MIN_DIMENSION_FOR_RADIUS_HANDLES && size.height >= MIN_DIMENSION_FOR_RADIUS_HANDLES;
 
 	// Reactive: Convert to screen coordinates
-	$: screenTopLeft = {
-		x: viewport.x + pos.x * viewport.scale,
-		y: viewport.y + pos.y * viewport.scale
-	};
+	// screenTopLeft is now calculated based on whether we have a parent
+	$: screenTopLeft = childScreenPos;
 
 	$: screenBottomRight = {
-		x: viewport.x + (pos.x + size.width) * viewport.scale,
-		y: viewport.y + (pos.y + size.height) * viewport.scale
+		x: childScreenPos.x + size.width * viewport.scale,
+		y: childScreenPos.y + size.height * viewport.scale
 	};
 
 	$: screenWidth = screenBottomRight.x - screenTopLeft.x;
@@ -153,20 +172,34 @@
 	$: centerY = screenHeight / 2;
 </script>
 
-<!-- Container for all selection UI elements that will be rotated together -->
-<div
-	class="selection-container"
-	style="
-		position: absolute;
-		left: {screenTopLeft.x}px;
-		top: {screenTopLeft.y}px;
-		width: {screenWidth}px;
-		height: {screenHeight}px;
-		{rotation ? `transform: rotate(${rotation}deg); transform-origin: ${centerX}px ${centerY}px;` : ''}
-		pointer-events: none;
-	"
->
-	<!-- Selection border -->
+{#if hasParent}
+	<!-- Parent wrapper: applies parent's transform (position and rotation) -->
+	{@const parentCenterX = parentTransform.size.width / 2 * viewport.scale}
+	{@const parentCenterY = parentTransform.size.height / 2 * viewport.scale}
+	<div
+		class="parent-wrapper"
+		style="
+			position: absolute;
+			left: {parentWrapperScreenPos.x}px;
+			top: {parentWrapperScreenPos.y}px;
+			{parentTransform.rotation ? `transform: rotate(${parentTransform.rotation}deg); transform-origin: ${parentCenterX}px ${parentCenterY}px;` : ''}
+			pointer-events: none;
+		"
+	>
+		<!-- Selection container: positioned relative to parent, rotated by element's own rotation -->
+		<div
+			class="selection-container"
+			style="
+				position: absolute;
+				left: {pos.x * viewport.scale}px;
+				top: {pos.y * viewport.scale}px;
+				width: {screenWidth}px;
+				height: {screenHeight}px;
+				{rotation ? `transform: rotate(${rotation}deg); transform-origin: ${centerX}px ${centerY}px;` : ''}
+				pointer-events: none;
+			"
+		>
+			<!-- Selection border -->
 	<div
 		class="selection-border"
 		style="
@@ -576,7 +609,434 @@
 			aria-label="Rotate element"
 		/>
 	{/if}
-</div>
+		</div>
+	</div>
+{:else}
+	<!-- No parent: selection container positioned absolutely in canvas space -->
+	<div
+		class="selection-container"
+		style="
+			position: absolute;
+			left: {screenTopLeft.x}px;
+			top: {screenTopLeft.y}px;
+			width: {screenWidth}px;
+			height: {screenHeight}px;
+			{rotation ? `transform: rotate(${rotation}deg); transform-origin: ${centerX}px ${centerY}px;` : ''}
+			pointer-events: none;
+		"
+	>
+		<!-- Selection border -->
+		<div
+			class="selection-border"
+			style="
+				position: absolute;
+				left: 0;
+				top: 0;
+				width: 100%;
+				height: 100%;
+				border: {BORDER_WIDTH}px solid #3b82f6;
+				pointer-events: none;
+				box-sizing: border-box;
+			"
+		/>
+
+		<!-- Draggable area (invisible, covers element) -->
+		<!-- NOTE: pointer-events: none allows clicks to pass through to elements with higher z-index -->
+		<div
+			class="drag-area"
+			style="
+				position: absolute;
+				left: 0;
+				top: 0;
+				width: 100%;
+				height: 100%;
+				cursor: {dragCursor};
+				pointer-events: none;
+			"
+			role="button"
+			tabindex="0"
+			aria-label="Drag {element.type}"
+		/>
+
+		<!-- Corner resize handles (visual indicators) -->
+		<!-- NE -->
+		<div
+			class="resize-handle"
+			style="
+				position: absolute;
+				left: calc(100% - {handleOffset}px);
+				top: -{handleOffset}px;
+				cursor: nesw-resize;
+				pointer-events: auto;
+			"
+			on:mousedown={(e) => onMouseDown(e, 'ne')}
+			role="button"
+			tabindex="0"
+			aria-label="Resize northeast"
+		/>
+
+		<!-- SE -->
+		<div
+			class="resize-handle"
+			style="
+				position: absolute;
+				left: calc(100% - {handleOffset}px);
+				top: calc(100% - {handleOffset}px);
+				cursor: nwse-resize;
+				pointer-events: auto;
+			"
+			on:mousedown={(e) => onMouseDown(e, 'se')}
+			role="button"
+			tabindex="0"
+			aria-label="Resize southeast"
+		/>
+
+		<!-- SW -->
+		<div
+			class="resize-handle"
+			style="
+				position: absolute;
+				left: -{handleOffset}px;
+				top: calc(100% - {handleOffset}px);
+				cursor: nesw-resize;
+				pointer-events: auto;
+			"
+			on:mousedown={(e) => onMouseDown(e, 'sw')}
+			role="button"
+			tabindex="0"
+			aria-label="Resize southwest"
+		/>
+
+		<!-- NW -->
+		<div
+			class="resize-handle"
+			style="
+				position: absolute;
+				left: -{handleOffset}px;
+				top: -{handleOffset}px;
+				cursor: nwse-resize;
+				pointer-events: auto;
+			"
+			on:mousedown={(e) => onMouseDown(e, 'nw')}
+			role="button"
+			tabindex="0"
+			aria-label="Resize northwest"
+		/>
+
+		<!-- Corner radius handles (one per corner, positioned inside at 45° diagonal) -->
+		<!-- Only show if element is large enough relative to radius -->
+		{#if showRadiusHandles}
+			<!-- NW corner radius handle -->
+			<div
+				class="radius-handle"
+				style="
+					position: absolute;
+					left: calc({screenRadiusHandleDistances.nw}px - {RADIUS_HANDLE_SIZE / 2}px);
+					top: calc({screenRadiusHandleDistances.nw}px - {RADIUS_HANDLE_SIZE / 2}px);
+					width: {RADIUS_HANDLE_SIZE}px;
+					height: {RADIUS_HANDLE_SIZE}px;
+					border-radius: 50%;
+					background: white;
+					border: 1px solid #3b82f6;
+					cursor: move;
+					pointer-events: auto;
+					z-index: 4;
+				"
+				on:mousedown={(e) => onMouseDown(e, 'radius-nw')}
+				role="button"
+				tabindex="0"
+				aria-label="Adjust corner radius"
+			/>
+
+			<!-- NE corner radius handle -->
+			<div
+				class="radius-handle"
+				style="
+					position: absolute;
+					left: calc(100% - {screenRadiusHandleDistances.ne}px - {RADIUS_HANDLE_SIZE / 2}px);
+					top: calc({screenRadiusHandleDistances.ne}px - {RADIUS_HANDLE_SIZE / 2}px);
+					width: {RADIUS_HANDLE_SIZE}px;
+					height: {RADIUS_HANDLE_SIZE}px;
+					border-radius: 50%;
+					background: white;
+					border: 1px solid #3b82f6;
+					cursor: move;
+					pointer-events: auto;
+					z-index: 3;
+				"
+				on:mousedown={(e) => onMouseDown(e, 'radius-ne')}
+				role="button"
+				tabindex="0"
+				aria-label="Adjust corner radius"
+			/>
+
+			<!-- SE corner radius handle -->
+			<div
+				class="radius-handle"
+				style="
+					position: absolute;
+					left: calc(100% - {screenRadiusHandleDistances.se}px - {RADIUS_HANDLE_SIZE / 2}px);
+					top: calc(100% - {screenRadiusHandleDistances.se}px - {RADIUS_HANDLE_SIZE / 2}px);
+					width: {RADIUS_HANDLE_SIZE}px;
+					height: {RADIUS_HANDLE_SIZE}px;
+					border-radius: 50%;
+					background: white;
+					border: 1px solid #3b82f6;
+					cursor: move;
+					pointer-events: auto;
+					z-index: 2;
+				"
+				on:mousedown={(e) => onMouseDown(e, 'radius-se')}
+				role="button"
+				tabindex="0"
+				aria-label="Adjust corner radius"
+			/>
+
+			<!-- SW corner radius handle -->
+			<div
+				class="radius-handle"
+				style="
+					position: absolute;
+					left: calc({screenRadiusHandleDistances.sw}px - {RADIUS_HANDLE_SIZE / 2}px);
+					top: calc(100% - {screenRadiusHandleDistances.sw}px - {RADIUS_HANDLE_SIZE / 2}px);
+					width: {RADIUS_HANDLE_SIZE}px;
+					height: {RADIUS_HANDLE_SIZE}px;
+					border-radius: 50%;
+					background: white;
+					border: 1px solid #3b82f6;
+					cursor: move;
+					pointer-events: auto;
+					z-index: 1;
+				"
+				on:mousedown={(e) => onMouseDown(e, 'radius-sw')}
+				role="button"
+				tabindex="0"
+				aria-label="Adjust corner radius"
+			/>
+		{/if}
+
+		<!-- Full-width invisible edge resize zones (Figma-style) -->
+		<!-- North edge - full width clickable zone -->
+		<div
+			class="edge-resize-zone"
+			style="
+				position: absolute;
+				left: 0;
+				top: -{EDGE_RESIZE_ZONE_WIDTH}px;
+				width: 100%;
+				height: {EDGE_RESIZE_ZONE_WIDTH * 2}px;
+				cursor: ns-resize;
+				pointer-events: auto;
+			"
+			on:mousedown={(e) => onMouseDown(e, 'n')}
+			role="button"
+			tabindex="0"
+			aria-label="Resize north"
+		/>
+
+		<!-- East edge - full height clickable zone -->
+		<div
+			class="edge-resize-zone"
+			style="
+				position: absolute;
+				left: calc(100% - {EDGE_RESIZE_ZONE_WIDTH}px);
+				top: 0;
+				width: {EDGE_RESIZE_ZONE_WIDTH * 2}px;
+				height: 100%;
+				cursor: ew-resize;
+				pointer-events: auto;
+			"
+			on:mousedown={(e) => onMouseDown(e, 'e')}
+			role="button"
+			tabindex="0"
+			aria-label="Resize east"
+		/>
+
+		<!-- South edge - full width clickable zone -->
+		<div
+			class="edge-resize-zone"
+			style="
+				position: absolute;
+				left: 0;
+				top: calc(100% - {EDGE_RESIZE_ZONE_WIDTH}px);
+				width: 100%;
+				height: {EDGE_RESIZE_ZONE_WIDTH * 2}px;
+				cursor: ns-resize;
+				pointer-events: auto;
+			"
+			on:mousedown={(e) => onMouseDown(e, 's')}
+			role="button"
+			tabindex="0"
+			aria-label="Resize south"
+		/>
+
+		<!-- West edge - full height clickable zone -->
+		<div
+			class="edge-resize-zone"
+			style="
+				position: absolute;
+				left: -{EDGE_RESIZE_ZONE_WIDTH}px;
+				top: 0;
+				width: {EDGE_RESIZE_ZONE_WIDTH * 2}px;
+				height: 100%;
+				cursor: ew-resize;
+				pointer-events: auto;
+			"
+			on:mousedown={(e) => onMouseDown(e, 'w')}
+			role="button"
+			tabindex="0"
+			aria-label="Resize west"
+		/>
+
+		<!-- Rotation zones - L-shaped areas around each corner handle for rotation -->
+		<!-- Only show rotation zones when not panning -->
+		{#if !isPanning}
+			<!-- NW (top-left) corner rotation zone - L-shaped -->
+			<!-- Horizontal part -->
+			<div
+				class="rotation-zone"
+				style="
+					position: absolute;
+					left: -{ROTATION_ZONE_SIZE}px;
+					top: -{ROTATION_ZONE_SIZE}px;
+					width: {ROTATION_ZONE_SIZE * 2}px;
+					height: {ROTATION_ZONE_SIZE}px;
+					cursor: grab;
+					pointer-events: auto;
+				"
+				on:mousedown={(e) => onMouseDown(e, 'rotate')}
+				role="button"
+				tabindex="0"
+				aria-label="Rotate element"
+			/>
+			<!-- Vertical part -->
+			<div
+				class="rotation-zone"
+				style="
+					position: absolute;
+					left: -{ROTATION_ZONE_SIZE}px;
+					top: -{ROTATION_ZONE_SIZE}px;
+					width: {ROTATION_ZONE_SIZE}px;
+					height: {ROTATION_ZONE_SIZE * 2}px;
+					cursor: grab;
+					pointer-events: auto;
+				"
+				on:mousedown={(e) => onMouseDown(e, 'rotate')}
+				role="button"
+				tabindex="0"
+				aria-label="Rotate element"
+			/>
+
+			<!-- NE (top-right) corner rotation zone - L-shaped -->
+			<!-- Horizontal part -->
+			<div
+				class="rotation-zone"
+				style="
+					position: absolute;
+					left: calc(100% - {ROTATION_ZONE_SIZE}px);
+					top: -{ROTATION_ZONE_SIZE}px;
+					width: {ROTATION_ZONE_SIZE * 2}px;
+					height: {ROTATION_ZONE_SIZE}px;
+					cursor: grab;
+					pointer-events: auto;
+				"
+				on:mousedown={(e) => onMouseDown(e, 'rotate')}
+				role="button"
+				tabindex="0"
+				aria-label="Rotate element"
+			/>
+			<!-- Vertical part -->
+			<div
+				class="rotation-zone"
+				style="
+					position: absolute;
+					left: calc(100%);
+					top: -{ROTATION_ZONE_SIZE}px;
+					width: {ROTATION_ZONE_SIZE}px;
+					height: {ROTATION_ZONE_SIZE * 2}px;
+					cursor: grab;
+					pointer-events: auto;
+				"
+				on:mousedown={(e) => onMouseDown(e, 'rotate')}
+				role="button"
+				tabindex="0"
+				aria-label="Rotate element"
+			/>
+
+			<!-- SE (bottom-right) corner rotation zone - L-shaped -->
+			<!-- Horizontal part -->
+			<div
+				class="rotation-zone"
+				style="
+					position: absolute;
+					left: calc(100% - {ROTATION_ZONE_SIZE}px);
+					top: calc(100%);
+					width: {ROTATION_ZONE_SIZE * 2}px;
+					height: {ROTATION_ZONE_SIZE}px;
+					cursor: grab;
+					pointer-events: auto;
+				"
+				on:mousedown={(e) => onMouseDown(e, 'rotate')}
+				role="button"
+				tabindex="0"
+				aria-label="Rotate element"
+			/>
+			<!-- Vertical part -->
+			<div
+				class="rotation-zone"
+				style="
+					position: absolute;
+					left: calc(100%);
+					top: calc(100% - {ROTATION_ZONE_SIZE}px);
+					width: {ROTATION_ZONE_SIZE}px;
+					height: {ROTATION_ZONE_SIZE * 2}px;
+					cursor: grab;
+					pointer-events: auto;
+				"
+				on:mousedown={(e) => onMouseDown(e, 'rotate')}
+				role="button"
+				tabindex="0"
+				aria-label="Rotate element"
+			/>
+
+			<!-- SW (bottom-left) corner rotation zone - L-shaped -->
+			<!-- Horizontal part -->
+			<div
+				class="rotation-zone"
+				style="
+					position: absolute;
+					left: -{ROTATION_ZONE_SIZE}px;
+					top: calc(100%);
+					width: {ROTATION_ZONE_SIZE * 2}px;
+					height: {ROTATION_ZONE_SIZE}px;
+					cursor: grab;
+					pointer-events: auto;
+				"
+				on:mousedown={(e) => onMouseDown(e, 'rotate')}
+				role="button"
+				tabindex="0"
+				aria-label="Rotate element"
+			/>
+			<!-- Vertical part -->
+			<div
+				class="rotation-zone"
+				style="
+					position: absolute;
+					left: -{ROTATION_ZONE_SIZE}px;
+					top: calc(100% - {ROTATION_ZONE_SIZE}px);
+					width: {ROTATION_ZONE_SIZE}px;
+					height: {ROTATION_ZONE_SIZE * 2}px;
+					cursor: grab;
+					pointer-events: auto;
+				"
+				on:mousedown={(e) => onMouseDown(e, 'rotate')}
+				role="button"
+				tabindex="0"
+				aria-label="Rotate element"
+			/>
+		{/if}
+	</div>
+{/if}
 
 <style>
 	.selection-border {
