@@ -11,7 +11,7 @@
 
 	import { onDestroy, tick } from 'svelte';
 	import { get } from 'svelte/store';
-	import type { Element } from '$lib/types/events';
+	import type { Element, DesignState } from '$lib/types/events';
 	import { designState, moveElement, resizeElement, rotateElement, moveElementsGroup, resizeElementsGroup, rotateElementsGroup, selectElement, selectElements, clearSelection, addToSelection, removeFromSelection, updateElementStyles, reorderElement } from '$lib/stores/design-store';
 	import { interactionState } from '$lib/stores/interaction-store';
 	import { currentTool } from '$lib/stores/tool-store';
@@ -55,6 +55,138 @@
 	let reorderElementRotation: number = 0; // Rotation of element being reordered
 	let reorderElementSize: { width: number; height: number } = { width: 0, height: 0 }; // Size of element being reordered
 	let currentMouseScreen: { x: number; y: number } = { x: 0, y: 0 }; // Current mouse position for debug
+
+	// Parent change detection during drag (for dragging elements out of/into divs)
+	let potentialDropParentId: string | null = null; // Element being hovered over that could become new parent
+	let originalParentId: string | null = null; // Original parent at drag start (to detect if parent changed)
+
+	/**
+	 * Find the container element that the dragged element overlaps with
+	 * Returns null if the element is completely outside all containers (should drop at root level)
+	 */
+	function findDropParentAtPosition(
+		elementX: number,
+		elementY: number,
+		elementWidth: number,
+		elementHeight: number,
+		draggedElementId: string
+	): string | null {
+		const state = get(designState);
+		const draggedElement = state.elements[draggedElementId];
+		if (!draggedElement) return null;
+
+		// Container types that can accept children
+		const containerTypes = ['div', 'section', 'header', 'footer', 'article', 'aside', 'nav', 'main'];
+
+		// IMPORTANT: Check if element is still within its original parent's boundaries
+		// Elements can only leave their parent when moved completely beyond the parent's boundaries
+		if (originalParentId && state.elements[originalParentId]) {
+			const originalParent = state.elements[originalParentId];
+			const parentAbsPos = getAbsolutePosition(originalParent);
+			const parentLeft = parentAbsPos.x;
+			const parentRight = parentAbsPos.x + originalParent.size.width;
+			const parentTop = parentAbsPos.y;
+			const parentBottom = parentAbsPos.y + originalParent.size.height;
+
+			const elementLeft = elementX;
+			const elementRight = elementX + elementWidth;
+			const elementTop = elementY;
+			const elementBottom = elementY + elementHeight;
+
+			// Check if ANY part of the element is still within the original parent's boundaries
+			const isStillWithinOriginalParent = !(
+				elementRight < parentLeft ||   // Completely to the left
+				elementLeft > parentRight ||    // Completely to the right
+				elementBottom < parentTop ||    // Completely above
+				elementTop > parentBottom       // Completely below
+			);
+
+			// If still within original parent boundaries, keep the original parent
+			if (isStillWithinOriginalParent) {
+				console.log('🔒 Staying with original parent (still within boundaries):', {
+					originalParentId: originalParentId.slice(0, 8) + '...',
+					elementBounds: { x: elementX, y: elementY, w: elementWidth, h: elementHeight },
+					parentBounds: { x: parentLeft, y: parentTop, w: originalParent.size.width, h: originalParent.size.height }
+				});
+				return originalParentId;
+			}
+
+			console.log('🚀 Element moved beyond original parent boundaries:', {
+				originalParentId: originalParentId.slice(0, 8) + '...',
+				elementBounds: { x: elementX, y: elementY, w: elementWidth, h: elementHeight },
+				parentBounds: { x: parentLeft, y: parentTop, w: originalParent.size.width, h: originalParent.size.height }
+			});
+		}
+
+		// Element has moved beyond its original parent (or had no parent)
+		// Now find overlapping containers to determine the new parent
+		const overlappingContainers: Element[] = [];
+
+		for (const elementId in state.elements) {
+			const element = state.elements[elementId];
+
+			// Skip the dragged element and its descendants
+			if (element.id === draggedElementId) continue;
+			if (isDescendant(draggedElementId, element.id, state)) continue;
+			// Skip if dragged element is ancestor of this element (can't drop parent into child)
+			if (isDescendant(element.id, draggedElementId, state)) continue;
+
+			// Only consider container elements as potential parents
+			if (!containerTypes.includes(element.type)) continue;
+
+			// Check if the dragged element's bounds overlap with this container's bounds
+			const absPos = getAbsolutePosition(element);
+			const containerLeft = absPos.x;
+			const containerRight = absPos.x + element.size.width;
+			const containerTop = absPos.y;
+			const containerBottom = absPos.y + element.size.height;
+
+			const elementLeft = elementX;
+			const elementRight = elementX + elementWidth;
+			const elementTop = elementY;
+			const elementBottom = elementY + elementHeight;
+
+			// Check for overlap (bounding boxes intersect)
+			const hasOverlap = !(
+				elementRight < containerLeft ||
+				elementLeft > containerRight ||
+				elementBottom < containerTop ||
+				elementTop > containerBottom
+			);
+
+			if (hasOverlap) {
+				overlappingContainers.push(element);
+			}
+		}
+
+		// Sort by z-index (highest first) to get topmost container
+		overlappingContainers.sort((a, b) => (b.zIndex || 0) - (a.zIndex || 0));
+
+		const result = overlappingContainers.length > 0 ? overlappingContainers[0].id : null;
+		console.log('🎯 findDropParentAtPosition:', {
+			elementBounds: { x: elementX, y: elementY, w: elementWidth, h: elementHeight },
+			overlappingCount: overlappingContainers.length,
+			overlappingIds: overlappingContainers.map(c => c.id.slice(0, 8) + '...'),
+			result: result ? result.slice(0, 8) + '...' : 'null (root)'
+		});
+
+		// Return the topmost overlapping container (or null to drop at root)
+		return result;
+	}
+
+	/**
+	 * Check if childId is a descendant of parentId
+	 */
+	function isDescendant(parentId: string, childId: string, state: DesignState): boolean {
+		let currentId: string | null = childId;
+		while (currentId) {
+			const element: Element | undefined = state.elements[currentId];
+			if (!element) return false;
+			if (element.parentId === parentId) return true;
+			currentId = element.parentId;
+		}
+		return false;
+	}
 
 	/**
 	 * Calculate the actual top-left position for a rotated element in screen space
@@ -1150,6 +1282,10 @@
 				reorderTargetIndex = null;
 				lastAppliedIndex = null;
 
+				// Store original parent for drag-out detection
+				originalParentId = element.parentId;
+				potentialDropParentId = null;
+
 				// Check if element is in auto layout and can be reordered
 				const state = get(designState);
 				const parent = element.parentId ? state.elements[element.parentId] : null;
@@ -1502,6 +1638,22 @@
 					x: elementStartCanvas.x + deltaCanvas.x,
 					y: elementStartCanvas.y + deltaCanvas.y
 				};
+
+				// Detect potential drop parent for single element drags (not groups, not auto layout)
+				if (!isGroupInteraction && activeElementId && pendingPosition) {
+					// Get the dragged element's size to check for overlap with potential parents
+					const state = get(designState);
+					const draggedElement = state.elements[activeElementId];
+					if (draggedElement) {
+						potentialDropParentId = findDropParentAtPosition(
+							pendingPosition.x,
+							pendingPosition.y,
+							draggedElement.size.width,
+							draggedElement.size.height,
+							activeElementId
+						);
+					}
+				}
 
 				// Update pending transforms for all group elements
 				if (isGroupInteraction) {
@@ -2179,9 +2331,40 @@
 					if (pendingPosition && activeElement) {
 						// Skip moveElement if in auto layout (reordering already happened live)
 						if (!reorderParentId) {
-							// Convert absolute position to parent-relative position
-							const relativePos = absoluteToRelativePosition(activeElement, pendingPosition);
-							await moveElement(activeElementId, relativePos);
+							// Check if parent changed during drag (drag out of/into div)
+							console.log('🔍 Parent change detection:', {
+								potentialDropParentId,
+								originalParentId,
+								willReparent: potentialDropParentId !== originalParentId
+							});
+							if (potentialDropParentId !== originalParentId) {
+								// Parent changed - use reorderElement to change parent and position
+								const newParent = potentialDropParentId ? get(designState).elements[potentialDropParentId] : null;
+
+								// Calculate position relative to new parent
+								let relativePos;
+								if (potentialDropParentId && newParent) {
+									const newParentAbsPos = getAbsolutePosition(newParent);
+									relativePos = {
+										x: pendingPosition.x - newParentAbsPos.x,
+										y: pendingPosition.y - newParentAbsPos.y
+									};
+								} else {
+									// Dropping at root - use absolute position
+									relativePos = pendingPosition;
+								}
+
+								// Reorder to new parent (index 0 = first child, or root if no parent)
+								await reorderElement(activeElementId, potentialDropParentId, 0);
+
+								// Then move to the correct position within that parent
+								await moveElement(activeElementId, relativePos);
+							} else {
+								// Parent didn't change - just move within same parent
+								// Convert absolute position to parent-relative position
+								const relativePos = absoluteToRelativePosition(activeElement, pendingPosition);
+								await moveElement(activeElementId, relativePos);
+							}
 						}
 					}
 				}
@@ -2289,6 +2472,8 @@
 		reorderGhostOffset = { x: 0, y: 0 };
 		reorderElementRotation = 0;
 		reorderElementSize = { width: 0, height: 0 };
+		potentialDropParentId = null;
+		originalParentId = null;
 
 		document.removeEventListener('mousemove', handleMouseMove);
 		document.removeEventListener('mouseup', handleMouseUp);
