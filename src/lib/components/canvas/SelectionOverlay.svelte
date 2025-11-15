@@ -777,6 +777,26 @@
 		return element.rotation || 0;
 	}
 
+	/**
+	 * Get all ancestors of an element (from root to immediate parent)
+	 * Returns array ordered from root ancestor to immediate parent
+	 */
+	function getAllAncestors(element: Element): Element[] {
+		const state = get(designState);
+		const ancestors: Element[] = [];
+		
+		let currentElement: Element | null = element;
+		while (currentElement?.parentId) {
+			const parent = state.elements[currentElement.parentId];
+			if (!parent) break;
+			ancestors.push(parent);
+			currentElement = parent;
+		}
+		
+		// Reverse to get order from root to immediate parent
+		return ancestors.reverse();
+	}
+
 	// Start group interaction (for multi-selection)
 	function startGroupInteraction(e: MouseEvent, handle?: string) {
 		const tool = get(currentTool);
@@ -1589,10 +1609,50 @@
 				);
 			} else {
 				// Normal drag: update position based on delta from start
-				pendingPosition = {
-					x: elementStartCanvas.x + deltaCanvas.x,
-					y: elementStartCanvas.y + deltaCanvas.y
-				};
+				// For elements with rotated ancestors, transform mouse delta through all ancestor rotations
+				const state = get(designState);
+				const activeElement = state.elements[activeElementId!];
+				
+				if (activeElement && activeElement.parentId) {
+					const ancestors = getAllAncestors(activeElement);
+					// Calculate cumulative rotation from all ancestors
+					let cumulativeRotation = 0;
+					for (const ancestor of ancestors) {
+						cumulativeRotation += getDisplayRotation(ancestor);
+					}
+					cumulativeRotation = normalizeRotation(cumulativeRotation);
+					
+					if (cumulativeRotation !== 0) {
+						// Transform mouse delta from screen space into the coordinate system of the immediate parent
+						// We need to rotate by the negative of cumulative rotation to convert from screen to parent space
+						const rotationRad = -cumulativeRotation * (Math.PI / 180);
+						const cos = Math.cos(rotationRad);
+						const sin = Math.sin(rotationRad);
+						
+						// Rotate the delta vector
+						const transformedDelta = {
+							x: deltaCanvas.x * cos - deltaCanvas.y * sin,
+							y: deltaCanvas.x * sin + deltaCanvas.y * cos
+						};
+						
+						pendingPosition = {
+							x: elementStartCanvas.x + transformedDelta.x,
+							y: elementStartCanvas.y + transformedDelta.y
+						};
+					} else {
+						// No rotation: use delta directly
+						pendingPosition = {
+							x: elementStartCanvas.x + deltaCanvas.x,
+							y: elementStartCanvas.y + deltaCanvas.y
+						};
+					}
+				} else {
+					// No parent: use delta directly
+					pendingPosition = {
+						x: elementStartCanvas.x + deltaCanvas.x,
+						y: elementStartCanvas.y + deltaCanvas.y
+					};
+				}
 
 				// Detect potential drop parent for single element drags (not groups, not auto layout)
 				if (!isGroupInteraction && activeElementId && pendingPosition) {
