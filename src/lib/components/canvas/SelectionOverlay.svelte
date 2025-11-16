@@ -1008,22 +1008,34 @@
 		if (handle?.startsWith('rotate')) {
 			// Rotation mode
 			interactionMode = 'rotating';
+			
+			// Initialize mouse screen position for debug overlay
+			currentMouseScreen = { x: e.clientX, y: e.clientY };
 
 			// Extract corner from handle (e.g., 'rotate-nw' -> 'nw')
 			if (handle.includes('-')) {
 				rotationReferenceCorner = handle.split('-')[1] as 'nw' | 'ne' | 'se' | 'sw';
 			}
 
-			// Calculate center point of selection
+			// Calculate center point of selection in canvas space
 			const centerX = elementStartCanvas.x + elementStartCanvas.width / 2;
 			const centerY = elementStartCanvas.y + elementStartCanvas.height / 2;
 
-			// Convert mouse position to canvas space
-			const mouseCanvasX = (e.clientX - viewport.x) / viewport.scale;
-			const mouseCanvasY = (e.clientY - viewport.y) / viewport.scale;
+			// Get canvas rect for screen-space conversion
+			const canvasElement = document.querySelector('.canvas') as HTMLElement | null;
+			const canvasRect = canvasElement?.getBoundingClientRect();
 
-			// Calculate initial angle from center to cursor
-			rotationStartAngle = Math.atan2(mouseCanvasY - centerY, mouseCanvasX - centerX) * (180 / Math.PI);
+			// Convert center to screen space (matches how SelectionUI renders center)
+			const centerScreenX = canvasRect
+				? canvasRect.left + viewport.x + centerX * viewport.scale
+				: centerX;
+			const centerScreenY = canvasRect
+				? canvasRect.top + viewport.y + centerY * viewport.scale
+				: centerY;
+
+			// Calculate initial angle from center to cursor in SCREEN space
+			// (angles are preserved under translate+scale, so this matches canvas-space geometry)
+			rotationStartAngle = Math.atan2(e.clientY - centerScreenY, e.clientX - centerScreenX) * (180 / Math.PI);
 
 			// Store current rotation of first element (for groups, we'll rotate all together)
 			elementStartRotation = selectedElements[0].rotation || 0;
@@ -1040,7 +1052,16 @@
 			const cornerBaseAngle = Math.atan2(cornerOffset.y, cornerOffset.x) * (180 / Math.PI);
 
 			// Calculate initial offset to prevent jump
-			rotationInitialOffset = rotationStartAngle - (cornerBaseAngle + elementStartRotation);
+			// For groups, check if all elements share the same parent rotation
+			const state_for_parent = get(designState);
+			let parentRotation = 0;
+			if (selectedElements.length > 0) {
+				const firstElement = selectedElements[0];
+				const parent_at_start = firstElement.parentId ? state_for_parent.elements[firstElement.parentId] : null;
+				parentRotation = parent_at_start ? (parent_at_start.rotation || 0) : 0;
+			}
+			// Corner's visual angle = cornerBaseAngle + elementRotation + parentRotation
+			rotationInitialOffset = rotationStartAngle - (cornerBaseAngle + elementStartRotation + parentRotation);
 		} else {
 			// Resize mode
 			interactionMode = 'resizing';
@@ -2240,10 +2261,18 @@
 
 			// DEBUG: Calculate actual corner position in world space
 			// Get parent rotation to calculate total visual rotation
+			// For groups, use first element's parent rotation (same as in rotation start)
 			const state_for_debug = get(designState);
-			const activeElementForDebug = state_for_debug.elements[activeElementId!];
-			const parentForDebug = activeElementForDebug?.parentId ? state_for_debug.elements[activeElementForDebug.parentId] : null;
-			const parentRotationForDebug = parentForDebug ? (parentForDebug.rotation || 0) : 0;
+			let parentRotationForDebug = 0;
+			if (isGroupInteraction && selectedElements.length > 0) {
+				const firstElement = selectedElements[0];
+				const parentForDebug = firstElement.parentId ? state_for_debug.elements[firstElement.parentId] : null;
+				parentRotationForDebug = parentForDebug ? (parentForDebug.rotation || 0) : 0;
+			} else if (activeElementId) {
+				const activeElementForDebug = state_for_debug.elements[activeElementId];
+				const parentForDebug = activeElementForDebug?.parentId ? state_for_debug.elements[activeElementForDebug.parentId] : null;
+				parentRotationForDebug = parentForDebug ? (parentForDebug.rotation || 0) : 0;
+			}
 			// Total visual rotation includes both element and parent rotation
 			const totalVisualRotation = (pendingRotation || 0) + parentRotationForDebug;
 			const currentRotationRad = totalVisualRotation * (Math.PI / 180);
