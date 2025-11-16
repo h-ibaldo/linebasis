@@ -2771,11 +2771,66 @@
 								// Calculate position relative to new parent
 								let relativePos;
 								if (potentialDropParentId && newParent) {
-									const newParentAbsPos = getAbsolutePosition(newParent);
-									relativePos = {
-										x: dropPosition.x - newParentAbsPos.x,
-										y: dropPosition.y - newParentAbsPos.y
-									};
+									const newParentRotation = newParent.rotation || 0;
+
+									// If dragging INTO a rotated parent, need to transform coordinates
+									// This is the reverse of dragging OUT of a rotated parent
+									if (newParentRotation !== 0) {
+										// Get visual centers from DOM (same approach as drag-out)
+										const canvasElement = document.querySelector('.canvas') as HTMLElement | null;
+										const canvasRect = canvasElement?.getBoundingClientRect();
+										const childDomElement = document.querySelector(`[data-element-id="${activeElementId}"]`);
+										const parentDomElement = document.querySelector(`[data-element-id="${potentialDropParentId}"]`);
+
+										if (childDomElement && parentDomElement && canvasRect) {
+											// Get child's visual center
+											const childRect = childDomElement.getBoundingClientRect();
+											const childCenterScreenX = childRect.left + childRect.width / 2;
+											const childCenterScreenY = childRect.top + childRect.height / 2;
+											const childCenterCanvasX = (childCenterScreenX - canvasRect.left - viewport.x) / viewport.scale;
+											const childCenterCanvasY = (childCenterScreenY - canvasRect.top - viewport.y) / viewport.scale;
+
+											// Get parent's visual center
+											const parentRect = parentDomElement.getBoundingClientRect();
+											const parentCenterScreenX = parentRect.left + parentRect.width / 2;
+											const parentCenterScreenY = parentRect.top + parentRect.height / 2;
+											const parentCenterCanvasX = (parentCenterScreenX - canvasRect.left - viewport.x) / viewport.scale;
+											const parentCenterCanvasY = (parentCenterScreenY - canvasRect.top - viewport.y) / viewport.scale;
+
+											// Offset from parent center to child center (in world/canvas space)
+											const dx = childCenterCanvasX - parentCenterCanvasX;
+											const dy = childCenterCanvasY - parentCenterCanvasY;
+
+											// Transform to parent's local space (inverse rotation)
+											const angleRad = -newParentRotation * (Math.PI / 180);
+											const localDx = dx * Math.cos(angleRad) - dy * Math.sin(angleRad);
+											const localDy = dx * Math.sin(angleRad) + dy * Math.cos(angleRad);
+
+											// Get sizes
+											const childSize = getDisplaySize(activeElement);
+											const parentSize = getDisplaySize(newParent);
+
+											// Convert from center-relative to top-left relative (in parent's local space)
+											relativePos = {
+												x: localDx + parentSize.width / 2 - childSize.width / 2,
+												y: localDy + parentSize.height / 2 - childSize.height / 2
+											};
+										} else {
+											// Fallback: use simple subtraction
+											const newParentAbsPos = getAbsolutePosition(newParent);
+											relativePos = {
+												x: dropPosition.x - newParentAbsPos.x,
+												y: dropPosition.y - newParentAbsPos.y
+											};
+										}
+									} else {
+										// Parent not rotated - simple subtraction
+										const newParentAbsPos = getAbsolutePosition(newParent);
+										relativePos = {
+											x: dropPosition.x - newParentAbsPos.x,
+											y: dropPosition.y - newParentAbsPos.y
+										};
+									}
 								} else {
 									// Dropping at root - use absolute position
 									relativePos = dropPosition;
