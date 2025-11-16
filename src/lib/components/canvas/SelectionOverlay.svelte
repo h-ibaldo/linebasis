@@ -2904,14 +2904,13 @@
 	{/if}
 {/if}
 
-<!-- Rotation angle display -->
-{#if interactionMode === 'rotating' && pendingRotation !== null}
+<!-- Rotation angle display - follows cursor -->
+{#if interactionMode === 'rotating' && pendingRotation !== null && currentMouseScreen.x !== 0 && currentMouseScreen.y !== 0}
 	<div
 		style="
-			position: absolute;
-			left: {viewport.x + (elementStartCanvas.x + elementStartCanvas.width / 2) * viewport.scale}px;
-			top: {viewport.y + (elementStartCanvas.y + elementStartCanvas.height / 2) * viewport.scale - 60}px;
-			transform: translateX(-50%);
+			position: fixed;
+			left: {currentMouseScreen.x + 20}px;
+			top: {currentMouseScreen.y - 30}px;
 			background: #1e293b;
 			color: white;
 			padding: 4px 12px;
@@ -2922,6 +2921,7 @@
 			pointer-events: none;
 			white-space: nowrap;
 			box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+			z-index: 10001;
 		"
 	>
 		{Math.round(pendingRotation)}°
