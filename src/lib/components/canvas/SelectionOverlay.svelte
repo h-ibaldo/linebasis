@@ -125,34 +125,47 @@
 		// Container types that can accept children
 		const containerTypes = ['div', 'section', 'header', 'footer', 'article', 'aside', 'nav', 'main'];
 
-		// IMPORTANT: Check if element is still within its original parent's boundaries
-		// Elements can only leave their parent when moved completely beyond the parent's boundaries
+		// Get visual boundaries from DOM for accurate containment checking
+		const canvasElement = document.querySelector('.canvas') as HTMLElement | null;
+		const canvasRect = canvasElement?.getBoundingClientRect();
+		if (!canvasRect) return null;
+
+		// Get dragged element's visual bounding box from DOM
+		const draggedDomElement = document.querySelector(`[data-element-id="${draggedElementId}"]`);
+		if (!draggedDomElement) return null;
+		const draggedRect = draggedDomElement.getBoundingClientRect();
+		
+		// Convert to canvas space
+		const draggedVisualLeft = (draggedRect.left - canvasRect.left - viewport.x) / viewport.scale;
+		const draggedVisualRight = (draggedRect.right - canvasRect.left - viewport.x) / viewport.scale;
+		const draggedVisualTop = (draggedRect.top - canvasRect.top - viewport.y) / viewport.scale;
+		const draggedVisualBottom = (draggedRect.bottom - canvasRect.top - viewport.y) / viewport.scale;
+
+		// IMPORTANT: Check if element is still within its original parent's visual boundaries
 		if (originalParentId && state.elements[originalParentId]) {
 			const originalParent = state.elements[originalParentId];
-			const parentAbsPos = getAbsolutePosition(originalParent);
-			const parentLeft = parentAbsPos.x;
-			const parentRight = parentAbsPos.x + originalParent.size.width;
-			const parentTop = parentAbsPos.y;
-			const parentBottom = parentAbsPos.y + originalParent.size.height;
+			const originalParentDom = document.querySelector(`[data-element-id="${originalParentId}"]`);
+			
+			if (originalParentDom) {
+				const originalParentRect = originalParentDom.getBoundingClientRect();
+				const parentVisualLeft = (originalParentRect.left - canvasRect.left - viewport.x) / viewport.scale;
+				const parentVisualRight = (originalParentRect.right - canvasRect.left - viewport.x) / viewport.scale;
+				const parentVisualTop = (originalParentRect.top - canvasRect.top - viewport.y) / viewport.scale;
+				const parentVisualBottom = (originalParentRect.bottom - canvasRect.top - viewport.y) / viewport.scale;
 
-			const elementLeft = elementX;
-			const elementRight = elementX + elementWidth;
-			const elementTop = elementY;
-			const elementBottom = elementY + elementHeight;
+				// Check if ANY part of the element is still within the original parent's visual boundaries
+				const isStillWithinOriginalParent = !(
+					draggedVisualRight < parentVisualLeft ||   // Completely to the left
+					draggedVisualLeft > parentVisualRight ||    // Completely to the right
+					draggedVisualBottom < parentVisualTop ||    // Completely above
+					draggedVisualTop > parentVisualBottom       // Completely below
+				);
 
-			// Check if ANY part of the element is still within the original parent's boundaries
-			const isStillWithinOriginalParent = !(
-				elementRight < parentLeft ||   // Completely to the left
-				elementLeft > parentRight ||    // Completely to the right
-				elementBottom < parentTop ||    // Completely above
-				elementTop > parentBottom       // Completely below
-			);
-
-			// If still within original parent boundaries, keep the original parent
-			if (isStillWithinOriginalParent) {
-				return originalParentId;
+				// If still within original parent boundaries, keep the original parent
+				if (isStillWithinOriginalParent) {
+					return originalParentId;
+				}
 			}
-
 		}
 
 		// Element has moved beyond its original parent (or had no parent)
@@ -171,25 +184,47 @@
 			// Only consider container elements as potential parents
 			if (!containerTypes.includes(element.type)) continue;
 
-			// Check if the dragged element's bounds overlap with this container's bounds
-			const absPos = getAbsolutePosition(element);
-			const containerLeft = absPos.x;
-			const containerRight = absPos.x + element.size.width;
-			const containerTop = absPos.y;
-			const containerBottom = absPos.y + element.size.height;
-
-			const elementLeft = elementX;
-			const elementRight = elementX + elementWidth;
-			const elementTop = elementY;
-			const elementBottom = elementY + elementHeight;
-
-			// Check for complete containment (element must be 100% inside container)
-			const isFullyContained = (
-				elementLeft >= containerLeft &&
-				elementRight <= containerRight &&
-				elementTop >= containerTop &&
-				elementBottom <= containerBottom
-			);
+			// Check containment using actual rotated rectangle, not bounding box
+			// Get container's stored position and rotation
+			const containerAbsPos = getAbsolutePosition(element);
+			const containerRotation = getDisplayRotation(element);
+			const containerRotationRad = containerRotation * (Math.PI / 180);
+			
+			// Container's center in canvas space
+			const containerCenterX = containerAbsPos.x + element.size.width / 2;
+			const containerCenterY = containerAbsPos.y + element.size.height / 2;
+			
+			// Check if all four corners of dragged element's bounding box are inside the rotated container
+			// Transform each corner to container's local coordinate system and check bounds
+			const elementCorners = [
+				{ x: draggedVisualLeft, y: draggedVisualTop },      // Top-left
+				{ x: draggedVisualRight, y: draggedVisualTop },     // Top-right
+				{ x: draggedVisualRight, y: draggedVisualBottom }, // Bottom-right
+				{ x: draggedVisualLeft, y: draggedVisualBottom }    // Bottom-left
+			];
+			
+			let allCornersInside = true;
+			for (const corner of elementCorners) {
+				// Transform corner to container's local coordinate system (rotate by -containerRotation)
+				const relX = corner.x - containerCenterX;
+				const relY = corner.y - containerCenterY;
+				
+				const cos = Math.cos(-containerRotationRad);
+				const sin = Math.sin(-containerRotationRad);
+				const localX = relX * cos - relY * sin;
+				const localY = relX * sin + relY * cos;
+				
+				// Check if corner is inside container's bounds (with strict boundaries)
+				const halfWidth = element.size.width / 2;
+				const halfHeight = element.size.height / 2;
+				
+				if (!(localX > -halfWidth && localX < halfWidth && localY > -halfHeight && localY < halfHeight)) {
+					allCornersInside = false;
+					break;
+				}
+			}
+			
+			const isFullyContained = allCornersInside;
 
 			if (isFullyContained) {
 				overlappingContainers.push(element);
@@ -2752,9 +2787,20 @@
 								// Then move to the correct position within that parent
 								await moveElement(activeElementId, relativePos);
 
-								// Update rotation to visual rotation if dragging out of rotated parent
-								if (originalParentRotation !== 0) {
+								// Handle rotation based on drag direction
+								if (originalParentRotation !== 0 && !potentialDropParentId) {
+									// Dragging OUT of rotated parent: preserve visual rotation
 									await rotateElement(activeElementId, visualRotation);
+								} else if (potentialDropParentId && newParent) {
+									// Dragging INTO a parent: adjust rotation so element appears at same visual rotation
+									const newParentRotation = newParent.rotation || 0;
+									if (newParentRotation !== 0) {
+										// Element's current visual rotation (accounting for original parent if any)
+										const currentVisualRotation = childRotation + originalParentRotation;
+										// To maintain same visual rotation inside new parent, element rotation = visual - parent
+										const adjustedRotation = currentVisualRotation - newParentRotation;
+										await rotateElement(activeElementId, adjustedRotation);
+									}
 								}
 							} else {
 								// Parent didn't change - just move within same parent
@@ -2946,6 +2992,96 @@
 		/>
 	{/if}
 {/if}
+
+<!-- Droppable wrapper highlight - blue border when element can be dropped into wrapper -->
+<!-- TEMP: Always visible for inspection - show for all wrappers -->
+{#each Object.values(get(designState).elements).filter(el => ['div', 'section', 'header', 'footer', 'article', 'aside', 'nav', 'main'].includes(el.type)) as droppableWrapper (droppableWrapper.id)}
+	{#if droppableWrapper}
+		{@const state = get(designState)}
+		{@const canvasElement = document.querySelector('.canvas')}
+		{@const canvasRect = canvasElement?.getBoundingClientRect()}
+		{#if canvasRect}
+			{@const wrapperParent = droppableWrapper.parentId ? state.elements[droppableWrapper.parentId] : null}
+			{@const wrapperParentTransform = wrapperParent ? {
+				position: getAbsolutePosition(wrapperParent),
+				rotation: getDisplayRotation(wrapperParent),
+				size: getDisplaySize(wrapperParent)
+			} : null}
+			{@const wrapperHasParent = wrapperParentTransform !== null}
+			{@const wrapperPos = droppableWrapper.position}
+			{@const wrapperRotation = getDisplayRotation(droppableWrapper)}
+			{@const wrapperSize = getDisplaySize(droppableWrapper)}
+			
+			{#if wrapperHasParent}
+				<!-- Wrapper has parent: use same structure as SelectionUI -->
+				{@const parentWrapperScreenPos = {
+					x: canvasRect.left + viewport.x + wrapperParentTransform.position.x * viewport.scale,
+					y: canvasRect.top + viewport.y + wrapperParentTransform.position.y * viewport.scale
+				}}
+				{@const parentCenterX = wrapperParentTransform.size.width / 2 * viewport.scale}
+				{@const parentCenterY = wrapperParentTransform.size.height / 2 * viewport.scale}
+				{@const wrapperScreenPos = {
+					x: wrapperPos.x * viewport.scale,
+					y: wrapperPos.y * viewport.scale
+				}}
+				{@const wrapperScreenWidth = wrapperSize.width * viewport.scale}
+				{@const wrapperScreenHeight = wrapperSize.height * viewport.scale}
+				{@const wrapperCenterX = wrapperScreenWidth / 2}
+				{@const wrapperCenterY = wrapperScreenHeight / 2}
+				
+				<div
+					style="
+						position: fixed;
+						left: {parentWrapperScreenPos.x}px;
+						top: {parentWrapperScreenPos.y}px;
+						{wrapperParentTransform.rotation ? `transform: rotate(${wrapperParentTransform.rotation}deg); transform-origin: ${parentCenterX}px ${parentCenterY}px;` : ''}
+						pointer-events: none;
+						z-index: 9998;
+					"
+				>
+					<div
+						style="
+							position: absolute;
+							left: {wrapperScreenPos.x}px;
+							top: {wrapperScreenPos.y}px;
+							width: {wrapperScreenWidth}px;
+							height: {wrapperScreenHeight}px;
+							border: 3px solid #3b82f6;
+							pointer-events: none;
+							box-sizing: border-box;
+							{wrapperRotation ? `transform: rotate(${wrapperRotation}deg); transform-origin: ${wrapperCenterX}px ${wrapperCenterY}px;` : ''}
+						"
+					/>
+				</div>
+			{:else}
+				<!-- Wrapper has no parent: render directly -->
+				{@const wrapperScreenPos = {
+					x: canvasRect.left + viewport.x + wrapperPos.x * viewport.scale,
+					y: canvasRect.top + viewport.y + wrapperPos.y * viewport.scale
+				}}
+				{@const wrapperScreenWidth = wrapperSize.width * viewport.scale}
+				{@const wrapperScreenHeight = wrapperSize.height * viewport.scale}
+				{@const wrapperCenterX = wrapperScreenWidth / 2}
+				{@const wrapperCenterY = wrapperScreenHeight / 2}
+				
+				<div
+					style="
+						position: fixed;
+						left: {wrapperScreenPos.x}px;
+						top: {wrapperScreenPos.y}px;
+						width: {wrapperScreenWidth}px;
+						height: {wrapperScreenHeight}px;
+						border: 3px solid #3b82f6;
+						pointer-events: none;
+						box-sizing: border-box;
+						z-index: 9998;
+						{wrapperRotation ? `transform: rotate(${wrapperRotation}deg); transform-origin: ${wrapperCenterX}px ${wrapperCenterY}px;` : ''}
+					"
+				/>
+			{/if}
+		{/if}
+	{/if}
+{/each}
 
 <!-- Rotation angle display - follows cursor -->
 {#if interactionMode === 'rotating' && pendingRotation !== null && currentMouseScreen.x !== 0 && currentMouseScreen.y !== 0}
