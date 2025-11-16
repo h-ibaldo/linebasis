@@ -478,10 +478,10 @@
 				cursor: grab;
 				pointer-events: auto;
 			"
-			on:mousedown={(e) => onMouseDown(e, 'rotate')}
+			on:mousedown={(e) => onMouseDown(e, 'rotate-nw')}
 			role="button"
 			tabindex="0"
-			aria-label="Rotate element"
+			aria-label="Rotate element from top-left corner"
 		/>
 		<!-- Vertical part -->
 		<div
@@ -495,10 +495,10 @@
 				cursor: grab;
 				pointer-events: auto;
 			"
-			on:mousedown={(e) => onMouseDown(e, 'rotate')}
+			on:mousedown={(e) => onMouseDown(e, 'rotate-nw')}
 			role="button"
 			tabindex="0"
-			aria-label="Rotate element"
+			aria-label="Rotate element from top-left corner"
 		/>
 
 		<!-- NE (top-right) corner rotation zone - L-shaped -->
@@ -514,10 +514,10 @@
 				cursor: grab;
 				pointer-events: auto;
 			"
-			on:mousedown={(e) => onMouseDown(e, 'rotate')}
+			on:mousedown={(e) => onMouseDown(e, 'rotate-ne')}
 			role="button"
 			tabindex="0"
-			aria-label="Rotate element"
+			aria-label="Rotate element from top-right corner"
 		/>
 		<!-- Vertical part -->
 		<div
@@ -531,10 +531,10 @@
 				cursor: grab;
 				pointer-events: auto;
 			"
-			on:mousedown={(e) => onMouseDown(e, 'rotate')}
+			on:mousedown={(e) => onMouseDown(e, 'rotate-ne')}
 			role="button"
 			tabindex="0"
-			aria-label="Rotate element"
+			aria-label="Rotate element from top-right corner"
 		/>
 
 		<!-- SE (bottom-right) corner rotation zone - L-shaped -->
@@ -550,10 +550,10 @@
 				cursor: grab;
 				pointer-events: auto;
 			"
-			on:mousedown={(e) => onMouseDown(e, 'rotate')}
+			on:mousedown={(e) => onMouseDown(e, 'rotate-se')}
 			role="button"
 			tabindex="0"
-			aria-label="Rotate element"
+			aria-label="Rotate element from bottom-right corner"
 		/>
 		<!-- Vertical part -->
 		<div
@@ -567,10 +567,10 @@
 				cursor: grab;
 				pointer-events: auto;
 			"
-			on:mousedown={(e) => onMouseDown(e, 'rotate')}
+			on:mousedown={(e) => onMouseDown(e, 'rotate-se')}
 			role="button"
 			tabindex="0"
-			aria-label="Rotate element"
+			aria-label="Rotate element from bottom-right corner"
 		/>
 
 		<!-- SW (bottom-left) corner rotation zone - L-shaped -->
@@ -586,10 +586,10 @@
 				cursor: grab;
 				pointer-events: auto;
 			"
-			on:mousedown={(e) => onMouseDown(e, 'rotate')}
+			on:mousedown={(e) => onMouseDown(e, 'rotate-sw')}
 			role="button"
 			tabindex="0"
-			aria-label="Rotate element"
+			aria-label="Rotate element from bottom-left corner"
 		/>
 		<!-- Vertical part -->
 		<div
@@ -603,10 +603,10 @@
 				cursor: grab;
 				pointer-events: auto;
 			"
-			on:mousedown={(e) => onMouseDown(e, 'rotate')}
+			on:mousedown={(e) => onMouseDown(e, 'rotate-sw')}
 			role="button"
 			tabindex="0"
-			aria-label="Rotate element"
+			aria-label="Rotate element from bottom-left corner"
 		/>
 	{/if}
 		</div>

@@ -36,6 +36,18 @@
 	let pendingRadius: number | null = null;
 	let rotationStartAngle: number = 0; // Initial angle at rotation start
 	let elementStartRotation: number = 0; // Element's rotation at start
+	let rotationReferenceCorner: 'nw' | 'ne' | 'se' | 'sw' = 'ne'; // Which corner to align with cursor during rotation
+	let rotationInitialOffset: number = 0; // Initial angular offset between cursor and corner to prevent jump
+
+	// Debug visualization for rotation
+	let debugCenter: { x: number; y: number } | null = null;
+	let debugCorner: { x: number; y: number } | null = null;
+	let debugCursor: { x: number; y: number } | null = null;
+	let debugCenterAngle: number = 0;
+	let debugCornerAngle: number = 0;
+	let debugCursorAngle: number = 0;
+	let debugCornerBaseAngle: number = 0;
+	let debugTargetRotation: number = 0;
 	let radiusCorner: 'nw' | 'ne' | 'se' | 'sw' | null = null; // Which corner is being adjusted
 	let radiusStartDistance: number = 0; // Initial distance from corner at drag start
 	let radiusInitialValue: number = 0; // Initial radius value at drag start
@@ -55,6 +67,41 @@
 	let reorderElementRotation: number = 0; // Rotation of element being reordered
 	let reorderElementSize: { width: number; height: number } = { width: 0, height: 0 }; // Size of element being reordered
 	let currentMouseScreen: { x: number; y: number } = { x: 0, y: 0 }; // Current mouse position for debug
+
+	// Screen-space debug helpers for rotation visualization (account for canvas DOM offset)
+	let debugCenterScreen: { x: number; y: number } | null = null;
+	let debugCornerScreen: { x: number; y: number } | null = null;
+	let debugCursorScreen: { x: number; y: number } | null = null;
+
+	$: {
+		if (interactionMode === 'rotating' && debugCenter && debugCorner) {
+			const canvasElement = document.querySelector('.canvas') as HTMLElement | null;
+			if (canvasElement) {
+				const canvasRect = canvasElement.getBoundingClientRect();
+
+				// Center and corner: convert from canvas-space (debugCenter/debugCorner) to screen-space
+				debugCenterScreen = {
+					x: canvasRect.left + viewport.x + debugCenter.x * viewport.scale,
+					y: canvasRect.top + viewport.y + debugCenter.y * viewport.scale
+				};
+
+				debugCornerScreen = {
+					x: canvasRect.left + viewport.x + debugCorner.x * viewport.scale,
+					y: canvasRect.top + viewport.y + debugCorner.y * viewport.scale
+				};
+
+				// Cursor: use actual OS cursor position directly (already in screen space)
+				debugCursorScreen = {
+					x: currentMouseScreen.x,
+					y: currentMouseScreen.y
+				};
+			} else {
+				debugCenterScreen = debugCornerScreen = debugCursorScreen = null;
+			}
+		} else {
+			debugCenterScreen = debugCornerScreen = debugCursorScreen = null;
+		}
+	}
 
 	// Parent change detection during drag (for dragging elements out of/into divs)
 	let potentialDropParentId: string | null = null; // Element being hovered over that could become new parent
@@ -339,11 +386,19 @@
 
 	/**
 	 * Normalize rotation angle to -180 to 180 degree range
-	 * Uses modulo operator for efficiency instead of while loops
+	 * Properly handles negative angles
 	 */
 	function normalizeRotation(rotation: number): number {
-		// Shift to 0-360 range, then back to -180 to 180
-		return ((rotation + 180) % 360) - 180;
+		// First normalize to 0-360 range
+		let normalized = rotation % 360;
+
+		// Handle negative modulo results (JavaScript preserves sign in modulo)
+		if (normalized < 0) normalized += 360;
+
+		// Convert to -180 to 180 range
+		if (normalized > 180) normalized -= 360;
+
+		return normalized;
 	}
 
 	// Calculate bounding box for multiple elements
@@ -950,9 +1005,14 @@
 			height: unrotatedBounds.height
 		};
 
-		if (handle === 'rotate') {
+		if (handle?.startsWith('rotate')) {
 			// Rotation mode
 			interactionMode = 'rotating';
+
+			// Extract corner from handle (e.g., 'rotate-nw' -> 'nw')
+			if (handle.includes('-')) {
+				rotationReferenceCorner = handle.split('-')[1] as 'nw' | 'ne' | 'se' | 'sw';
+			}
 
 			// Calculate center point of selection
 			const centerX = elementStartCanvas.x + elementStartCanvas.width / 2;
@@ -962,12 +1022,25 @@
 			const mouseCanvasX = (e.clientX - viewport.x) / viewport.scale;
 			const mouseCanvasY = (e.clientY - viewport.y) / viewport.scale;
 
-			// Calculate initial angle
+			// Calculate initial angle from center to cursor
 			rotationStartAngle = Math.atan2(mouseCanvasY - centerY, mouseCanvasX - centerX) * (180 / Math.PI);
 
 			// Store current rotation of first element (for groups, we'll rotate all together)
 			elementStartRotation = selectedElements[0].rotation || 0;
 			pendingRotation = elementStartRotation;
+
+			// Calculate corner base angle (in local/unrotated space)
+			const cornerOffsets = {
+				nw: { x: -elementStartCanvas.width / 2, y: -elementStartCanvas.height / 2 },
+				ne: { x: elementStartCanvas.width / 2, y: -elementStartCanvas.height / 2 },
+				se: { x: elementStartCanvas.width / 2, y: elementStartCanvas.height / 2 },
+				sw: { x: -elementStartCanvas.width / 2, y: elementStartCanvas.height / 2 }
+			};
+			const cornerOffset = cornerOffsets[rotationReferenceCorner];
+			const cornerBaseAngle = Math.atan2(cornerOffset.y, cornerOffset.x) * (180 / Math.PI);
+
+			// Calculate initial offset to prevent jump
+			rotationInitialOffset = rotationStartAngle - (cornerBaseAngle + elementStartRotation);
 		} else {
 			// Resize mode
 			interactionMode = 'resizing';
@@ -1025,24 +1098,115 @@
 			height: size.height
 		};
 
-		if (handle === 'rotate') {
+		if (handle?.startsWith('rotate')) {
 			// Rotation mode
 			interactionMode = 'rotating';
+			
+			// Initialize mouse screen position for debug overlay
+			currentMouseScreen = { x: e.clientX, y: e.clientY };
 
-			// Calculate center point
+			// Extract corner from handle (e.g., 'rotate-nw' -> 'nw')
+			if (handle.includes('-')) {
+				rotationReferenceCorner = handle.split('-')[1] as 'nw' | 'ne' | 'se' | 'sw';
+			}
+
+			// Calculate center point in canvas space
 			const centerX = pos.x + size.width / 2;
 			const centerY = pos.y + size.height / 2;
 
-			// Convert mouse position to canvas space
-			const mouseCanvasX = (e.clientX - viewport.x) / viewport.scale;
-			const mouseCanvasY = (e.clientY - viewport.y) / viewport.scale;
+			// Get canvas rect for screen-space conversion
+			const canvasElement = document.querySelector('.canvas') as HTMLElement | null;
+			const canvasRect = canvasElement?.getBoundingClientRect();
 
-			// Calculate initial angle
-			rotationStartAngle = Math.atan2(mouseCanvasY - centerY, mouseCanvasX - centerX) * (180 / Math.PI);
+			// Convert center to screen space (matches how SelectionUI renders center)
+			const centerScreenX = canvasRect
+				? canvasRect.left + viewport.x + centerX * viewport.scale
+				: centerX;
+			const centerScreenY = canvasRect
+				? canvasRect.top + viewport.y + centerY * viewport.scale
+				: centerY;
+
+			// Also store mouse position in canvas space for debugging
+			const mouseCanvasX = canvasRect
+				? (e.clientX - canvasRect.left - viewport.x) / viewport.scale
+				: (e.clientX - viewport.x) / viewport.scale;
+			const mouseCanvasY = canvasRect
+				? (e.clientY - canvasRect.top - viewport.y) / viewport.scale
+				: (e.clientY - viewport.y) / viewport.scale;
+
+			// Calculate initial angle from center to cursor in SCREEN space
+			// (angles are preserved under translate+scale, so this matches canvas-space geometry)
+			rotationStartAngle = Math.atan2(e.clientY - centerScreenY, e.clientX - centerScreenX) * (180 / Math.PI);
 
 			// Store current rotation
 			elementStartRotation = element.rotation || 0;
 			pendingRotation = elementStartRotation;
+
+			// Calculate corner base angle (in local/unrotated space)
+			const cornerOffsets = {
+				nw: { x: -size.width / 2, y: -size.height / 2 },
+				ne: { x: size.width / 2, y: -size.height / 2 },
+				se: { x: size.width / 2, y: size.height / 2 },
+				sw: { x: -size.width / 2, y: size.height / 2 }
+			};
+			const cornerOffset = cornerOffsets[rotationReferenceCorner];
+			const cornerBaseAngle = Math.atan2(cornerOffset.y, cornerOffset.x) * (180 / Math.PI);
+
+			// Calculate initial offset to prevent jump
+			// Account for parent rotation - corner's visual angle includes both element and parent rotation
+			const state_for_parent = get(designState);
+			const parent_at_start = element.parentId ? state_for_parent.elements[element.parentId] : null;
+			const parentRotation = parent_at_start ? (parent_at_start.rotation || 0) : 0;
+			// Corner's visual angle = cornerBaseAngle + elementRotation + parentRotation
+			rotationInitialOffset = rotationStartAngle - (cornerBaseAngle + elementStartRotation + parentRotation);
+
+			// Get element's actual DOM center for comparison
+			const domElement = document.querySelector(`[data-element-id="${element.id}"]`);
+			let actualDOMCenter = { x: 0, y: 0 };
+			if (domElement && canvasElement) {
+				const rect = domElement.getBoundingClientRect();
+				const canvasRect = canvasElement.getBoundingClientRect();
+				// For rotated elements, getBoundingClientRect gives bounding box
+				// The center of the bounding box IS the element's center (rotation is around center)
+				actualDOMCenter.x = (rect.left + rect.width / 2 - canvasRect.left - viewport.x) / viewport.scale;
+				actualDOMCenter.y = (rect.top + rect.height / 2 - canvasRect.top - viewport.y) / viewport.scale;
+			}
+
+			// CONSOLE LOG: Rotation start
+			console.group('🎬 ROTATION START');
+			console.log('📦 Element STORED position:', element.position);
+			console.log('📦 Element STORED size:', element.size);
+			console.log('📦 Element DISPLAY position (from getDisplayPosition):', pos);
+			console.log('📦 Element DISPLAY size (from getDisplaySize):', size);
+			console.log('📍 Center (calculated from display pos + size/2):', { x: centerX, y: centerY });
+			console.log('📍 Center (if calculated from stored pos + stored size/2):', {
+				x: element.position.x + element.size.width / 2,
+				y: element.position.y + element.size.height / 2
+			});
+			console.log('📍 Center (ACTUAL from DOM getBoundingClientRect):', actualDOMCenter);
+			console.log('❌ Center ERROR (calculated - actual):', {
+				x: (centerX - actualDOMCenter.x).toFixed(2),
+				y: (centerY - actualDOMCenter.y).toFixed(2)
+			});
+			console.log('🔄 Element rotation:', element.rotation || 0, '°');
+			console.log('📐 Corner offset (local):', cornerOffset);
+			console.log('📐 Corner base angle:', cornerBaseAngle.toFixed(2), '°');
+			console.log('🔴 Cursor start position:', { x: mouseCanvasX.toFixed(2), y: mouseCanvasY.toFixed(2) });
+			console.log('🔴 Cursor start angle:', rotationStartAngle.toFixed(2), '°');
+			console.log('🎯 Element start rotation:', elementStartRotation.toFixed(2), '°');
+			console.log('🎯 Calculated initial offset:', rotationInitialOffset.toFixed(2), '°');
+			console.log('📏 Reference corner:', rotationReferenceCorner.toUpperCase());
+
+			// Check if element is in auto layout
+			const state_check = get(designState);
+			const parent_check = element.parentId ? state_check.elements[element.parentId] : null;
+			const parentRotation_check = parent_check ? (parent_check.rotation || 0) : 0;
+			console.log('👪 Parent:', parent_check ? parent_check.id : 'none');
+			console.log('👪 Parent rotation:', parentRotation_check, '°');
+			console.log('🔲 Parent has auto layout:', parent_check?.autoLayout?.enabled || false);
+			console.log('🚫 Element ignores auto layout:', element.autoLayout?.ignoreAutoLayout || false);
+			console.log('⚠️  TOTAL rotation (element + parent):', (elementStartRotation + parentRotation_check).toFixed(2), '°');
+			console.groupEnd();
 		} else if (handle?.startsWith('radius-')) {
 			// Corner radius mode
 			interactionMode = 'radius';
@@ -2013,6 +2177,9 @@
 				);
 			}
 		} else if (interactionMode === 'rotating') {
+			// Track latest screen-space cursor position for debug overlay
+			currentMouseScreen = { x: e.clientX, y: e.clientY };
+
 			// Get current element to check if in auto layout
 			const activeElement = selectedElements.find(el => el.id === activeElementId);
 			const state = get(designState);
@@ -2034,23 +2201,92 @@
 				centerY = elementStartCanvas.y + elementStartCanvas.height / 2;
 			}
 
-			// Convert current mouse position to canvas space
-			const mouseCanvasX = (e.clientX - viewport.x) / viewport.scale;
-			const mouseCanvasY = (e.clientY - viewport.y) / viewport.scale;
+			// Get canvas rect for screen-space conversion
+			const canvasElement = document.querySelector('.canvas') as HTMLElement | null;
+			const canvasRect = canvasElement?.getBoundingClientRect();
 
-			// Calculate current angle
-			const currentAngle = Math.atan2(mouseCanvasY - centerY, mouseCanvasX - centerX) * (180 / Math.PI);
+			// Convert current mouse position to canvas space for debugging
+			const mouseCanvasX = canvasRect
+				? (e.clientX - canvasRect.left - viewport.x) / viewport.scale
+				: (e.clientX - viewport.x) / viewport.scale;
+			const mouseCanvasY = canvasRect
+				? (e.clientY - canvasRect.top - viewport.y) / viewport.scale
+				: (e.clientY - viewport.y) / viewport.scale;
 
-			// Calculate rotation delta
-			let angleDelta = currentAngle - rotationStartAngle;
+			// Convert center to screen space (matches how SelectionUI renders center)
+			const centerScreenX = canvasRect
+				? canvasRect.left + viewport.x + centerX * viewport.scale
+				: centerX;
+			const centerScreenY = canvasRect
+				? canvasRect.top + viewport.y + centerY * viewport.scale
+				: centerY;
+
+			// Calculate current cursor angle from center in SCREEN space
+			const cursorAngle = Math.atan2(e.clientY - centerScreenY, e.clientX - centerScreenX) * (180 / Math.PI);
+
+			// Calculate base angle from center to the reference corner (in local/unrotated space)
+			const cornerOffsets = {
+				nw: { x: -elementStartCanvas.width / 2, y: -elementStartCanvas.height / 2 },
+				ne: { x: elementStartCanvas.width / 2, y: -elementStartCanvas.height / 2 },
+				se: { x: elementStartCanvas.width / 2, y: elementStartCanvas.height / 2 },
+				sw: { x: -elementStartCanvas.width / 2, y: elementStartCanvas.height / 2 }
+			};
+			const cornerOffset = cornerOffsets[rotationReferenceCorner];
+			const cornerBaseAngle = Math.atan2(cornerOffset.y, cornerOffset.x) * (180 / Math.PI);
+
+			// Calculate rotation to make corner point toward cursor
+			// Subtract initial offset to prevent jump while maintaining alignment
+			let targetRotation = cursorAngle - cornerBaseAngle - rotationInitialOffset;
+
+			// DEBUG: Calculate actual corner position in world space
+			// Get parent rotation to calculate total visual rotation
+			const state_for_debug = get(designState);
+			const activeElementForDebug = state_for_debug.elements[activeElementId!];
+			const parentForDebug = activeElementForDebug?.parentId ? state_for_debug.elements[activeElementForDebug.parentId] : null;
+			const parentRotationForDebug = parentForDebug ? (parentForDebug.rotation || 0) : 0;
+			// Total visual rotation includes both element and parent rotation
+			const totalVisualRotation = (pendingRotation || 0) + parentRotationForDebug;
+			const currentRotationRad = totalVisualRotation * (Math.PI / 180);
+			const rotatedCornerX = centerX + cornerOffset.x * Math.cos(currentRotationRad) - cornerOffset.y * Math.sin(currentRotationRad);
+			const rotatedCornerY = centerY + cornerOffset.x * Math.sin(currentRotationRad) + cornerOffset.y * Math.cos(currentRotationRad);
+			const actualCornerAngle = Math.atan2(rotatedCornerY - centerY, rotatedCornerX - centerX) * (180 / Math.PI);
+
+			// CONSOLE LOG DEBUGGING
+			console.group('🔄 ROTATION DEBUG');
+			console.log('📦 Element Canvas:', elementStartCanvas);
+			console.log('📍 Center (calculated):', { x: centerX, y: centerY });
+			console.log('📐 Corner offset (local space):', cornerOffset);
+			console.log('📐 Corner base angle (local):', cornerBaseAngle.toFixed(2), '°');
+			console.log('👪 Parent rotation:', parentRotationForDebug.toFixed(2), '°');
+			console.log('🔄 Element rotation (pending):', (pendingRotation || 0).toFixed(2), '°');
+			console.log('🔄 Total visual rotation (element + parent):', totalVisualRotation.toFixed(2), '°');
+			console.log('🟢 Corner position (world space):', { x: rotatedCornerX.toFixed(2), y: rotatedCornerY.toFixed(2) });
+			console.log('🟢 Corner actual angle:', actualCornerAngle.toFixed(2), '°');
+			console.log('🔴 Cursor position (canvas):', { x: mouseCanvasX.toFixed(2), y: mouseCanvasY.toFixed(2) });
+			console.log('🔴 Cursor angle:', cursorAngle.toFixed(2), '°');
+			console.log('⚠️  Angular delta (cursor - corner):', (cursorAngle - actualCornerAngle).toFixed(2), '°');
+			console.log('🎯 Initial offset:', rotationInitialOffset.toFixed(2), '°');
+			console.log('🎯 Element start rotation:', elementStartRotation.toFixed(2), '°');
+			console.log('🎯 Target rotation:', targetRotation.toFixed(2), '°');
+			console.log('📏 Reference corner:', rotationReferenceCorner.toUpperCase());
+			console.groupEnd();
+
+			// Store debug values for visualization
+			debugCenter = { x: centerX, y: centerY };
+			debugCorner = { x: rotatedCornerX, y: rotatedCornerY };
+			debugCursor = { x: mouseCanvasX, y: mouseCanvasY };
+			debugCursorAngle = cursorAngle;
+			debugCornerAngle = actualCornerAngle;
+			debugCornerBaseAngle = cornerBaseAngle;
+			debugTargetRotation = targetRotation;
 
 			// Apply Shift key snap to 15° increments
 			if (e.shiftKey) {
-				angleDelta = Math.round(angleDelta / 15) * 15;
+				targetRotation = Math.round(targetRotation / 15) * 15;
 			}
 
-			// Calculate new rotation
-			pendingRotation = normalizeRotation(elementStartRotation + angleDelta);
+			// Normalize and apply rotation
+			pendingRotation = normalizeRotation(targetRotation);
 
 			// For auto layout, update position from DOM (element moves as it rotates)
 			if (isInAutoLayout && activeElement) {
@@ -2485,6 +2721,11 @@
 		potentialDropParentId = null;
 		originalParentId = null;
 
+		// Clear debug values
+		debugCenter = null;
+		debugCorner = null;
+		debugCursor = null;
+
 		document.removeEventListener('mousemove', handleMouseMove);
 		document.removeEventListener('mouseup', handleMouseUp);
 	}
@@ -2619,4 +2860,91 @@
 			{/if}
 		</div>
 	{/if}
+{/if}
+
+<!-- DEBUG: Rotation visualization -->
+{#if interactionMode === 'rotating' && debugCenterScreen && debugCornerScreen && debugCursorScreen}
+	<svg
+		style="
+			position: fixed;
+			top: 0;
+			left: 0;
+			width: 100vw;
+			height: 100vh;
+			pointer-events: none;
+			z-index: 100000;
+		"
+	>
+
+		<!-- Line from center to cursor (RED) -->
+		<line
+			x1={debugCenterScreen.x}
+			y1={debugCenterScreen.y}
+			x2={debugCursorScreen.x}
+			y2={debugCursorScreen.y}
+			stroke="red"
+			stroke-width="2"
+			opacity="0.7"
+		/>
+
+		<!-- Line from center to corner (GREEN) -->
+		<line
+			x1={debugCenterScreen.x}
+			y1={debugCenterScreen.y}
+			x2={debugCornerScreen.x}
+			y2={debugCornerScreen.y}
+			stroke="lime"
+			stroke-width="2"
+			opacity="0.7"
+		/>
+
+		<!-- Center point (BLUE) -->
+		<circle cx={debugCenterScreen.x} cy={debugCenterScreen.y} r="6" fill="blue" opacity="0.8" />
+
+		<!-- Corner point (GREEN) -->
+		<circle cx={debugCornerScreen.x} cy={debugCornerScreen.y} r="6" fill="lime" opacity="0.8" />
+
+		<!-- Cursor point (RED) -->
+		<circle cx={debugCursorScreen.x} cy={debugCursorScreen.y} r="6" fill="red" opacity="0.8" />
+
+		<!-- Labels -->
+		<text x={debugCenterScreen.x + 10} y={debugCenterScreen.y - 10} fill="blue" font-size="12" font-weight="bold">
+			CENTER
+		</text>
+		<text x={debugCornerScreen.x + 10} y={debugCornerScreen.y - 10} fill="lime" font-size="12" font-weight="bold">
+			CORNER ({rotationReferenceCorner.toUpperCase()})
+		</text>
+		<text x={debugCursorScreen.x + 10} y={debugCursorScreen.y + 20} fill="red" font-size="12" font-weight="bold">
+			CURSOR
+		</text>
+
+		<!-- Angle information -->
+		<g transform="translate(20, 80)">
+			<rect x="0" y="0" width="320" height="180" fill="black" opacity="0.8" rx="5" />
+			<text x="10" y="20" fill="white" font-size="12" font-family="monospace">
+				Corner Base Angle: {debugCornerBaseAngle.toFixed(2)}°
+			</text>
+			<text x="10" y="40" fill="white" font-size="12" font-family="monospace">
+				Cursor Angle: {debugCursorAngle.toFixed(2)}°
+			</text>
+			<text x="10" y="60" fill="lime" font-size="12" font-family="monospace">
+				Actual Corner Angle: {debugCornerAngle.toFixed(2)}°
+			</text>
+			<text x="10" y="80" fill="yellow" font-size="12" font-family="monospace">
+				Angular Delta: {(debugCursorAngle - debugCornerAngle).toFixed(2)}°
+			</text>
+			<text x="10" y="100" fill="white" font-size="12" font-family="monospace">
+				Initial Offset: {rotationInitialOffset.toFixed(2)}°
+			</text>
+			<text x="10" y="120" fill="white" font-size="12" font-family="monospace">
+				Element Start Rotation: {elementStartRotation.toFixed(2)}°
+			</text>
+			<text x="10" y="140" fill="white" font-size="12" font-family="monospace">
+				Target Rotation: {debugTargetRotation.toFixed(2)}°
+			</text>
+			<text x="10" y="160" fill="cyan" font-size="12" font-family="monospace">
+				Pending Rotation: {(pendingRotation || 0).toFixed(2)}°
+			</text>
+		</g>
+	</svg>
 {/if}
