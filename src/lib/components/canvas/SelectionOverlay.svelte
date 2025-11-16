@@ -2737,9 +2737,9 @@
 	});
 </script>
 
-<!-- Render selection UI (hide when text is being edited or during auto layout reordering) -->
+<!-- Render selection UI (hide when text is being edited, during rotation, or during auto layout reordering) -->
 	{#if $interactionState.mode !== 'editing-text'}
-	{#if selectedElements.length === 1 && !(interactionMode === 'dragging' && reorderParentId)}
+	{#if selectedElements.length === 1 && !(interactionMode === 'dragging' && reorderParentId) && interactionMode !== 'rotating'}
 		<!-- Single element selection (hidden during auto layout reordering - ghost shows instead) -->
 		{@const selectedElement = selectedElements[0]}
 		{@const state = get(designState)}
@@ -2766,7 +2766,7 @@
 			{parentTransform}
 			onMouseDown={(e, handle) => handleMouseDown(e, selectedElement, handle)}
 		/>
-	{:else if selectedElements.length > 1 && groupBounds}
+	{:else if selectedElements.length > 1 && groupBounds && interactionMode !== 'rotating'}
 		<!-- Multi-element selection - single bounding box -->
 		<!-- Note: groupBounds already accounts for rotated elements by calculating their corners -->
 		<!-- groupBounds is reactive to groupPendingTransforms, so it updates in real-time during interactions -->
