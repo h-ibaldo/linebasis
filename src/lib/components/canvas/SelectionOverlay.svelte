@@ -1860,13 +1860,13 @@
 				);
 			} else {
 				// Normal drag: update position based on delta from start
-				// For elements with rotated ancestors, transform mouse delta through all ancestor rotations
 				const state = get(designState);
 				const activeElement = state.elements[activeElementId!];
 				
+				// First, detect potential drop parent using current pendingPosition (will be updated below)
+				let tempPendingPosition = pendingPosition || { x: elementStartCanvas.x, y: elementStartCanvas.y };
 				if (activeElement && activeElement.parentId) {
 					const ancestors = getAllAncestors(activeElement);
-					// Calculate cumulative rotation from all ancestors
 					let cumulativeRotation = 0;
 					for (const ancestor of ancestors) {
 						cumulativeRotation += getDisplayRotation(ancestor);
@@ -1874,51 +1874,50 @@
 					cumulativeRotation = normalizeRotation(cumulativeRotation);
 					
 					if (cumulativeRotation !== 0) {
-						// Transform mouse delta from screen space into the coordinate system of the immediate parent
-						// We need to rotate by the negative of cumulative rotation to convert from screen to parent space
 						const rotationRad = -cumulativeRotation * (Math.PI / 180);
 						const cos = Math.cos(rotationRad);
 						const sin = Math.sin(rotationRad);
-						
-						// Rotate the delta vector
 						const transformedDelta = {
 							x: deltaCanvas.x * cos - deltaCanvas.y * sin,
 							y: deltaCanvas.x * sin + deltaCanvas.y * cos
 						};
-						
-						pendingPosition = {
+						tempPendingPosition = {
 							x: elementStartCanvas.x + transformedDelta.x,
 							y: elementStartCanvas.y + transformedDelta.y
 						};
 					} else {
-						// No rotation: use delta directly
-						pendingPosition = {
+						tempPendingPosition = {
 							x: elementStartCanvas.x + deltaCanvas.x,
 							y: elementStartCanvas.y + deltaCanvas.y
 						};
 					}
 				} else {
-					// No parent: use delta directly
-					pendingPosition = {
+					tempPendingPosition = {
 						x: elementStartCanvas.x + deltaCanvas.x,
 						y: elementStartCanvas.y + deltaCanvas.y
 					};
 				}
-
+				
 				// Detect potential drop parent for single element drags (not groups, not auto layout)
-				if (!isGroupInteraction && activeElementId && pendingPosition) {
+				if (!isGroupInteraction && activeElementId && tempPendingPosition) {
 					// Get the dragged element's size to check for overlap with potential parents
-					const state = get(designState);
 					const draggedElement = state.elements[activeElementId];
 					if (draggedElement) {
 						potentialDropParentId = findDropParentAtPosition(
-							pendingPosition.x,
-							pendingPosition.y,
+							tempPendingPosition.x,
+							tempPendingPosition.y,
 							draggedElement.size.width,
 							draggedElement.size.height,
 							activeElementId
 						);
+						
+						// Always use transformed delta (no special handling for dragging outside)
+						pendingPosition = tempPendingPosition;
+					} else {
+						pendingPosition = tempPendingPosition;
 					}
+				} else {
+					pendingPosition = tempPendingPosition;
 				}
 
 				// Update pending transforms for all group elements
@@ -2693,19 +2692,58 @@
 							// Check if parent changed during drag (drag out of/into div)
 							if (potentialDropParentId !== originalParentId) {
 								// Parent changed - use reorderElement to change parent and position
-								const newParent = potentialDropParentId ? get(designState).elements[potentialDropParentId] : null;
+								const state_for_parent = get(designState);
+								const newParent = potentialDropParentId ? state_for_parent.elements[potentialDropParentId] : null;
+								const originalParent = originalParentId ? state_for_parent.elements[originalParentId] : null;
+
+								// If dragging out of a rotated parent, preserve visual rotation and position
+								const originalParentRotation = originalParent?.rotation || 0;
+								const childRotation = activeElement.rotation || 0;
+								const visualRotation = childRotation + originalParentRotation;
+
+								// Get visual position from DOM at drop time if dragging out of rotated parent
+								// This ensures the element lands exactly where it appears visually
+								let dropPosition = pendingPosition;
+								if (originalParentRotation !== 0) {
+									const canvasElement = document.querySelector('.canvas') as HTMLElement | null;
+									const canvasRect = canvasElement?.getBoundingClientRect();
+									const domElement = document.querySelector(`[data-element-id="${activeElementId}"]`);
+									
+									if (domElement && canvasRect) {
+										const rect = domElement.getBoundingClientRect();
+										// Get element's center from bounding box (transform-origin is center center)
+										// The bounding box center IS the element's visual center, which equals stored center
+										const centerScreenX = rect.left + rect.width / 2;
+										const centerScreenY = rect.top + rect.height / 2;
+										
+										// Convert center to canvas space
+										const centerCanvasX = (centerScreenX - canvasRect.left - viewport.x) / viewport.scale;
+										const centerCanvasY = (centerScreenY - canvasRect.top - viewport.y) / viewport.scale;
+										
+										// Get display size (accounts for pending size changes)
+										const displaySize = getDisplaySize(activeElement);
+										
+										// Stored top-left = stored center + (-width/2, -height/2)
+										// Since stored center = visual center, we can calculate directly
+										// No rotation needed because stored coordinates are unrotated
+										dropPosition = {
+											x: centerCanvasX - displaySize.width / 2,
+											y: centerCanvasY - displaySize.height / 2
+										};
+									}
+								}
 
 								// Calculate position relative to new parent
 								let relativePos;
 								if (potentialDropParentId && newParent) {
 									const newParentAbsPos = getAbsolutePosition(newParent);
 									relativePos = {
-										x: pendingPosition.x - newParentAbsPos.x,
-										y: pendingPosition.y - newParentAbsPos.y
+										x: dropPosition.x - newParentAbsPos.x,
+										y: dropPosition.y - newParentAbsPos.y
 									};
 								} else {
 									// Dropping at root - use absolute position
-									relativePos = pendingPosition;
+									relativePos = dropPosition;
 								}
 
 								// Reorder to new parent (index 0 = first child, or root if no parent)
@@ -2713,6 +2751,11 @@
 
 								// Then move to the correct position within that parent
 								await moveElement(activeElementId, relativePos);
+
+								// Update rotation to visual rotation if dragging out of rotated parent
+								if (originalParentRotation !== 0) {
+									await rotateElement(activeElementId, visualRotation);
+								}
 							} else {
 								// Parent didn't change - just move within same parent
 								// Convert absolute position to parent-relative position
