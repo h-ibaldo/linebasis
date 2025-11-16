@@ -18,6 +18,7 @@
 		updateElementTypography
 	} from '$lib/stores/design-store';
 import { interactionState, startEditingText, stopEditingText } from '$lib/stores/interaction-store';
+import { sanitizeTextContent } from '$lib/utils/sanitize';
 
 type DocumentWithCaret = Document & {
 	caretRangeFromPoint?: (x: number, y: number) => Range | null;
@@ -34,6 +35,9 @@ type DocumentWithCaret = Document & {
 
 	// Check if this element is a text element (used for cursor and editing)
 	$: isTextElement = ['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'span', 'a', 'button', 'label'].includes(element.type);
+
+	// Sanitize element content to prevent XSS attacks when rendering
+	$: sanitizedContent = sanitizeTextContent(element.content || '');
 
 	// Determine cursor based on tool, panning state, and dragging state
 	$: elementCursor =
@@ -138,7 +142,8 @@ type DocumentWithCaret = Document & {
 
 			const target = e.target as HTMLElement;
 			// Use innerHTML to preserve formatting (bold, paragraphs, etc.)
-			let newContent = target.innerHTML || '';
+			// Sanitize to prevent XSS attacks
+		let newContent = sanitizeTextContent(target.innerHTML || '');
 
 			// Normalize the HTML to remove browser inconsistencies
 			// This helps with comparison and prevents unnecessary updates
@@ -590,7 +595,8 @@ let hasFocusedEditor = false;
 // Ensure text editor shows current content on entry
 $: if (textEditorElement && isEditing && isTextElement && element.children.length === 0) {
 	if (!justExitedEditing) {
-		textEditorElement.innerHTML = element.content || '';
+		// Sanitize content to prevent XSS attacks
+		textEditorElement.innerHTML = sanitizeTextContent(element.content || '');
 	}
 }
 
@@ -693,9 +699,9 @@ $: if (isEditing && textEditorElement && !hasFocusedEditor) {
 			{#if element.type === 'img'}
 			<img src={element.src || ''} alt={element.alt || ''} style={imageStyles} />
 		{:else if element.type === 'a'}
-			<a href={element.href || '#'}>{@html element.content || 'Link'}</a>
+			<a href={element.href || '#'}>{@html sanitizedContent || 'Link'}</a>
 		{:else if element.type === 'button'}
-			<button type="button">{@html element.content || 'Button'}</button>
+			<button type="button">{@html sanitizedContent || 'Button'}</button>
 		{:else if element.type === 'input'}
 			<input type="text" placeholder={element.content || 'Input'} />
 		{:else if element.type === 'textarea'}
@@ -703,7 +709,7 @@ $: if (isEditing && textEditorElement && !hasFocusedEditor) {
 		{:else if isTextElement && element.children.length === 0}
 			<!-- Render text content for leaf text elements (p, h1-h6, span with no children) -->
 			<div class="text-content" data-display-for={element.id}>
-				{@html element.content || ''}
+				{@html sanitizedContent}
 			</div>
 		{/if}
 		{/if}

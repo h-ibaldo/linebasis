@@ -15,15 +15,46 @@ const REFRESH_TOKEN_EXPIRES_DAYS = 30;
 
 /**
  * Validate JWT_SECRET is present and valid
+ * Throws an error in production if using default/weak secrets
  */
 function validateJWTSecret(): void {
+	const isDevelopment = process.env.NODE_ENV === 'development';
+	const isTest = process.env.NODE_ENV === 'test';
+
 	if (!JWT_SECRET || JWT_SECRET.trim().length === 0) {
-		throw new Error('JWT_SECRET is not configured. Please set JWT_SECRET environment variable.');
+		throw new Error(
+			'[auth] FATAL: JWT_SECRET is not configured. Please set JWT_SECRET environment variable.'
+		);
 	}
+
+	// Check for default/weak secret
 	if (JWT_SECRET === 'development-secret-change-in-production') {
-		console.warn('[auth] Warning: Using default JWT_SECRET. This should be changed in production.');
+		if (isDevelopment || isTest) {
+			console.warn(
+				'[auth] Warning: Using default JWT_SECRET. This is only acceptable in development/test environments.'
+			);
+		} else {
+			// Production: fail hard
+			throw new Error(
+				'[auth] FATAL: Default JWT_SECRET detected in production. ' +
+				'You MUST set a secure JWT_SECRET environment variable before deploying to production. ' +
+				'Generate a secure secret using: openssl rand -base64 32'
+			);
+		}
+	}
+
+	// Check minimum length in production
+	if (!isDevelopment && !isTest && JWT_SECRET.length < 32) {
+		throw new Error(
+			'[auth] FATAL: JWT_SECRET is too short for production use. ' +
+			'Minimum length: 32 characters. Current length: ' + JWT_SECRET.length + '. ' +
+			'Generate a secure secret using: openssl rand -base64 32'
+		);
 	}
 }
+
+// Validate JWT secret on module load
+validateJWTSecret();
 
 export interface AuthTokens {
 	accessToken: string;

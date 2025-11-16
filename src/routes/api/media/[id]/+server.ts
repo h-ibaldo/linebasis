@@ -32,9 +32,47 @@ export const PUT: RequestHandler = requireAuth(async ({ params, request, locals 
 		return json({ error: 'User must belong to a team' }, { status: 403 });
 	}
 
-	const { altText, filename } = await request.json();
+	const body = await request.json();
+	const { altText, filename } = body;
 
-	const result = await updateMedia(params.id, user.teamId, { altText, filename });
+	// Validate at least one field is provided
+	if (altText === undefined && filename === undefined) {
+		return json({ error: 'At least one field (altText or filename) must be provided' }, { status: 400 });
+	}
+
+	// Validate altText if provided
+	let validatedAltText: string | undefined = undefined;
+	if (altText !== undefined) {
+		if (typeof altText !== 'string') {
+			return json({ error: 'Invalid altText: must be a string' }, { status: 400 });
+		}
+		if (altText.length > 500) {
+			return json({ error: 'altText too long: maximum 500 characters' }, { status: 400 });
+		}
+		validatedAltText = altText.trim();
+	}
+
+	// Validate filename if provided
+	let validatedFilename: string | undefined = undefined;
+	if (filename !== undefined) {
+		if (typeof filename !== 'string') {
+			return json({ error: 'Invalid filename: must be a string' }, { status: 400 });
+		}
+		if (filename.length === 0 || filename.length > 255) {
+			return json({ error: 'Invalid filename length: must be 1-255 characters' }, { status: 400 });
+		}
+		// Basic sanitization: remove path separators and dangerous characters
+		const sanitizedFilename = filename.replace(/[/\\<>:"|?*\x00-\x1F]/g, '');
+		if (sanitizedFilename !== filename) {
+			return json({ error: 'Invalid filename: contains illegal characters' }, { status: 400 });
+		}
+		validatedFilename = sanitizedFilename.trim();
+	}
+
+	const result = await updateMedia(params.id, user.teamId, {
+		altText: validatedAltText,
+		filename: validatedFilename
+	});
 
 	if ('error' in result) {
 		return json({ error: result.error }, { status: 404 });

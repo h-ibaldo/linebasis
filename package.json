@@ -28,6 +28,7 @@
 		"@sveltejs/vite-plugin-svelte": "^3.1.2",
 		"@testing-library/svelte": "^5.2.8",
 		"@types/bcryptjs": "^2.4.6",
+		"@types/dompurify": "^3.0.5",
 		"@types/jsonwebtoken": "^9.0.10",
 		"@types/uuid": "^10.0.0",
 		"@vitest/ui": "^3.2.4",
@@ -43,6 +44,7 @@
 	"dependencies": {
 		"@prisma/client": "^6.18.0",
 		"bcryptjs": "^3.0.2",
+		"dompurify": "^3.3.0",
 		"jsonwebtoken": "^9.0.2",
 		"nanoid": "^5.1.6",
 		"sharp": "^0.34.4",

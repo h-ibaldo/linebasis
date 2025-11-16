@@ -23,6 +23,20 @@
 	export let selectedElements: Element[];
 	export let isPanning: boolean = false;
 
+	// Event listener cleanup registry to prevent memory leaks
+	// Stores cleanup functions for all active event listeners
+	const cleanupFunctions: Array<() => void> = [];
+
+	// Helper to register event listeners with automatic cleanup
+	function addTrackedEventListener<K extends keyof DocumentEventMap>(
+		target: EventTarget,
+		event: K,
+		handler: (event: DocumentEventMap[K]) => void
+	) {
+		target.addEventListener(event, handler as EventListener);
+		cleanupFunctions.push(() => target.removeEventListener(event, handler as EventListener));
+	}
+
 	// Local interaction state
 	let activeElementId: string | null = null;
 	let interactionMode: 'idle' | 'dragging' | 'resizing' | 'rotating' | 'radius' = 'idle';
@@ -931,6 +945,7 @@
 			};
 
 			const handleClick = (upEvent: MouseEvent) => {
+				// Remove from cleanup registry when manually cleaned up
 				document.removeEventListener('mousemove', checkMove);
 				document.removeEventListener('mouseup', handleClick);
 
@@ -1026,8 +1041,9 @@
 			e.stopPropagation();
 			e.preventDefault();
 
-			document.addEventListener('mousemove', checkMove);
-			document.addEventListener('mouseup', handleClick);
+			// Use tracked listeners to ensure cleanup on component unmount
+			addTrackedEventListener(document, 'mousemove', checkMove);
+			addTrackedEventListener(document, 'mouseup', handleClick);
 			return;
 		}
 
@@ -2250,8 +2266,8 @@
 			if (activeElement) {
 				const state = get(designState);
 				const parent = activeElement.parentId ? state.elements[activeElement.parentId] : null;
-				const parentHasAutoLayout = !!((parent as any)?.autoLayout?.enabled);
-				const childIgnoresAutoLayout = !!((activeElement as any).autoLayout?.ignoreAutoLayout);
+				const parentHasAutoLayout = !!(parent?.autoLayout?.enabled);
+				const childIgnoresAutoLayout = !!(activeElement.autoLayout?.ignoreAutoLayout);
 				const isInAutoLayout = parentHasAutoLayout && !childIgnoresAutoLayout;
 
 				if (isInAutoLayout) {
@@ -2446,8 +2462,8 @@
 			if (activeElement) {
 				const state_for_autolayout = get(designState);
 				const parent_for_autolayout = activeElement.parentId ? state_for_autolayout.elements[activeElement.parentId] : null;
-				const parentHasAutoLayout = !!((parent_for_autolayout as any)?.autoLayout?.enabled);
-				const childIgnoresAutoLayout = !!((activeElement as any)?.autoLayout?.ignoreAutoLayout);
+				const parentHasAutoLayout = !!(parent_for_autolayout?.autoLayout?.enabled);
+				const childIgnoresAutoLayout = !!(activeElement?.autoLayout?.ignoreAutoLayout);
 				const isInAutoLayout = parentHasAutoLayout && !childIgnoresAutoLayout;
 				
 				if (isInAutoLayout) {
@@ -3003,8 +3019,13 @@
 		document.removeEventListener('mouseup', handleMouseUp);
 	}
 
-	// Cleanup on destroy
+	// Cleanup on destroy - remove all event listeners to prevent memory leaks
 	onDestroy(() => {
+		// Clean up all tracked event listeners
+		cleanupFunctions.forEach(cleanup => cleanup());
+		cleanupFunctions.length = 0;
+
+		// Also clean up the main handlers as a safety measure
 		document.removeEventListener('mousemove', handleMouseMove);
 		document.removeEventListener('mouseup', handleMouseUp);
 	});

@@ -303,12 +303,56 @@ export async function exportEvents(): Promise<string> {
 }
 
 /**
+ * Validate if parsed JSON is a valid array of DesignEvents
+ */
+function validateEvents(data: unknown): data is DesignEvent[] {
+	if (!Array.isArray(data)) {
+		return false;
+	}
+
+	// Check that each item has required event properties
+	return data.every((event) => {
+		return (
+			event &&
+			typeof event === 'object' &&
+			'id' in event &&
+			'type' in event &&
+			'timestamp' in event &&
+			typeof event.id === 'string' &&
+			typeof event.type === 'string' &&
+			typeof event.timestamp === 'number'
+		);
+	});
+}
+
+/**
  * Import events from JSON (for restore/sync)
+ *
+ * @throws {Error} If JSON is invalid or doesn't match expected event structure
  */
 export async function importEvents(json: string): Promise<void> {
-	const events = JSON.parse(json) as DesignEvent[];
-	await clearEvents();
-	await appendEvents(events);
+	try {
+		// Parse JSON with error handling
+		const parsed = JSON.parse(json);
+
+		// Validate structure
+		if (!validateEvents(parsed)) {
+			throw new Error(
+				'Invalid event data: Expected an array of events with id, type, and timestamp properties'
+			);
+		}
+
+		// Clear existing events and import new ones
+		await clearEvents();
+		await appendEvents(parsed);
+	} catch (error) {
+		// Re-throw with more context if it's a JSON parse error
+		if (error instanceof SyntaxError) {
+			throw new Error(`Failed to parse JSON: ${error.message}`);
+		}
+		// Re-throw other errors as-is
+		throw error;
+	}
 }
 
 /**
