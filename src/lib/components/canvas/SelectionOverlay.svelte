@@ -142,29 +142,49 @@
 		const draggedVisualBottom = (draggedRect.bottom - canvasRect.top - viewport.y) / viewport.scale;
 
 		// IMPORTANT: Check if element is still within its original parent's visual boundaries
+		// Use rotated rectangle check instead of bounding box for accurate detection
 		if (originalParentId && state.elements[originalParentId]) {
 			const originalParent = state.elements[originalParentId];
-			const originalParentDom = document.querySelector(`[data-element-id="${originalParentId}"]`);
-			
-			if (originalParentDom) {
-				const originalParentRect = originalParentDom.getBoundingClientRect();
-				const parentVisualLeft = (originalParentRect.left - canvasRect.left - viewport.x) / viewport.scale;
-				const parentVisualRight = (originalParentRect.right - canvasRect.left - viewport.x) / viewport.scale;
-				const parentVisualTop = (originalParentRect.top - canvasRect.top - viewport.y) / viewport.scale;
-				const parentVisualBottom = (originalParentRect.bottom - canvasRect.top - viewport.y) / viewport.scale;
+			const parentRotation = getDisplayRotation(originalParent);
+			const parentRotationRad = parentRotation * (Math.PI / 180);
+			const parentAbsPos = getAbsolutePosition(originalParent);
 
-				// Check if ANY part of the element is still within the original parent's visual boundaries
-				const isStillWithinOriginalParent = !(
-					draggedVisualRight < parentVisualLeft ||   // Completely to the left
-					draggedVisualLeft > parentVisualRight ||    // Completely to the right
-					draggedVisualBottom < parentVisualTop ||    // Completely above
-					draggedVisualTop > parentVisualBottom       // Completely below
-				);
+			// Parent's center in canvas space
+			const parentCenterX = parentAbsPos.x + originalParent.size.width / 2;
+			const parentCenterY = parentAbsPos.y + originalParent.size.height / 2;
 
-				// If still within original parent boundaries, keep the original parent
-				if (isStillWithinOriginalParent) {
-					return originalParentId;
+			// Check if ANY corner of dragged element is inside the rotated parent
+			const elementCorners = [
+				{ x: draggedVisualLeft, y: draggedVisualTop },      // Top-left
+				{ x: draggedVisualRight, y: draggedVisualTop },     // Top-right
+				{ x: draggedVisualRight, y: draggedVisualBottom },  // Bottom-right
+				{ x: draggedVisualLeft, y: draggedVisualBottom }    // Bottom-left
+			];
+
+			let anyCornerInside = false;
+			for (const corner of elementCorners) {
+				// Transform corner to parent's local coordinate system
+				const relX = corner.x - parentCenterX;
+				const relY = corner.y - parentCenterY;
+
+				const cos = Math.cos(-parentRotationRad);
+				const sin = Math.sin(-parentRotationRad);
+				const localX = relX * cos - relY * sin;
+				const localY = relX * sin + relY * cos;
+
+				// Check if corner is inside parent's bounds
+				const halfWidth = originalParent.size.width / 2;
+				const halfHeight = originalParent.size.height / 2;
+
+				if (localX > -halfWidth && localX < halfWidth && localY > -halfHeight && localY < halfHeight) {
+					anyCornerInside = true;
+					break;
 				}
+			}
+
+			// If ANY corner is still within original parent, keep the original parent
+			if (anyCornerInside) {
+				return originalParentId;
 			}
 		}
 
@@ -3290,4 +3310,42 @@
 			</text>
 		</g>
 	</svg>
+{/if}
+
+<!-- Drop parent boundary visualization - show wrapper boundaries when dragging inside -->
+{#if interactionMode === 'dragging' && potentialDropParentId}
+	{@const state = $designState}
+	{@const dropParent = state.elements[potentialDropParentId]}
+	{#if dropParent}
+		{@const canvasElement = document.querySelector('.canvas')}
+		{#if canvasElement}
+			{@const canvasRect = canvasElement.getBoundingClientRect()}
+			{@const parentAbsPos = getAbsolutePosition(dropParent)}
+			{@const parentRotation = dropParent.rotation || 0}
+			{@const parentSize = dropParent.size}
+
+			{@const parentScreenLeft = canvasRect.left + viewport.x + parentAbsPos.x * viewport.scale}
+			{@const parentScreenTop = canvasRect.top + viewport.y + parentAbsPos.y * viewport.scale}
+			{@const parentScreenWidth = parentSize.width * viewport.scale}
+			{@const parentScreenHeight = parentSize.height * viewport.scale}
+			{@const parentCenterX = parentScreenWidth / 2}
+			{@const parentCenterY = parentScreenHeight / 2}
+
+			<div
+				style="
+					position: fixed;
+					left: {parentScreenLeft}px;
+					top: {parentScreenTop}px;
+					width: {parentScreenWidth}px;
+					height: {parentScreenHeight}px;
+					border: 2px dashed #3b82f6;
+					background: rgba(59, 130, 246, 0.05);
+					pointer-events: none;
+					box-sizing: border-box;
+					z-index: 9999;
+					{parentRotation ? `transform: rotate(${parentRotation}deg); transform-origin: ${parentCenterX}px ${parentCenterY}px;` : ''}
+				"
+			/>
+		{/if}
+	{/if}
 {/if}
