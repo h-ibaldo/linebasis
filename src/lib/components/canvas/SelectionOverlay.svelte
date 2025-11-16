@@ -379,6 +379,7 @@
 	// Drag start tracking
 	let dragStartScreen = { x: 0, y: 0 };
 	let elementStartCanvas = { x: 0, y: 0, width: 0, height: 0 };
+	let rotationStartCenter: { x: number; y: number; screenX: number; screenY: number } | null = null; // Fixed center at rotation start (for child elements)
 	let groupStartElements: Array<{ id: string; x: number; y: number; width: number; height: number; rotation: number }> = [];
 	let hasMovedPastThreshold = false; // Track if we've moved past the initial dead zone
 	let initialHandlePosition: Point | null = null; // The ideal position of the handle being dragged at start
@@ -1131,21 +1132,49 @@
 				rotationReferenceCorner = handle.split('-')[1] as 'nw' | 'ne' | 'se' | 'sw';
 			}
 
-			// Calculate center point in canvas space
-			const centerX = pos.x + size.width / 2;
-			const centerY = pos.y + size.height / 2;
-
 			// Get canvas rect for screen-space conversion
 			const canvasElement = document.querySelector('.canvas') as HTMLElement | null;
 			const canvasRect = canvasElement?.getBoundingClientRect();
 
-			// Convert center to screen space (matches how SelectionUI renders center)
-			const centerScreenX = canvasRect
-				? canvasRect.left + viewport.x + centerX * viewport.scale
-				: centerX;
-			const centerScreenY = canvasRect
-				? canvasRect.top + viewport.y + centerY * viewport.scale
-				: centerY;
+			// For child elements, get actual DOM center to account for parent rotation
+			// For root elements, use calculated center
+			let centerX: number, centerY: number;
+			let centerScreenX: number, centerScreenY: number;
+			
+			if (element.parentId && canvasRect) {
+				// Child element: get actual center from DOM (accounts for parent rotation)
+				const domElement = document.querySelector(`[data-element-id="${element.id}"]`);
+				if (domElement) {
+					const rect = domElement.getBoundingClientRect();
+					// Center of bounding box is the element's center (rotation is around center)
+					const domCenterScreenX = rect.left + rect.width / 2;
+					const domCenterScreenY = rect.top + rect.height / 2;
+					
+					// Convert to canvas space
+					centerX = (domCenterScreenX - canvasRect.left - viewport.x) / viewport.scale;
+					centerY = (domCenterScreenY - canvasRect.top - viewport.y) / viewport.scale;
+					
+					// Screen space is just the DOM center
+					centerScreenX = domCenterScreenX;
+					centerScreenY = domCenterScreenY;
+				} else {
+					// Fallback: use calculated center
+					centerX = pos.x + size.width / 2;
+					centerY = pos.y + size.height / 2;
+					centerScreenX = canvasRect.left + viewport.x + centerX * viewport.scale;
+					centerScreenY = canvasRect.top + viewport.y + centerY * viewport.scale;
+				}
+			} else {
+				// Root element: use calculated center
+				centerX = pos.x + size.width / 2;
+				centerY = pos.y + size.height / 2;
+				centerScreenX = canvasRect
+					? canvasRect.left + viewport.x + centerX * viewport.scale
+					: centerX;
+				centerScreenY = canvasRect
+					? canvasRect.top + viewport.y + centerY * viewport.scale
+					: centerY;
+			}
 
 			// Also store mouse position in canvas space for debugging
 			const mouseCanvasX = canvasRect
@@ -1154,6 +1183,14 @@
 			const mouseCanvasY = canvasRect
 				? (e.clientY - canvasRect.top - viewport.y) / viewport.scale
 				: (e.clientY - viewport.y) / viewport.scale;
+
+			// Store fixed center for use during rotation move (prevents inconsistencies)
+			rotationStartCenter = {
+				x: centerX,
+				y: centerY,
+				screenX: centerScreenX,
+				screenY: centerScreenY
+			};
 
 			// Calculate initial angle from center to cursor in SCREEN space
 			// (angles are preserved under translate+scale, so this matches canvas-space geometry)
@@ -1174,12 +1211,41 @@
 			const cornerBaseAngle = Math.atan2(cornerOffset.y, cornerOffset.x) * (180 / Math.PI);
 
 			// Calculate initial offset to prevent jump
-			// Account for parent rotation - corner's visual angle includes both element and parent rotation
+			// For child elements with rotated parents, we need to apply rotations in correct order
 			const state_for_parent = get(designState);
 			const parent_at_start = element.parentId ? state_for_parent.elements[element.parentId] : null;
 			const parentRotation = parent_at_start ? (parent_at_start.rotation || 0) : 0;
-			// Corner's visual angle = cornerBaseAngle + elementRotation + parentRotation
-			rotationInitialOffset = rotationStartAngle - (cornerBaseAngle + elementStartRotation + parentRotation);
+			
+			// Calculate actual visual corner angle at rotation start
+			// For child elements with rotated parents, apply rotations in order:
+			// 1. First rotate corner offset by element rotation (in element's local space)
+			// 2. Then transform by parent rotation (in parent's coordinate system)
+			const elementRotationRad = elementStartRotation * (Math.PI / 180);
+			const parentRotationRad = parentRotation * (Math.PI / 180);
+			
+			// Step 1: Rotate corner offset by element rotation
+			const elementRotatedCornerX = cornerOffset.x * Math.cos(elementRotationRad) - cornerOffset.y * Math.sin(elementRotationRad);
+			const elementRotatedCornerY = cornerOffset.x * Math.sin(elementRotationRad) + cornerOffset.y * Math.cos(elementRotationRad);
+			
+			// Step 2: Transform by parent rotation (if parent is rotated)
+			let rotatedCornerX: number, rotatedCornerY: number;
+			if (parentRotation !== 0) {
+				rotatedCornerX = elementRotatedCornerX * Math.cos(parentRotationRad) - elementRotatedCornerY * Math.sin(parentRotationRad);
+				rotatedCornerY = elementRotatedCornerX * Math.sin(parentRotationRad) + elementRotatedCornerY * Math.cos(parentRotationRad);
+			} else {
+				rotatedCornerX = elementRotatedCornerX;
+				rotatedCornerY = elementRotatedCornerY;
+			}
+			
+			// Add to center to get actual corner position
+			const cornerWorldX = centerX + rotatedCornerX;
+			const cornerWorldY = centerY + rotatedCornerY;
+			
+			// Calculate actual visual angle from center to rotated corner
+			const actualCornerAngleAtStart = Math.atan2(cornerWorldY - centerY, cornerWorldX - centerX) * (180 / Math.PI);
+			
+			// Initial offset = difference between cursor angle and actual visual corner angle
+			rotationInitialOffset = rotationStartAngle - actualCornerAngleAtStart;
 
 			// Get element's actual DOM center for comparison
 			const domElement = document.querySelector(`[data-element-id="${element.id}"]`);
@@ -2201,28 +2267,33 @@
 			// Track latest screen-space cursor position for debug overlay
 			currentMouseScreen = { x: e.clientX, y: e.clientY };
 
-			// Get current element to check if in auto layout
-			const activeElement = selectedElements.find(el => el.id === activeElementId);
-			const state = get(designState);
-			const parent = activeElement?.parentId ? state.elements[activeElement.parentId] : null;
-			const parentHasAutoLayout = !!((parent as any)?.autoLayout?.enabled);
-			const childIgnoresAutoLayout = !!((activeElement as any)?.autoLayout?.ignoreAutoLayout);
-			const isInAutoLayout = parentHasAutoLayout && !childIgnoresAutoLayout;
-
-			// For auto layout, read center from DOM (flexbox repositions element as it rotates)
-			// For others, use fixed center calculated at start
+			// Use fixed center stored at rotation start (prevents inconsistencies)
+			// For child elements, this center was calculated from DOM accounting for parent rotation
+			// For root elements, this center was calculated from position
 			let centerX: number, centerY: number;
-			if (isInAutoLayout && activeElement) {
-				const currentPos = getAbsolutePosition(activeElement);
-				const currentSize = getActualSize(activeElement);
-				centerX = currentPos.x + currentSize.width / 2;
-				centerY = currentPos.y + currentSize.height / 2;
+			let centerScreenX: number, centerScreenY: number;
+			
+			if (rotationStartCenter) {
+				// Use stored fixed center from rotation start
+				centerX = rotationStartCenter.x;
+				centerY = rotationStartCenter.y;
+				centerScreenX = rotationStartCenter.screenX;
+				centerScreenY = rotationStartCenter.screenY;
 			} else {
+				// Fallback: calculate center (shouldn't happen, but safety check)
+				const canvasElement = document.querySelector('.canvas') as HTMLElement | null;
+				const canvasRect = canvasElement?.getBoundingClientRect();
 				centerX = elementStartCanvas.x + elementStartCanvas.width / 2;
 				centerY = elementStartCanvas.y + elementStartCanvas.height / 2;
+				centerScreenX = canvasRect
+					? canvasRect.left + viewport.x + centerX * viewport.scale
+					: centerX;
+				centerScreenY = canvasRect
+					? canvasRect.top + viewport.y + centerY * viewport.scale
+					: centerY;
 			}
 
-			// Get canvas rect for screen-space conversion
+			// Get canvas rect for mouse position conversion
 			const canvasElement = document.querySelector('.canvas') as HTMLElement | null;
 			const canvasRect = canvasElement?.getBoundingClientRect();
 
@@ -2233,14 +2304,6 @@
 			const mouseCanvasY = canvasRect
 				? (e.clientY - canvasRect.top - viewport.y) / viewport.scale
 				: (e.clientY - viewport.y) / viewport.scale;
-
-			// Convert center to screen space (matches how SelectionUI renders center)
-			const centerScreenX = canvasRect
-				? canvasRect.left + viewport.x + centerX * viewport.scale
-				: centerX;
-			const centerScreenY = canvasRect
-				? canvasRect.top + viewport.y + centerY * viewport.scale
-				: centerY;
 
 			// Calculate current cursor angle from center in SCREEN space
 			const cursorAngle = Math.atan2(e.clientY - centerScreenY, e.clientX - centerScreenX) * (180 / Math.PI);
@@ -2255,24 +2318,31 @@
 			const cornerOffset = cornerOffsets[rotationReferenceCorner];
 			const cornerBaseAngle = Math.atan2(cornerOffset.y, cornerOffset.x) * (180 / Math.PI);
 
-			// Calculate rotation to make corner point toward cursor
-			// Subtract initial offset to prevent jump while maintaining alignment
-			let targetRotation = cursorAngle - cornerBaseAngle - rotationInitialOffset;
-
-			// DEBUG: Calculate actual corner position in world space
-			// Get parent rotation to calculate total visual rotation
+			// Get parent rotation to account for it in target rotation calculation
 			// For groups, use first element's parent rotation (same as in rotation start)
-			const state_for_debug = get(designState);
-			let parentRotationForDebug = 0;
+			const state_for_parent = get(designState);
+			let parentRotation = 0;
 			if (isGroupInteraction && selectedElements.length > 0) {
 				const firstElement = selectedElements[0];
-				const parentForDebug = firstElement.parentId ? state_for_debug.elements[firstElement.parentId] : null;
-				parentRotationForDebug = parentForDebug ? (parentForDebug.rotation || 0) : 0;
+				const parentForRotation = firstElement.parentId ? state_for_parent.elements[firstElement.parentId] : null;
+				parentRotation = parentForRotation ? (parentForRotation.rotation || 0) : 0;
 			} else if (activeElementId) {
-				const activeElementForDebug = state_for_debug.elements[activeElementId];
-				const parentForDebug = activeElementForDebug?.parentId ? state_for_debug.elements[activeElementForDebug.parentId] : null;
-				parentRotationForDebug = parentForDebug ? (parentForDebug.rotation || 0) : 0;
+				const activeElementForRotation = state_for_parent.elements[activeElementId];
+				const parentForRotation = activeElementForRotation?.parentId ? state_for_parent.elements[activeElementForRotation.parentId] : null;
+				parentRotation = parentForRotation ? (parentForRotation.rotation || 0) : 0;
 			}
+
+			// Calculate rotation to make corner point toward cursor
+			// For child elements with rotated parents, we need to account for parent rotation
+			// The visual corner angle = cornerBaseAngle + targetRotation + parentRotation
+			// We want: visual corner angle = cursorAngle - rotationInitialOffset
+			// So: cursorAngle - rotationInitialOffset = cornerBaseAngle + targetRotation + parentRotation
+			// Therefore: targetRotation = cursorAngle - cornerBaseAngle - parentRotation - rotationInitialOffset
+			let targetRotation = cursorAngle - cornerBaseAngle - parentRotation - rotationInitialOffset;
+
+			// DEBUG: Calculate actual corner position in world space
+			// Get parent rotation for debug (same as above)
+			let parentRotationForDebug = parentRotation;
 			// Total visual rotation includes both element and parent rotation
 			const totalVisualRotation = (pendingRotation || 0) + parentRotationForDebug;
 			const currentRotationRad = totalVisualRotation * (Math.PI / 180);
@@ -2318,12 +2388,21 @@
 			pendingRotation = normalizeRotation(targetRotation);
 
 			// For auto layout, update position from DOM (element moves as it rotates)
-			if (isInAutoLayout && activeElement) {
-				setTimeout(() => {
-					const actualPos = getAbsolutePosition(activeElement);
-					pendingPosition = actualPos;
-				}, 0);
-				pendingPosition = getAbsolutePosition(activeElement);
+			const activeElement = selectedElements.find(el => el.id === activeElementId);
+			if (activeElement) {
+				const state_for_autolayout = get(designState);
+				const parent_for_autolayout = activeElement.parentId ? state_for_autolayout.elements[activeElement.parentId] : null;
+				const parentHasAutoLayout = !!((parent_for_autolayout as any)?.autoLayout?.enabled);
+				const childIgnoresAutoLayout = !!((activeElement as any)?.autoLayout?.ignoreAutoLayout);
+				const isInAutoLayout = parentHasAutoLayout && !childIgnoresAutoLayout;
+				
+				if (isInAutoLayout) {
+					setTimeout(() => {
+						const actualPos = getAbsolutePosition(activeElement);
+						pendingPosition = actualPos;
+					}, 0);
+					pendingPosition = getAbsolutePosition(activeElement);
+				}
 			}
 
 			// Update pending transforms for all group elements during rotation
@@ -2728,6 +2807,7 @@
 		pendingSize = null;
 		pendingRotation = null;
 		pendingRadius = null;
+		rotationStartCenter = null;
 		radiusCorner = null;
 		radiusStartDistance = 0;
 		radiusInitialValue = 0;
