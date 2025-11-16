@@ -1052,6 +1052,7 @@ export async function wrapSelectedElementsInDiv(): Promise<void> {
 
 /**
  * Unwrap selected div - move its children out and delete the wrapper
+ * Preserves visual position and rotation of children
  */
 export async function unwrapSelectedDiv(): Promise<void> {
 	const selected = get(selectedElements);
@@ -1063,10 +1064,23 @@ export async function unwrapSelectedDiv(): Promise<void> {
 	const state = get(designState);
 	const childrenToSelect: string[] = [];
 
-	// Get wrapper's absolute position
-	const wrapperX = wrapper.position.x;
-	const wrapperY = wrapper.position.y;
+	// Get wrapper's absolute top-left position (traverse parent chain)
+	let wrapperAbsX = wrapper.position.x;
+	let wrapperAbsY = wrapper.position.y;
+	let currentParent = wrapper.parentId ? state.elements[wrapper.parentId] : null;
+	while (currentParent) {
+		wrapperAbsX += currentParent.position.x;
+		wrapperAbsY += currentParent.position.y;
+		currentParent = currentParent.parentId ? state.elements[currentParent.parentId] : null;
+	}
+
 	const parentId = wrapper.parentId;
+	const wrapperRotation = wrapper.rotation || 0;
+	const wrapperRotationRad = wrapperRotation * (Math.PI / 180);
+
+	// Calculate wrapper's center in canvas space (for rotating child positions)
+	const wrapperCenterAbsX = wrapperAbsX + wrapper.size.width / 2;
+	const wrapperCenterAbsY = wrapperAbsY + wrapper.size.height / 2;
 
 	// Move each child out of the wrapper
 	for (const childId of wrapper.children) {
@@ -1075,15 +1089,42 @@ export async function unwrapSelectedDiv(): Promise<void> {
 
 		childrenToSelect.push(childId);
 
-		// Calculate absolute position
-		const absoluteX = wrapperX + child.position.x;
-		const absoluteY = wrapperY + child.position.y;
+		// Calculate visual position accounting for wrapper rotation
+		// Child's center relative to wrapper's center (in wrapper's local space)
+		const childCenterLocalX = child.position.x + child.size.width / 2 - wrapper.size.width / 2;
+		const childCenterLocalY = child.position.y + child.size.height / 2 - wrapper.size.height / 2;
+
+		// Rotate child center by wrapper rotation to get visual center relative to wrapper's center
+		let childCenterVisualX: number, childCenterVisualY: number;
+		if (wrapperRotation !== 0) {
+			childCenterVisualX = childCenterLocalX * Math.cos(wrapperRotationRad) - childCenterLocalY * Math.sin(wrapperRotationRad);
+			childCenterVisualY = childCenterLocalX * Math.sin(wrapperRotationRad) + childCenterLocalY * Math.cos(wrapperRotationRad);
+		} else {
+			childCenterVisualX = childCenterLocalX;
+			childCenterVisualY = childCenterLocalY;
+		}
+
+		// Add wrapper's center absolute position to get child's visual center in canvas space
+		const childCenterAbsX = wrapperCenterAbsX + childCenterVisualX;
+		const childCenterAbsY = wrapperCenterAbsY + childCenterVisualY;
+
+		// Calculate visual top-left position
+		const absoluteX = childCenterAbsX - child.size.width / 2;
+		const absoluteY = childCenterAbsY - child.size.height / 2;
+
+		// Calculate visual rotation (child rotation + wrapper rotation)
+		// This preserves the visual rotation the child displayed while inside the rotated wrapper
+		const childRotation = child.rotation ?? 0; // Use nullish coalescing to handle undefined, but preserve explicit 0
+		const visualRotation = childRotation + wrapperRotation;
 
 		// Move child to wrapper's parent
 		await reorderElement(childId, parentId, 0);
 
-		// Update position to absolute
+		// Update position to visual absolute position
 		await moveElement(childId, { x: absoluteX, y: absoluteY });
+
+		// Update rotation to visual rotation (always update, even if 0, to clear stored rotation if needed)
+		await rotateElement(childId, visualRotation);
 	}
 
 	// Delete the wrapper
