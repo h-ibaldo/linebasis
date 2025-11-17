@@ -203,6 +203,7 @@
 		if (!draggedElement) return null;
 
 		// Container types that can accept children
+		// Note: divs have special restrictions - only views or auto-layout divs can accept drops
 		const containerTypes = ['div', 'section', 'header', 'footer', 'article', 'aside', 'nav', 'main'];
 
 		// Get visual boundaries from DOM for accurate containment checking
@@ -225,46 +226,55 @@
 		// Use rotated rectangle check instead of bounding box for accurate detection
 		if (originalParentId && state.elements[originalParentId]) {
 			const originalParent = state.elements[originalParentId];
-			const parentRotation = getDisplayRotation(originalParent);
-			const parentRotationRad = parentRotation * (Math.PI / 180);
-			const parentAbsPos = getAbsolutePosition(originalParent);
 
-			// Parent's center in canvas space
-			const parentCenterX = parentAbsPos.x + originalParent.size.width / 2;
-			const parentCenterY = parentAbsPos.y + originalParent.size.height / 2;
+			// Check if original parent is a valid drop target (views, auto-layout divs, or non-div containers)
+			const isValidDropTarget = originalParent.type !== 'div' ||
+				originalParent.isView === true ||
+				originalParent.autoLayout?.enabled === true;
 
-			// Check if ANY corner of dragged element is inside the rotated parent
-			const elementCorners = [
-				{ x: draggedVisualLeft, y: draggedVisualTop },      // Top-left
-				{ x: draggedVisualRight, y: draggedVisualTop },     // Top-right
-				{ x: draggedVisualRight, y: draggedVisualBottom },  // Bottom-right
-				{ x: draggedVisualLeft, y: draggedVisualBottom }    // Bottom-left
-			];
+			// Only keep original parent if it's a valid drop target
+			if (isValidDropTarget) {
+				const parentRotation = getDisplayRotation(originalParent);
+				const parentRotationRad = parentRotation * (Math.PI / 180);
+				const parentAbsPos = getAbsolutePosition(originalParent);
 
-			let anyCornerInside = false;
-			for (const corner of elementCorners) {
-				// Transform corner to parent's local coordinate system
-				const relX = corner.x - parentCenterX;
-				const relY = corner.y - parentCenterY;
+				// Parent's center in canvas space
+				const parentCenterX = parentAbsPos.x + originalParent.size.width / 2;
+				const parentCenterY = parentAbsPos.y + originalParent.size.height / 2;
 
-				const cos = Math.cos(-parentRotationRad);
-				const sin = Math.sin(-parentRotationRad);
-				const localX = relX * cos - relY * sin;
-				const localY = relX * sin + relY * cos;
+				// Check if ANY corner of dragged element is inside the rotated parent
+				const elementCorners = [
+					{ x: draggedVisualLeft, y: draggedVisualTop },      // Top-left
+					{ x: draggedVisualRight, y: draggedVisualTop },     // Top-right
+					{ x: draggedVisualRight, y: draggedVisualBottom },  // Bottom-right
+					{ x: draggedVisualLeft, y: draggedVisualBottom }    // Bottom-left
+				];
 
-				// Check if corner is inside parent's bounds
-				const halfWidth = originalParent.size.width / 2;
-				const halfHeight = originalParent.size.height / 2;
+				let anyCornerInside = false;
+				for (const corner of elementCorners) {
+					// Transform corner to parent's local coordinate system
+					const relX = corner.x - parentCenterX;
+					const relY = corner.y - parentCenterY;
 
-				if (localX > -halfWidth && localX < halfWidth && localY > -halfHeight && localY < halfHeight) {
-					anyCornerInside = true;
-					break;
+					const cos = Math.cos(-parentRotationRad);
+					const sin = Math.sin(-parentRotationRad);
+					const localX = relX * cos - relY * sin;
+					const localY = relX * sin + relY * cos;
+
+					// Check if corner is inside parent's bounds
+					const halfWidth = originalParent.size.width / 2;
+					const halfHeight = originalParent.size.height / 2;
+
+					if (localX > -halfWidth && localX < halfWidth && localY > -halfHeight && localY < halfHeight) {
+						anyCornerInside = true;
+						break;
+					}
 				}
-			}
 
-			// If ANY corner is still within original parent, keep the original parent
-			if (anyCornerInside) {
-				return originalParentId;
+				// If ANY corner is still within original parent, keep the original parent
+				if (anyCornerInside) {
+					return originalParentId;
+				}
 			}
 		}
 
@@ -283,6 +293,18 @@
 
 			// Only consider container elements as potential parents
 			if (!containerTypes.includes(element.type)) continue;
+
+			// Special restriction for divs: only allow drops into views or auto-layout divs
+			// This prevents the unnatural HTML behavior of arbitrary nesting
+			if (element.type === 'div') {
+				const isView = element.isView === true;
+				const hasAutoLayout = element.autoLayout?.enabled === true;
+
+				// Skip this div if it's not a view and doesn't have auto layout
+				if (!isView && !hasAutoLayout) {
+					continue;
+				}
+			}
 
 			// Check containment using actual rotated rectangle, not bounding box
 			// Get container's stored position and rotation
