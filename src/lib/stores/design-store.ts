@@ -1641,6 +1641,153 @@ export async function pasteElements(): Promise<void> {
 }
 
 /**
+ * Paste elements from clipboard INSIDE the selected container
+ * This bypasses the normal drop restrictions and allows pasting into ANY div
+ * Triggered by Cmd/Ctrl+Shift+V
+ */
+export async function pasteElementsInside(): Promise<void> {
+	if (clipboard.length === 0) return;
+
+	const state = get(designState);
+	const currentPageId = state.currentPageId;
+	if (!currentPageId) return;
+
+	const pageId: string = currentPageId;
+
+	// Check if a single element is selected to paste inside
+	const selected = get(selectedElements);
+	if (selected.length !== 1) {
+		console.warn('Paste inside requires exactly one container element to be selected');
+		return;
+	}
+
+	const selectedElement = selected[0];
+
+	// Check if selected element can be a container
+	const containerTypes = ['div', 'section', 'header', 'footer', 'article', 'aside', 'nav', 'main'];
+	if (!containerTypes.includes(selectedElement.type)) {
+		console.warn('Selected element cannot contain children. Select a container element (div, section, etc.)');
+		return;
+	}
+
+	// Force paste inside the selected element (bypassing drop restrictions)
+	const targetParentId = selectedElement.id;
+
+	// Clear selection
+	clearSelection();
+
+	// Wrap entire paste operation in a transaction
+	beginTransaction();
+
+	try {
+		const oldToNewIdMap = new Map<string, string>();
+		const clipboardIds = new Set(clipboard.map(el => el.id));
+		const rootElements = clipboard.filter(el => !el.parentId || !clipboardIds.has(el.parentId));
+
+		// Recursive function to paste an element and its descendants
+		async function pasteElementTree(element: Element, isRoot: boolean): Promise<string> {
+			// Determine new parent ID
+			let newParentId: string | null;
+			if (element.parentId && oldToNewIdMap.has(element.parentId)) {
+				newParentId = oldToNewIdMap.get(element.parentId)!;
+			} else if (isRoot) {
+				// Force paste inside the selected container
+				newParentId = targetParentId;
+			} else {
+				newParentId = null;
+			}
+
+			// Calculate position based on paste context
+			let position: { x: number; y: number };
+
+			if (isRoot && newParentId !== null) {
+				// Pasting as child of the selected container
+				const currentState = get(designState);
+				const parentElement = currentState.elements[newParentId];
+
+				if (parentElement?.autoLayout?.enabled) {
+					// Parent has auto layout -> paste as last child
+					position = { x: 0, y: 0 };
+				} else if (parentElement) {
+					// Parent doesn't have auto layout -> paste at center of parent
+					const centerX = parentElement.size.width / 2 - element.size.width / 2;
+					const centerY = parentElement.size.height / 2 - element.size.height / 2;
+					position = { x: centerX, y: centerY };
+				} else {
+					position = { x: element.position.x, y: element.position.y };
+				}
+			} else {
+				// Non-root elements -> maintain their relative position
+				position = { x: element.position.x, y: element.position.y };
+			}
+
+			// Create the new element
+			const createData: Parameters<typeof createElement>[0] = {
+				parentId: newParentId,
+				pageId,
+				elementType: element.type,
+				position,
+				size: element.size,
+				styles: element.styles,
+				content: element.content
+			};
+			const newElementId = await createElement(createData);
+
+			// Map old ID to new ID
+			oldToNewIdMap.set(element.id, newElementId);
+
+			// Copy additional properties
+			if (Object.keys(element.typography || {}).length > 0) {
+				await updateElementTypography(newElementId, element.typography);
+			}
+			if (Object.keys(element.spacing || {}).length > 0) {
+				await updateElementSpacing(newElementId, element.spacing);
+			}
+			if (element.autoLayout && Object.keys(element.autoLayout).length > 0) {
+				await updateElementAutoLayout(newElementId, element.autoLayout);
+			}
+			if (element.rotation && element.rotation !== 0) {
+				await rotateElement(newElementId, element.rotation);
+			}
+			if (element.alt || element.href || element.src) {
+				await updateElement(newElementId, {
+					alt: element.alt,
+					href: element.href,
+					src: element.src
+				});
+			}
+
+			// Paste all descendants
+			const descendants = clipboard.filter(el => el.parentId === element.id);
+			for (const descendant of descendants) {
+				await pasteElementTree(descendant, false);
+			}
+
+			return newElementId;
+		}
+
+		// Paste all root elements
+		const newRootElementIds: string[] = [];
+		for (const rootElement of rootElements) {
+			const newId = await pasteElementTree(rootElement, true);
+			newRootElementIds.push(newId);
+		}
+
+		await commitTransaction();
+
+		// Select the newly pasted root elements
+		selectElements(newRootElementIds);
+	} catch (error) {
+		if (isInTransaction) {
+			isInTransaction = false;
+			transactionEvents = [];
+			currentTransactionId = null;
+		}
+		throw error;
+	}
+}
+
+/**
  * Duplicate selected elements
  */
 export async function duplicateElements(): Promise<void> {
@@ -1914,8 +2061,13 @@ export function setupKeyboardShortcuts(): (() => void) | undefined {
 			e.preventDefault();
 			cutElements();
 		}
+		// Cmd+Shift+V (paste inside) - bypasses drop restrictions
+		else if ((e.metaKey || e.ctrlKey) && e.key === 'v' && e.shiftKey && !isTyping) {
+			e.preventDefault();
+			pasteElementsInside();
+		}
 		// Cmd+V (paste)
-		else if ((e.metaKey || e.ctrlKey) && e.key === 'v' && !isTyping) {
+		else if ((e.metaKey || e.ctrlKey) && e.key === 'v' && !e.shiftKey && !isTyping) {
 			e.preventDefault();
 			pasteElements();
 		}

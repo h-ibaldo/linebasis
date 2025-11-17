@@ -170,13 +170,10 @@
 		if (originalParentId && state.elements[originalParentId]) {
 			const originalParent = state.elements[originalParentId];
 
-			// Check if original parent is a valid drop target (views, auto-layout divs, or non-div containers)
-			const isValidDropTarget = originalParent.type !== 'div' ||
-				originalParent.isView === true ||
-				originalParent.autoLayout?.enabled === true;
-
-			// Only keep original parent if it's a valid drop target
-			if (isValidDropTarget) {
+			// When checking if element should stay in CURRENT parent during drag,
+			// we DON'T apply drop restrictions - elements can stay in any container
+			// Drop restrictions only apply when finding a NEW parent below
+			if (containerTypes.includes(originalParent.type)) {
 				const parentRotation = getDisplayRotation(originalParent);
 				const parentRotationRad = parentRotation * (Math.PI / 180);
 				const parentAbsPos = getAbsolutePosition(originalParent);
@@ -218,6 +215,18 @@
 				if (anyCornerInside) {
 					return originalParentId;
 				}
+
+			// Special rule for regular divs (not views, not auto-layout):
+			// Children cannot be dragged out - they're locked inside
+			// The only way to remove them is via copy/cut and paste outside
+			const isRegularDiv = originalParent.type === 'div' &&
+				!originalParent.isView &&
+				!originalParent.autoLayout?.enabled;
+
+			if (isRegularDiv) {
+				// Force element to stay in parent even if all corners are outside
+				return originalParentId;
+			}
 			}
 		}
 
@@ -3312,21 +3321,32 @@
 			{@const parentCenterX = parentScreenWidth / 2}
 			{@const parentCenterY = parentScreenHeight / 2}
 
-			<div
-				style="
-					position: fixed;
-					left: {parentScreenLeft}px;
-					top: {parentScreenTop}px;
-					width: {parentScreenWidth}px;
-					height: {parentScreenHeight}px;
-					border: 2px dashed #3b82f6;
-					background: rgba(59, 130, 246, 0.05);
-					pointer-events: none;
-					box-sizing: border-box;
-					z-index: 9999;
-					{parentRotation ? `transform: rotate(${parentRotation}deg); transform-origin: ${parentCenterX}px ${parentCenterY}px;` : ''}
-				"
-			/>
+			{@const draggedElement = activeElementId ? state.elements[activeElementId] : null}
+			{@const isSameAsOriginalParent = draggedElement && draggedElement.parentId === potentialDropParentId}
+			{@const isView = dropParent.isView === true}
+			{@const hasAutoLayout = dropParent.autoLayout?.enabled === true}
+			{@const isRegularDiv = dropParent.type === 'div' && !isView && !hasAutoLayout}
+
+			{@const shouldHideHighlight = isSameAsOriginalParent && isView}
+			{@const shouldShowMinimalHighlight = isSameAsOriginalParent && isRegularDiv}
+
+			{#if !shouldHideHighlight}
+				<div
+					style="
+						position: fixed;
+						left: {parentScreenLeft}px;
+						top: {parentScreenTop}px;
+						width: {parentScreenWidth}px;
+						height: {parentScreenHeight}px;
+						border: {shouldShowMinimalHighlight ? '1px dotted #3b82f6' : '2px dashed #3b82f6'};
+						background: {shouldShowMinimalHighlight ? 'transparent' : 'rgba(59, 130, 246, 0.05)'};
+						pointer-events: none;
+						box-sizing: border-box;
+						z-index: 9999;
+						{parentRotation ? `transform: rotate(${parentRotation}deg); transform-origin: ${parentCenterX}px ${parentCenterY}px;` : ''}
+					"
+				/>
+			{/if}
 		{/if}
 	{/if}
 {/if}
