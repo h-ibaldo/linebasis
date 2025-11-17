@@ -117,10 +117,36 @@
 		}
 	}
 
+	// Reactive: Move DOM nodes so dragged element appears above droppable area
+	$: if (interactionMode === 'dragging' && potentialDropParentId !== previousPotentialDropParentId) {
+		// Use tick to ensure DOM is ready
+		tick().then(() => {
+			// Move potential drop parent to end (so it's above other elements)
+			if (potentialDropParentId) {
+				const droppableElement = document.querySelector(`[data-element-id="${potentialDropParentId}"]`) as HTMLElement | null;
+				if (droppableElement && droppableElement.parentElement) {
+					// Move droppable element to end of parent (renders on top)
+					droppableElement.parentElement.appendChild(droppableElement);
+				}
+			}
+			
+			// Move dragged element to end (so it appears above the droppable area)
+			if (activeElementId) {
+				const draggedElement = document.querySelector(`[data-element-id="${activeElementId}"]`) as HTMLElement | null;
+				if (draggedElement && draggedElement.parentElement) {
+					// Move dragged element to end (renders on top of everything, including droppable)
+					draggedElement.parentElement.appendChild(draggedElement);
+				}
+			}
+		});
+		previousPotentialDropParentId = potentialDropParentId;
+	}
+
 	// Parent change detection during drag (for dragging elements out of/into divs)
 	let potentialDropParentId: string | null = null; // Element being hovered over that could become new parent
 	let originalParentId: string | null = null; // Original parent at drag start (to detect if parent changed)
 	let pendingParentChange: { elementId: string; newParentId: string | null } | null = null; // Track parent change in progress
+	let previousPotentialDropParentId: string | null = null; // Track previous value to detect changes for DOM reordering
 
 	/**
 	 * Find the container element that the dragged element overlaps with
@@ -1608,14 +1634,22 @@
 				pendingPosition = { ...pos };
 				
 				// Calculate and store offset from cursor to element's top-left at drag start
+				// Use DOM position to account for all rotations and transforms
 				const canvasElement = document.querySelector('.canvas') as HTMLElement | null;
 				const canvasRect = canvasElement?.getBoundingClientRect();
-				if (canvasRect) {
+				const elementDom = document.querySelector(`[data-element-id="${element.id}"]`) as HTMLElement | null;
+				if (canvasRect && elementDom) {
 					const cursorCanvasX = (e.clientX - canvasRect.left - viewport.x) / viewport.scale;
 					const cursorCanvasY = (e.clientY - canvasRect.top - viewport.y) / viewport.scale;
+					
+					// Get element's actual visual position from DOM (accounts for all rotations)
+					const elementRect = elementDom.getBoundingClientRect();
+					const elementVisualCanvasX = (elementRect.left - canvasRect.left - viewport.x) / viewport.scale;
+					const elementVisualCanvasY = (elementRect.top - canvasRect.top - viewport.y) / viewport.scale;
+					
 					dragOffsetCanvas = {
-						x: cursorCanvasX - pos.x,
-						y: cursorCanvasY - pos.y
+						x: cursorCanvasX - elementVisualCanvasX,
+						y: cursorCanvasY - elementVisualCanvasY
 					};
 				}
 
@@ -2000,6 +2034,26 @@
 						
 						// Just track potential parent - don't change during drag (change on drop to prevent issues)
 						potentialDropParentId = detectedParentId;
+						
+						// Move DOM nodes so dragged element appears above droppable area
+						tick().then(() => {
+							// Move potential drop parent to end (so it's above other elements)
+							if (detectedParentId) {
+								const droppableElement = document.querySelector(`[data-element-id="${detectedParentId}"]`) as HTMLElement | null;
+								if (droppableElement && droppableElement.parentElement) {
+									droppableElement.parentElement.appendChild(droppableElement);
+								}
+							}
+							
+							// Move dragged element to end (so it appears above the droppable area)
+							if (activeElementId) {
+								const draggedElement = document.querySelector(`[data-element-id="${activeElementId}"]`) as HTMLElement | null;
+								if (draggedElement && draggedElement.parentElement) {
+									draggedElement.parentElement.appendChild(draggedElement);
+								}
+							}
+						});
+						
 						pendingPosition = tempPendingPosition;
 					} else {
 						pendingPosition = tempPendingPosition;
@@ -2975,6 +3029,7 @@
 		reorderElementRotation = 0;
 		reorderElementSize = { width: 0, height: 0 };
 		potentialDropParentId = null;
+		previousPotentialDropParentId = null;
 		originalParentId = null;
 		pendingParentChange = null;
 
