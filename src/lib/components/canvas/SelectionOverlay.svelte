@@ -450,6 +450,7 @@
 	// Drag start tracking
 	let dragStartScreen = { x: 0, y: 0 };
 	let elementStartCanvas = { x: 0, y: 0, width: 0, height: 0 };
+	let dragOffsetCanvas = { x: 0, y: 0 }; // Offset from cursor to element's top-left at drag start
 	let rotationStartCenter: { x: number; y: number; screenX: number; screenY: number } | null = null; // Fixed center at rotation start (for child elements)
 	let groupStartElements: Array<{ id: string; x: number; y: number; width: number; height: number; rotation: number }> = [];
 	let hasMovedPastThreshold = false; // Track if we've moved past the initial dead zone
@@ -1605,6 +1606,18 @@
 			} else {
 				// Single element drag
 				pendingPosition = { ...pos };
+				
+				// Calculate and store offset from cursor to element's top-left at drag start
+				const canvasElement = document.querySelector('.canvas') as HTMLElement | null;
+				const canvasRect = canvasElement?.getBoundingClientRect();
+				if (canvasRect) {
+					const cursorCanvasX = (e.clientX - canvasRect.left - viewport.x) / viewport.scale;
+					const cursorCanvasY = (e.clientY - canvasRect.top - viewport.y) / viewport.scale;
+					dragOffsetCanvas = {
+						x: cursorCanvasX - pos.x,
+						y: cursorCanvasY - pos.y
+					};
+				}
 
 				// Initialize auto layout reordering state
 				reorderTargetIndex = null;
@@ -2785,8 +2798,14 @@
 									hiddenDuringTransition: activeElementId
 								}));
 								
-								// Use cursor position as drop reference (simpler and more accurate)
+								// Use cursor position as drop reference, maintaining the offset from drag start
 								const dropPosition = cursorCanvasPos || pendingPosition;
+								
+								// Calculate element's top-left position: cursor position minus the drag offset
+								const elementTopLeftCanvas = {
+									x: dropPosition.x - dragOffsetCanvas.x,
+									y: dropPosition.y - dragOffsetCanvas.y
+								};
 								
 								// Calculate position relative to new parent
 								const state_for_drop = get(designState);
@@ -2794,7 +2813,7 @@
 								let relativePos: { x: number; y: number };
 								
 								if (newParent) {
-									// Convert cursor position to relative position for new parent
+									// Convert element's top-left position to relative position for new parent
 									const newParentAbsPos = getAbsolutePosition(newParent);
 									const newParentRotation = getDisplayRotation(newParent);
 									
@@ -2802,9 +2821,9 @@
 									const parentCenterX = newParentAbsPos.x + newParent.size.width / 2;
 									const parentCenterY = newParentAbsPos.y + newParent.size.height / 2;
 									
-									// Cursor position is the element's center (simplest and most predictable)
-									const elementCenterX = dropPosition.x;
-									const elementCenterY = dropPosition.y;
+									// Get element's center in canvas space
+									const elementCenterX = elementTopLeftCanvas.x + activeElement.size.width / 2;
+									const elementCenterY = elementTopLeftCanvas.y + activeElement.size.height / 2;
 									
 									// Offset from parent center to element center (in world/canvas space)
 									const dx = elementCenterX - parentCenterX;
@@ -2824,17 +2843,13 @@
 									} else {
 										// Parent not rotated - simple subtraction
 										relativePos = {
-											x: dropPosition.x - activeElement.size.width / 2 - newParentAbsPos.x,
-											y: dropPosition.y - activeElement.size.height / 2 - newParentAbsPos.y
+											x: elementTopLeftCanvas.x - newParentAbsPos.x,
+											y: elementTopLeftCanvas.y - newParentAbsPos.y
 										};
 									}
 								} else {
-									// Dropping at root - cursor position is already in absolute coordinates
-									// Convert from center (cursor) to top-left
-									relativePos = {
-										x: dropPosition.x - activeElement.size.width / 2,
-										y: dropPosition.y - activeElement.size.height / 2
-									};
+									// Dropping at root - element top-left is already in absolute coordinates
+									relativePos = elementTopLeftCanvas;
 								}
 								
 								// Change parent and move position
