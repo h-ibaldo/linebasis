@@ -3006,14 +3006,56 @@
 		{@const selectedElement = selectedElements[0]}
 		{@const state = get(designState)}
 		{@const parent = selectedElement.parentId ? state.elements[selectedElement.parentId] : null}
+		{@const parentHasAutoLayout = parent?.autoLayout?.enabled || false}
+		{@const childIgnoresAutoLayout = selectedElement.autoLayout?.ignoreAutoLayout || false}
+		{@const isInAutoLayout = parentHasAutoLayout && !childIgnoresAutoLayout}
 		{@const parentTransform = parent ? {
 			position: getAbsolutePosition(parent),
 			rotation: getDisplayRotation(parent),
 			size: getDisplaySize(parent)
 		} : null}
-		{@const relativePendingPosition = (activeElementId === selectedElement.id && pendingPosition && parent)
-			? absoluteToRelativePosition(selectedElement, pendingPosition)
-			: (activeElementId === selectedElement.id ? pendingPosition : null)}
+		{@const relativePendingPosition = (() => {
+			// If element is being dragged and has pending position
+			if (activeElementId === selectedElement.id && pendingPosition) {
+				// If element has a parent, convert absolute position to relative
+				if (parent) {
+					return absoluteToRelativePosition(selectedElement, pendingPosition);
+				}
+				// If element has no parent (root-level), pendingPosition is already absolute
+				return pendingPosition;
+			}
+			// For auto layout children, get actual rendered position from DOM
+			if (isInAutoLayout && parent) {
+				const domElement = document.querySelector(`[data-element-id="${selectedElement.id}"]`);
+				const parentDomElement = document.querySelector(`[data-element-id="${parent.id}"]`);
+				if (domElement && parentDomElement) {
+					const elementRect = domElement.getBoundingClientRect();
+					const parentRect = parentDomElement.getBoundingClientRect();
+					const canvasElement = document.querySelector('.canvas');
+					if (canvasElement) {
+						const canvasRect = canvasElement.getBoundingClientRect();
+						// Get element's top-left in screen space
+						const elementScreenX = elementRect.left;
+						const elementScreenY = elementRect.top;
+						// Get parent's top-left in screen space
+						const parentScreenX = parentRect.left;
+						const parentScreenY = parentRect.top;
+						// Convert to canvas space
+						const elementCanvasX = (elementScreenX - canvasRect.left - viewport.x) / viewport.scale;
+						const elementCanvasY = (elementScreenY - canvasRect.top - viewport.y) / viewport.scale;
+						const parentCanvasX = (parentScreenX - canvasRect.left - viewport.x) / viewport.scale;
+						const parentCanvasY = (parentScreenY - canvasRect.top - viewport.y) / viewport.scale;
+						// Calculate relative position (top-left to top-left)
+						return {
+							x: elementCanvasX - parentCanvasX,
+							y: elementCanvasY - parentCanvasY
+						};
+					}
+				}
+			}
+			// Default: use element's stored position (already relative to parent)
+			return null;
+		})()}
 		<SelectionUI
 			element={selectedElement}
 			{viewport}
