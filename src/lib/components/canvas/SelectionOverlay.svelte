@@ -120,6 +120,7 @@
 	// Parent change detection during drag (for dragging elements out of/into divs)
 	let potentialDropParentId: string | null = null; // Element being hovered over that could become new parent
 	let originalParentId: string | null = null; // Original parent at drag start (to detect if parent changed)
+	let pendingParentChange: { elementId: string; newParentId: string | null } | null = null; // Track parent change in progress
 
 	/**
 	 * Find the container element that the dragged element overlaps with
@@ -1935,7 +1936,8 @@
 				const state = get(designState);
 				const activeElement = state.elements[activeElementId!];
 				
-				// First, detect potential drop parent using current pendingPosition (will be updated below)
+				// Calculate position based on delta from start (this automatically handles rotation based on current parent)
+				// The key is that elementStartCanvas is in absolute coordinates, and we calculate from there
 				let tempPendingPosition = pendingPosition || { x: elementStartCanvas.x, y: elementStartCanvas.y };
 				if (activeElement && activeElement.parentId) {
 					const ancestors = getAllAncestors(activeElement);
@@ -1975,7 +1977,7 @@
 					// Get the dragged element's size to check for overlap with potential parents
 					const draggedElement = state.elements[activeElementId];
 					if (draggedElement) {
-						potentialDropParentId = findDropParentAtPosition(
+						const detectedParentId = findDropParentAtPosition(
 							tempPendingPosition.x,
 							tempPendingPosition.y,
 							draggedElement.size.width,
@@ -1983,7 +1985,8 @@
 							activeElementId
 						);
 						
-						// Always use transformed delta (no special handling for dragging outside)
+						// Just track potential parent - don't change during drag (change on drop to prevent issues)
+						potentialDropParentId = detectedParentId;
 						pendingPosition = tempPendingPosition;
 					} else {
 						pendingPosition = tempPendingPosition;
@@ -2763,28 +2766,62 @@
 						if (!reorderParentId) {
 							// Check if parent changed during drag (drag out of/into div)
 							if (potentialDropParentId !== originalParentId) {
-								// Parent changed - use reorderElement to change parent and position
-								const state_for_parent = get(designState);
-								const newParent = potentialDropParentId ? state_for_parent.elements[potentialDropParentId] : null;
-								const originalParent = originalParentId ? state_for_parent.elements[originalParentId] : null;
-
-								// If dragging out of a rotated parent, preserve visual rotation and position
-								const originalParentRotation = originalParent?.rotation || 0;
-								const childRotation = activeElement.rotation || 0;
-								const visualRotation = childRotation + originalParentRotation;
-
-								// Get visual position from DOM at drop time if dragging out of rotated parent
-								// This ensures the element lands exactly where it appears visually
-								let dropPosition = pendingPosition;
-								if (originalParentRotation !== 0) {
+								// Parent changed - hide element during transition to prevent flash
+								interactionState.update(state => ({
+									...state,
+									hiddenDuringTransition: activeElementId
+								}));
+								
+								// Calculate position relative to new parent BEFORE changing parent
+								const state_for_drop = get(designState);
+								const newParent = potentialDropParentId ? state_for_drop.elements[potentialDropParentId] : null;
+								let relativePos: { x: number; y: number };
+								
+								if (newParent) {
+									// Convert absolute position to relative position for new parent
+									const newParentAbsPos = getAbsolutePosition(newParent);
+									const newParentRotation = getDisplayRotation(newParent);
+									
+									// Get parent's center in canvas space
+									const parentCenterX = newParentAbsPos.x + newParent.size.width / 2;
+									const parentCenterY = newParentAbsPos.y + newParent.size.height / 2;
+									
+									// Get element's center in canvas space
+									const elementCenterX = pendingPosition.x + activeElement.size.width / 2;
+									const elementCenterY = pendingPosition.y + activeElement.size.height / 2;
+									
+									// Offset from parent center to element center (in world/canvas space)
+									const dx = elementCenterX - parentCenterX;
+									const dy = elementCenterY - parentCenterY;
+									
+									if (newParentRotation !== 0) {
+										// Transform to parent's local space (inverse rotation)
+										const angleRad = -newParentRotation * (Math.PI / 180);
+										const localDx = dx * Math.cos(angleRad) - dy * Math.sin(angleRad);
+										const localDy = dx * Math.sin(angleRad) + dy * Math.cos(angleRad);
+										
+										// Convert from center-relative to top-left relative (in parent's local space)
+										relativePos = {
+											x: localDx + newParent.size.width / 2 - activeElement.size.width / 2,
+											y: localDy + newParent.size.height / 2 - activeElement.size.height / 2
+										};
+									} else {
+										// Parent not rotated - simple subtraction
+										relativePos = {
+											x: pendingPosition.x - newParentAbsPos.x,
+											y: pendingPosition.y - newParentAbsPos.y
+										};
+									}
+								} else {
+									// Dropping at root - get visual position from DOM to ensure accuracy
+									// This accounts for any rotation that might affect the position
 									const canvasElement = document.querySelector('.canvas') as HTMLElement | null;
 									const canvasRect = canvasElement?.getBoundingClientRect();
 									const domElement = document.querySelector(`[data-element-id="${activeElementId}"]`);
 									
 									if (domElement && canvasRect) {
 										const rect = domElement.getBoundingClientRect();
-										// Get element's center from bounding box (transform-origin is center center)
-										// The bounding box center IS the element's visual center, which equals stored center
+										// Get element's center from bounding box
 										const centerScreenX = rect.left + rect.width / 2;
 										const centerScreenY = rect.top + rect.height / 2;
 										
@@ -2792,126 +2829,28 @@
 										const centerCanvasX = (centerScreenX - canvasRect.left - viewport.x) / viewport.scale;
 										const centerCanvasY = (centerScreenY - canvasRect.top - viewport.y) / viewport.scale;
 										
-										// Get display size (accounts for pending size changes)
-										const displaySize = getDisplaySize(activeElement);
-										
-										// Stored top-left = stored center + (-width/2, -height/2)
-										// Since stored center = visual center, we can calculate directly
-										// No rotation needed because stored coordinates are unrotated
-										dropPosition = {
-											x: centerCanvasX - displaySize.width / 2,
-											y: centerCanvasY - displaySize.height / 2
-										};
-									}
-								}
-
-								// Calculate position relative to new parent
-								let relativePos;
-								if (potentialDropParentId && newParent) {
-									const newParentRotation = newParent.rotation || 0;
-
-									// If dragging INTO a rotated parent, need to transform coordinates
-									// This is the reverse of dragging OUT of a rotated parent
-									if (newParentRotation !== 0) {
-										// Get visual centers from DOM (same approach as drag-out)
-										const canvasElement = document.querySelector('.canvas') as HTMLElement | null;
-										const canvasRect = canvasElement?.getBoundingClientRect();
-										const childDomElement = document.querySelector(`[data-element-id="${activeElementId}"]`);
-										const parentDomElement = document.querySelector(`[data-element-id="${potentialDropParentId}"]`);
-
-										if (childDomElement && parentDomElement && canvasRect) {
-											// Get child's visual center
-											const childRect = childDomElement.getBoundingClientRect();
-											const childCenterScreenX = childRect.left + childRect.width / 2;
-											const childCenterScreenY = childRect.top + childRect.height / 2;
-											const childCenterCanvasX = (childCenterScreenX - canvasRect.left - viewport.x) / viewport.scale;
-											const childCenterCanvasY = (childCenterScreenY - canvasRect.top - viewport.y) / viewport.scale;
-
-											// Get parent's visual center
-											const parentRect = parentDomElement.getBoundingClientRect();
-											const parentCenterScreenX = parentRect.left + parentRect.width / 2;
-											const parentCenterScreenY = parentRect.top + parentRect.height / 2;
-											const parentCenterCanvasX = (parentCenterScreenX - canvasRect.left - viewport.x) / viewport.scale;
-											const parentCenterCanvasY = (parentCenterScreenY - canvasRect.top - viewport.y) / viewport.scale;
-
-											// Offset from parent center to child center (in world/canvas space)
-											const dx = childCenterCanvasX - parentCenterCanvasX;
-											const dy = childCenterCanvasY - parentCenterCanvasY;
-
-											// Transform to parent's local space (inverse rotation)
-											const angleRad = -newParentRotation * (Math.PI / 180);
-											const localDx = dx * Math.cos(angleRad) - dy * Math.sin(angleRad);
-											const localDy = dx * Math.sin(angleRad) + dy * Math.cos(angleRad);
-
-											// Get sizes
-											const childSize = getDisplaySize(activeElement);
-											const parentSize = getDisplaySize(newParent);
-
-											// Convert from center-relative to top-left relative (in parent's local space)
-											relativePos = {
-												x: localDx + parentSize.width / 2 - childSize.width / 2,
-												y: localDy + parentSize.height / 2 - childSize.height / 2
-											};
-										} else {
-											// Fallback: use simple subtraction
-											const newParentAbsPos = getAbsolutePosition(newParent);
-											relativePos = {
-												x: dropPosition.x - newParentAbsPos.x,
-												y: dropPosition.y - newParentAbsPos.y
-											};
-										}
-									} else {
-										// Parent not rotated - simple subtraction
-										const newParentAbsPos = getAbsolutePosition(newParent);
+										// Convert from center to top-left
 										relativePos = {
-											x: dropPosition.x - newParentAbsPos.x,
-											y: dropPosition.y - newParentAbsPos.y
+											x: centerCanvasX - activeElement.size.width / 2,
+											y: centerCanvasY - activeElement.size.height / 2
 										};
-									}
-								} else {
-									// Dropping at root - use absolute position
-									relativePos = dropPosition;
-								}
-
-								// Calculate rotation correction
-								let rotationCorrection: number | null = null;
-								if (originalParentRotation !== 0 && !potentialDropParentId) {
-									rotationCorrection = visualRotation;
-								} else if (potentialDropParentId && newParent) {
-									const newParentRotation = newParent.rotation || 0;
-									if (newParentRotation !== 0) {
-										const currentVisualRotation = childRotation + originalParentRotation;
-										rotationCorrection = currentVisualRotation - newParentRotation;
+									} else {
+										// Fallback: use pendingPosition (should be correct but DOM is more accurate)
+										relativePos = pendingPosition;
 									}
 								}
-
-								// Set flag to hide element during transition (CanvasElement will reactively hide itself)
-								interactionState.update(state => ({
-									...state,
-									hiddenDuringTransition: activeElementId
-								}));
-
-								// Perform all operations in parallel where possible to minimize transition time
-								// Reorder to new parent (index 0 = first child, or root if no parent)
-								await reorderElement(activeElementId, potentialDropParentId, 0);
 								
-								// Apply rotation correction and move position in parallel
-								const operations = [];
-								if (rotationCorrection !== null) {
-									operations.push(rotateElement(activeElementId, rotationCorrection));
-								}
-								operations.push(moveElement(activeElementId, relativePos));
-								await Promise.all(operations);
-
-								// Clear hide flag immediately - no wait, let Svelte's reactivity handle it
-								// The operations are complete, so the element should be in correct state
+								// Change parent and move position
+								await reorderElement(activeElementId, potentialDropParentId, 0);
+								await moveElement(activeElementId, relativePos);
+								
+								// Clear hide flag
 								interactionState.update(state => ({
 									...state,
 									hiddenDuringTransition: null
 								}));
 							} else {
 								// Parent didn't change - just move within same parent
-								// Convert absolute position to parent-relative position
 								const relativePos = absoluteToRelativePosition(activeElement, pendingPosition);
 								await moveElement(activeElementId, relativePos);
 							}
@@ -3025,6 +2964,7 @@
 		reorderElementSize = { width: 0, height: 0 };
 		potentialDropParentId = null;
 		originalParentId = null;
+		pendingParentChange = null;
 
 		// Clear debug values
 		debugCenter = null;
