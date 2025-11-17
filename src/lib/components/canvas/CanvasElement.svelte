@@ -392,6 +392,9 @@ type DocumentWithCaret = Document & {
 		$interactionState.activeElementId === element.id &&
 		$interactionState.pendingPosition !== null;
 
+	// Check if element should be hidden during parent change transition
+	$: isHiddenDuringTransition = $interactionState.hiddenDuringTransition === element.id;
+
 	// Check if this is an auto layout child being dragged for reordering
 	$: isAutoLayoutChildDragging = (() => {
 		if (!isBeingDragged) return false;
@@ -559,6 +562,12 @@ type DocumentWithCaret = Document & {
 		if (element.spacing.paddingRight) styles.push(`padding-right: ${element.spacing.paddingRight}`);
 		if (element.spacing.paddingBottom) styles.push(`padding-bottom: ${element.spacing.paddingBottom}`);
 		if (element.spacing.paddingLeft) styles.push(`padding-left: ${element.spacing.paddingLeft}`);
+
+		// Hide element during parent change transition to prevent flash
+		if (isHiddenDuringTransition) {
+			styles.push(`visibility: hidden`);
+			styles.push(`pointer-events: none`);
+		}
 
 		return styles.join('; ');
 	})();

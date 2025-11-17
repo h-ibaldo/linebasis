@@ -441,7 +441,8 @@
 			pendingRadius,
 			pendingCornerRadii: cornerRadii,
 			groupTransforms: groupPendingTransforms,
-			editingElementId: null // SelectionOverlay doesn't handle text editing
+			editingElementId: null, // SelectionOverlay doesn't handle text editing
+			hiddenDuringTransition: $interactionState.hiddenDuringTransition // Preserve during reactive updates
 		});
 	}
 
@@ -2872,27 +2873,42 @@
 									relativePos = dropPosition;
 								}
 
-								// Reorder to new parent (index 0 = first child, or root if no parent)
-								await reorderElement(activeElementId, potentialDropParentId, 0);
-
-								// Then move to the correct position within that parent
-								await moveElement(activeElementId, relativePos);
-
-								// Handle rotation based on drag direction
+								// Calculate rotation correction
+								let rotationCorrection: number | null = null;
 								if (originalParentRotation !== 0 && !potentialDropParentId) {
-									// Dragging OUT of rotated parent: preserve visual rotation
-									await rotateElement(activeElementId, visualRotation);
+									rotationCorrection = visualRotation;
 								} else if (potentialDropParentId && newParent) {
-									// Dragging INTO a parent: adjust rotation so element appears at same visual rotation
 									const newParentRotation = newParent.rotation || 0;
 									if (newParentRotation !== 0) {
-										// Element's current visual rotation (accounting for original parent if any)
 										const currentVisualRotation = childRotation + originalParentRotation;
-										// To maintain same visual rotation inside new parent, element rotation = visual - parent
-										const adjustedRotation = currentVisualRotation - newParentRotation;
-										await rotateElement(activeElementId, adjustedRotation);
+										rotationCorrection = currentVisualRotation - newParentRotation;
 									}
 								}
+
+								// Set flag to hide element during transition (CanvasElement will reactively hide itself)
+								interactionState.update(state => ({
+									...state,
+									hiddenDuringTransition: activeElementId
+								}));
+
+								// Perform all operations in parallel where possible to minimize transition time
+								// Reorder to new parent (index 0 = first child, or root if no parent)
+								await reorderElement(activeElementId, potentialDropParentId, 0);
+								
+								// Apply rotation correction and move position in parallel
+								const operations = [];
+								if (rotationCorrection !== null) {
+									operations.push(rotateElement(activeElementId, rotationCorrection));
+								}
+								operations.push(moveElement(activeElementId, relativePos));
+								await Promise.all(operations);
+
+								// Clear hide flag immediately - no wait, let Svelte's reactivity handle it
+								// The operations are complete, so the element should be in correct state
+								interactionState.update(state => ({
+									...state,
+									hiddenDuringTransition: null
+								}));
 							} else {
 								// Parent didn't change - just move within same parent
 								// Convert absolute position to parent-relative position
@@ -3031,9 +3047,9 @@
 	});
 </script>
 
-<!-- Render selection UI (hide when text is being edited, during rotation, or during auto layout reordering) -->
+<!-- Render selection UI (hide when text is being edited, during rotation, during auto layout reordering, or during parent change transition) -->
 	{#if $interactionState.mode !== 'editing-text'}
-	{#if selectedElements.length === 1 && !(interactionMode === 'dragging' && reorderParentId) && interactionMode !== 'rotating'}
+	{#if selectedElements.length === 1 && !(interactionMode === 'dragging' && reorderParentId) && interactionMode !== 'rotating' && !$interactionState.hiddenDuringTransition}
 		<!-- Single element selection (hidden during auto layout reordering - ghost shows instead) -->
 		{@const selectedElement = selectedElements[0]}
 		{@const state = get(designState)}
@@ -3060,7 +3076,7 @@
 			{parentTransform}
 			onMouseDown={(e, handle) => handleMouseDown(e, selectedElement, handle)}
 		/>
-	{:else if selectedElements.length > 1 && groupBounds && interactionMode !== 'rotating'}
+	{:else if selectedElements.length > 1 && groupBounds && interactionMode !== 'rotating' && !$interactionState.hiddenDuringTransition}
 		<!-- Multi-element selection - single bounding box -->
 		<!-- Note: groupBounds already accounts for rotated elements by calculating their corners -->
 		<!-- groupBounds is reactive to groupPendingTransforms, so it updates in real-time during interactions -->
@@ -3280,3 +3296,4 @@
 		{/if}
 	{/if}
 {/if}
+

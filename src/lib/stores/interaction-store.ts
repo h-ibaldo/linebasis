@@ -19,6 +19,8 @@ export interface InteractionState {
 	groupTransforms: Map<string, { position: { x: number; y: number }; size: { width: number; height: number }; rotation?: number }>;
 	// Text editing state
 	editingElementId: string | null;
+	// Hide element during parent change transition to prevent flash
+	hiddenDuringTransition: string | null; // Element ID to hide
 }
 
 const initialState: InteractionState = {
@@ -30,7 +32,8 @@ const initialState: InteractionState = {
 	pendingRadius: null,
 	pendingCornerRadii: null,
 	groupTransforms: new Map(),
-	editingElementId: null
+	editingElementId: null,
+	hiddenDuringTransition: null
 };
 
 export const interactionState = writable<InteractionState>(initialState);
