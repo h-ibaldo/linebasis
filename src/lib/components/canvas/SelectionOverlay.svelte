@@ -2654,9 +2654,22 @@
 		}
 	}
 
-	async function handleMouseUp() {
+	async function handleMouseUp(e?: MouseEvent) {
 		if (interactionMode === 'idle') return;
 		if (!isGroupInteraction && !activeElementId) return;
+		
+		// Get cursor position in canvas coordinates at drop time
+		let cursorCanvasPos: { x: number; y: number } | null = null;
+		if (e) {
+			const canvasElement = document.querySelector('.canvas') as HTMLElement | null;
+			const canvasRect = canvasElement?.getBoundingClientRect();
+			if (canvasRect) {
+				cursorCanvasPos = {
+					x: (e.clientX - canvasRect.left - viewport.x) / viewport.scale,
+					y: (e.clientY - canvasRect.top - viewport.y) / viewport.scale
+				};
+			}
+		}
 
 		// Check if actually moved beyond threshold
 		const movedX = pendingPosition ? Math.abs(pendingPosition.x - elementStartCanvas.x) : 0;
@@ -2772,13 +2785,16 @@
 									hiddenDuringTransition: activeElementId
 								}));
 								
-								// Calculate position relative to new parent BEFORE changing parent
+								// Use cursor position as drop reference (simpler and more accurate)
+								const dropPosition = cursorCanvasPos || pendingPosition;
+								
+								// Calculate position relative to new parent
 								const state_for_drop = get(designState);
 								const newParent = potentialDropParentId ? state_for_drop.elements[potentialDropParentId] : null;
 								let relativePos: { x: number; y: number };
 								
 								if (newParent) {
-									// Convert absolute position to relative position for new parent
+									// Convert cursor position to relative position for new parent
 									const newParentAbsPos = getAbsolutePosition(newParent);
 									const newParentRotation = getDisplayRotation(newParent);
 									
@@ -2786,9 +2802,9 @@
 									const parentCenterX = newParentAbsPos.x + newParent.size.width / 2;
 									const parentCenterY = newParentAbsPos.y + newParent.size.height / 2;
 									
-									// Get element's center in canvas space
-									const elementCenterX = pendingPosition.x + activeElement.size.width / 2;
-									const elementCenterY = pendingPosition.y + activeElement.size.height / 2;
+									// Cursor position is the element's center (simplest and most predictable)
+									const elementCenterX = dropPosition.x;
+									const elementCenterY = dropPosition.y;
 									
 									// Offset from parent center to element center (in world/canvas space)
 									const dx = elementCenterX - parentCenterX;
@@ -2808,36 +2824,17 @@
 									} else {
 										// Parent not rotated - simple subtraction
 										relativePos = {
-											x: pendingPosition.x - newParentAbsPos.x,
-											y: pendingPosition.y - newParentAbsPos.y
+											x: dropPosition.x - activeElement.size.width / 2 - newParentAbsPos.x,
+											y: dropPosition.y - activeElement.size.height / 2 - newParentAbsPos.y
 										};
 									}
 								} else {
-									// Dropping at root - get visual position from DOM to ensure accuracy
-									// This accounts for any rotation that might affect the position
-									const canvasElement = document.querySelector('.canvas') as HTMLElement | null;
-									const canvasRect = canvasElement?.getBoundingClientRect();
-									const domElement = document.querySelector(`[data-element-id="${activeElementId}"]`);
-									
-									if (domElement && canvasRect) {
-										const rect = domElement.getBoundingClientRect();
-										// Get element's center from bounding box
-										const centerScreenX = rect.left + rect.width / 2;
-										const centerScreenY = rect.top + rect.height / 2;
-										
-										// Convert center to canvas space
-										const centerCanvasX = (centerScreenX - canvasRect.left - viewport.x) / viewport.scale;
-										const centerCanvasY = (centerScreenY - canvasRect.top - viewport.y) / viewport.scale;
-										
-										// Convert from center to top-left
-										relativePos = {
-											x: centerCanvasX - activeElement.size.width / 2,
-											y: centerCanvasY - activeElement.size.height / 2
-										};
-									} else {
-										// Fallback: use pendingPosition (should be correct but DOM is more accurate)
-										relativePos = pendingPosition;
-									}
+									// Dropping at root - cursor position is already in absolute coordinates
+									// Convert from center (cursor) to top-left
+									relativePos = {
+										x: dropPosition.x - activeElement.size.width / 2,
+										y: dropPosition.y - activeElement.size.height / 2
+									};
 								}
 								
 								// Change parent and move position
