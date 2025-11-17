@@ -418,7 +418,6 @@ type DocumentWithCaret = Document & {
 			styles.push(`position: absolute`);
 			styles.push(`left: ${displayPosition.x}px`);
 			styles.push(`top: ${displayPosition.y}px`);
-			styles.push(`z-index: 10000`);
 		} else if (useRelativePosition) {
 			// Auto layout: children use relative positioning
 			styles.push(`position: relative`);

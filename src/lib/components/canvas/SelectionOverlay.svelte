@@ -117,25 +117,60 @@
 		}
 	}
 
-	// Reactive: Move DOM nodes so dragged element appears above droppable area
+	// Reactive: Temporarily move dragged element above droppable target if it's behind
 	$: if (interactionMode === 'dragging' && potentialDropParentId !== previousPotentialDropParentId) {
 		// Use tick to ensure DOM is ready
 		tick().then(() => {
-			// Move potential drop parent to end (so it's above other elements)
-			if (potentialDropParentId) {
+			if (potentialDropParentId && activeElementId) {
 				const droppableElement = document.querySelector(`[data-element-id="${potentialDropParentId}"]`) as HTMLElement | null;
-				if (droppableElement && droppableElement.parentElement) {
-					// Move droppable element to end of parent (renders on top)
-					droppableElement.parentElement.appendChild(droppableElement);
-				}
-			}
-			
-			// Move dragged element to end (so it appears above the droppable area)
-			if (activeElementId) {
 				const draggedElement = document.querySelector(`[data-element-id="${activeElementId}"]`) as HTMLElement | null;
-				if (draggedElement && draggedElement.parentElement) {
-					// Move dragged element to end (renders on top of everything, including droppable)
-					draggedElement.parentElement.appendChild(draggedElement);
+				
+				if (droppableElement && draggedElement && droppableElement.parentElement && draggedElement.parentElement) {
+					// Check if dragged element is behind the droppable target
+					// Compare DOM order: if dragged element comes before droppable in DOM, it's behind
+					let draggedIsBehind = false;
+					
+					// If they're in the same parent, check DOM order
+					if (draggedElement.parentElement === droppableElement.parentElement) {
+						let node: Node | null = droppableElement;
+						while (node) {
+							if (node === draggedElement) {
+								draggedIsBehind = true;
+								break;
+							}
+							node = node.previousSibling;
+						}
+					} else {
+						// Different parents - check z-index
+						const state = get(designState);
+						const draggedEl = state.elements[activeElementId];
+						const droppableEl = state.elements[potentialDropParentId];
+						if (draggedEl && droppableEl) {
+							const draggedZ = draggedEl.zIndex || 0;
+							const droppableZ = droppableEl.zIndex || 0;
+							draggedIsBehind = draggedZ < droppableZ;
+						}
+					}
+					
+					// If dragged element is behind, temporarily move it above the droppable target
+					if (draggedIsBehind) {
+						// Move dragged element right after droppable target (so it appears above)
+						if (droppableElement.nextSibling) {
+							droppableElement.parentElement.insertBefore(draggedElement, droppableElement.nextSibling);
+						} else {
+							droppableElement.parentElement.appendChild(draggedElement);
+						}
+					}
+				}
+			} else if (!potentialDropParentId && activeElementId) {
+				// No potential drop parent - restore original DOM position if it was moved
+				const draggedElement = document.querySelector(`[data-element-id="${activeElementId}"]`) as HTMLElement | null;
+				if (draggedElement && draggedElementOriginalParent && draggedElementOriginalNextSibling) {
+					// Restore to original position
+					draggedElementOriginalParent.insertBefore(draggedElement, draggedElementOriginalNextSibling);
+				} else if (draggedElement && draggedElementOriginalParent) {
+					// No next sibling - append to end
+					draggedElementOriginalParent.appendChild(draggedElement);
 				}
 			}
 		});
@@ -147,6 +182,10 @@
 	let originalParentId: string | null = null; // Original parent at drag start (to detect if parent changed)
 	let pendingParentChange: { elementId: string; newParentId: string | null } | null = null; // Track parent change in progress
 	let previousPotentialDropParentId: string | null = null; // Track previous value to detect changes for DOM reordering
+	
+	// Track original DOM order for temporary reordering during hover
+	let draggedElementOriginalNextSibling: Node | null = null; // Next sibling before temporary reordering
+	let draggedElementOriginalParent: Node | null = null; // Parent before temporary reordering
 
 	/**
 	 * Find the container element that the dragged element overlaps with
@@ -1660,6 +1699,16 @@
 				// Store original parent for drag-out detection
 				originalParentId = element.parentId;
 				potentialDropParentId = null;
+				
+				// Store original DOM position for temporary reordering during hover
+				const draggedElementDom = document.querySelector(`[data-element-id="${element.id}"]`) as HTMLElement | null;
+				if (draggedElementDom) {
+					draggedElementOriginalNextSibling = draggedElementDom.nextSibling;
+					draggedElementOriginalParent = draggedElementDom.parentNode;
+				} else {
+					draggedElementOriginalNextSibling = null;
+					draggedElementOriginalParent = null;
+				}
 
 				// Check if element is in auto layout and can be reordered
 				const state = get(designState);
@@ -2033,26 +2082,8 @@
 						);
 						
 						// Just track potential parent - don't change during drag (change on drop to prevent issues)
+						// The reactive block will handle temporary DOM reordering if needed
 						potentialDropParentId = detectedParentId;
-						
-						// Move DOM nodes so dragged element appears above droppable area
-						tick().then(() => {
-							// Move potential drop parent to end (so it's above other elements)
-							if (detectedParentId) {
-								const droppableElement = document.querySelector(`[data-element-id="${detectedParentId}"]`) as HTMLElement | null;
-								if (droppableElement && droppableElement.parentElement) {
-									droppableElement.parentElement.appendChild(droppableElement);
-								}
-							}
-							
-							// Move dragged element to end (so it appears above the droppable area)
-							if (activeElementId) {
-								const draggedElement = document.querySelector(`[data-element-id="${activeElementId}"]`) as HTMLElement | null;
-								if (draggedElement && draggedElement.parentElement) {
-									draggedElement.parentElement.appendChild(draggedElement);
-								}
-							}
-						});
 						
 						pendingPosition = tempPendingPosition;
 					} else {
@@ -2853,9 +2884,15 @@
 								}));
 								
 								// Use cursor position as drop reference, maintaining the offset from drag start
+								// Always prefer cursor position to ensure accurate drop location
 								const dropPosition = cursorCanvasPos || pendingPosition;
 								
+								if (!cursorCanvasPos) {
+									console.warn('cursorCanvasPos not available at drop time, using pendingPosition');
+								}
+								
 								// Calculate element's top-left position: cursor position minus the drag offset
+								// This maintains the same cursor-to-element offset that was established at drag start
 								const elementTopLeftCanvas = {
 									x: dropPosition.x - dragOffsetCanvas.x,
 									y: dropPosition.y - dragOffsetCanvas.y
@@ -2903,12 +2940,19 @@
 									}
 								} else {
 									// Dropping at root - element top-left is already in absolute coordinates
+									// The elementTopLeftCanvas was calculated from cursor position minus offset,
+									// so it correctly maintains the cursor-to-element relationship
 									relativePos = elementTopLeftCanvas;
 								}
 								
 								// Change parent and move position
+								// Note: reorderElement will handle the permanent DOM reordering
 								await reorderElement(activeElementId, potentialDropParentId, 0);
 								await moveElement(activeElementId, relativePos);
+								
+								// Clear original DOM position tracking since element was dropped inside
+								draggedElementOriginalNextSibling = null;
+								draggedElementOriginalParent = null;
 								
 								// Clear hide flag
 								interactionState.update(state => ({
@@ -3032,6 +3076,25 @@
 		previousPotentialDropParentId = null;
 		originalParentId = null;
 		pendingParentChange = null;
+		
+		// Restore original DOM position if element was not dropped inside target
+		if (activeElementId && draggedElementOriginalParent && draggedElementOriginalNextSibling) {
+			const draggedElement = document.querySelector(`[data-element-id="${activeElementId}"]`) as HTMLElement | null;
+			if (draggedElement) {
+				// Restore to original position
+				draggedElementOriginalParent.insertBefore(draggedElement, draggedElementOriginalNextSibling);
+			}
+		} else if (activeElementId && draggedElementOriginalParent) {
+			const draggedElement = document.querySelector(`[data-element-id="${activeElementId}"]`) as HTMLElement | null;
+			if (draggedElement) {
+				// No next sibling - append to end
+				draggedElementOriginalParent.appendChild(draggedElement);
+			}
+		}
+		
+		// Clear original DOM position tracking
+		draggedElementOriginalNextSibling = null;
+		draggedElementOriginalParent = null;
 
 		// Clear debug values
 		debugCenter = null;
