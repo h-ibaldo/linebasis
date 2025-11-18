@@ -124,6 +124,12 @@
 			// Only consider container elements as potential parents
 			if (!containerTypes.includes(element.type)) continue;
 
+			// IMPORTANT: Only allow dropping into views OR auto-layout divs
+			// Regular divs cannot accept children (Figma-style behavior)
+			const isView = element.isView === true;
+			const isAutoLayout = element.autoLayout?.enabled === true;
+			if (!isView && !isAutoLayout) continue;
+
 			// Check if the dragged element's bounds overlap with this container's bounds
 			const absPos = getAbsolutePosition(element);
 			const containerLeft = absPos.x;
@@ -2289,7 +2295,40 @@
 							// Check if parent changed during drag (drag out of/into div)
 							if (potentialDropParentId !== originalParentId) {
 								// Parent changed - use reorderElement to change parent and position
-								const newParent = potentialDropParentId ? get(designState).elements[potentialDropParentId] : null;
+								const state = get(designState);
+								const newParent = potentialDropParentId ? state.elements[potentialDropParentId] : null;
+								const oldParent = originalParentId ? state.elements[originalParentId] : null;
+
+								// Calculate the correct index for the new position
+								let newIndex = 0;
+
+								// When dragging OUT of a parent (moving to its grandparent or root)
+								if (originalParentId && !potentialDropParentId) {
+									// Element is being moved to root, position it right after its former parent
+									// Get the root elements from the view
+									const currentView = state.views[activeElement.viewId];
+									if (currentView && oldParent) {
+										const rootElements = currentView.elements;
+										const oldParentIndex = rootElements.indexOf(originalParentId);
+										// Place right after the former parent (higher index = later in DOM = above in layers)
+										newIndex = oldParentIndex !== -1 ? oldParentIndex + 1 : rootElements.length;
+									}
+								} else if (originalParentId && potentialDropParentId) {
+									// Moving from one parent to another parent
+									// Check if the new parent is the grandparent (dragging up one level)
+									if (oldParent && oldParent.parentId === potentialDropParentId) {
+										// Dragging out to grandparent - place after former parent
+										const grandparentChildren = newParent ? newParent.children : [];
+										const oldParentIndex = grandparentChildren.indexOf(originalParentId);
+										newIndex = oldParentIndex !== -1 ? oldParentIndex + 1 : grandparentChildren.length;
+									} else {
+										// Moving to a different parent - place at end
+										newIndex = newParent ? newParent.children.length : 0;
+									}
+								} else {
+									// Moving into a parent from root or between roots
+									newIndex = newParent ? newParent.children.length : 0;
+								}
 
 								// Calculate position relative to new parent
 								let relativePos;
@@ -2304,8 +2343,8 @@
 									relativePos = pendingPosition;
 								}
 
-								// Reorder to new parent (index 0 = first child, or root if no parent)
-								await reorderElement(activeElementId, potentialDropParentId, 0);
+								// Reorder to new parent with calculated index
+								await reorderElement(activeElementId, potentialDropParentId, newIndex);
 
 								// Then move to the correct position within that parent
 								await moveElement(activeElementId, relativePos);

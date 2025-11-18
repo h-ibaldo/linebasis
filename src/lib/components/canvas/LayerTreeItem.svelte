@@ -31,7 +31,10 @@
 
 	$: isSelected = selectedIds.includes(element.id);
 	$: hasChildren = element.children && element.children.length > 0;
-	$: children = hasChildren ? element.children.map((id) => elements[id]).filter(Boolean) : [];
+	// Reverse children to show visual top-to-bottom order (last child = top layer)
+	$: children = hasChildren
+		? element.children.map((id) => elements[id]).filter(Boolean).reverse()
+		: [];
 	$: visible = element.visible !== false; // Default to visible if not specified
 	$: locked = element.locked === true; // Default to not locked
 

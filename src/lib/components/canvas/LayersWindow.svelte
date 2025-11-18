@@ -19,11 +19,12 @@
 
 	$: selectedIds = $designState.selectedElementIds;
 
-	// Get ALL root elements on the canvas (elements with no parent), sorted by z-index
-	// This shows the entire canvas like Figma, not just the current view
+	// Get ALL root elements on the canvas (elements with no parent)
+	// Sort by z-index DESCENDING to show top layers first (like Figma)
+	// This represents visual stacking order: highest z-index = top of list
 	$: rootElements = Object.values($designState.elements)
 		.filter((el) => !el.parentId)
-		.sort((a, b) => b.zIndex - a.zIndex); // Sort by z-index descending (top to bottom)
+		.sort((a, b) => b.zIndex - a.zIndex); // Visual top-to-bottom order
 
 	$: hasElements = rootElements.length > 0;
 

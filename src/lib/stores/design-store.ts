@@ -1428,7 +1428,7 @@ export async function cutElements(): Promise<void> {
 /**
  * Paste elements from clipboard
  */
-export async function pasteElements(): Promise<void> {
+export async function pasteElements(forceInside: boolean = false): Promise<void> {
 	if (clipboard.length === 0) return;
 
 	const state = get(designState);
@@ -1452,7 +1452,10 @@ export async function pasteElements(): Promise<void> {
 			targetParentId = selectedElement.parentId;
 		} else {
 			// Selected element is NOT in clipboard
-			if (selectedElement.children && selectedElement.children.length > 0) {
+			if (forceInside) {
+				// Cmd+Shift+V: Always paste inside selected element
+				targetParentId = selectedElement.id;
+			} else if (selectedElement.children && selectedElement.children.length > 0) {
 				// Selected element has children -> paste as child
 				targetParentId = selectedElement.id;
 			} else {
@@ -1909,10 +1912,15 @@ export function setupKeyboardShortcuts(): (() => void) | undefined {
 			e.preventDefault();
 			cutElements();
 		}
-		// Cmd+V (paste)
-		else if ((e.metaKey || e.ctrlKey) && e.key === 'v' && !isTyping) {
+		// Cmd+Shift+V (paste inside - always paste as child of selected element)
+		else if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'v' && !isTyping) {
 			e.preventDefault();
-			pasteElements();
+			pasteElements(true); // Pass true to force paste inside
+		}
+		// Cmd+V (paste - smart paste based on selection)
+		else if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key === 'v' && !isTyping) {
+			e.preventDefault();
+			pasteElements(false);
 		}
 		// Cmd+D (duplicate)
 		else if ((e.metaKey || e.ctrlKey) && e.key === 'd' && !isTyping) {
