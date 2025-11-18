@@ -1,9 +1,9 @@
 <script lang="ts">
 	/**
-	 * LayersWindow - Hierarchical layers panel for elements
+	 * LayersWindow - Hierarchical layers panel for all canvas elements
 	 *
-	 * Shows:
-	 * - Tree view of all elements in current view
+	 * Shows all elements on the canvas (like Figma/Framer):
+	 * - Tree view of all root elements (no parent)
 	 * - Nested structure (children indented)
 	 * - Click to select element
 	 * - Eye icon to hide/show element
@@ -17,16 +17,15 @@
 	import LayerTreeItem from './LayerTreeItem.svelte';
 	import type { Element } from '$lib/types/events';
 
-	$: currentViewId = $designState.currentViewId;
-	$: currentView = currentViewId ? $designState.views[currentViewId] : null;
 	$: selectedIds = $designState.selectedElementIds;
 
-	// Get root elements in current view (elements with no parent or parent in different view)
-	$: rootElements = currentView
-		? Object.values($designState.elements)
-				.filter((el) => el.viewId === currentView.id && (!el.parentId || !$designState.elements[el.parentId]))
-				.sort((a, b) => b.zIndex - a.zIndex) // Sort by z-index descending (top to bottom)
-		: [];
+	// Get ALL root elements on the canvas (elements with no parent), sorted by z-index
+	// This shows the entire canvas like Figma, not just the current view
+	$: rootElements = Object.values($designState.elements)
+		.filter((el) => !el.parentId)
+		.sort((a, b) => b.zIndex - a.zIndex); // Sort by z-index descending (top to bottom)
+
+	$: hasElements = rootElements.length > 0;
 
 	function handleSelectElement(elementId: string) {
 		selectElement(elementId);
@@ -54,12 +53,7 @@
 	maxWidth={300}
 >
 	<div class="layers-panel">
-		{#if !currentView}
-			<div class="no-view">
-				<p>No view selected</p>
-				<p class="hint">Create or select a view to see layers</p>
-			</div>
-		{:else if rootElements.length === 0}
+		{#if !hasElements}
 			<div class="no-elements">
 				<p>No elements</p>
 				<p class="hint">Add elements to the canvas</p>
