@@ -808,6 +808,46 @@ Breakpoints generate media queries:
 - Applied to: spacing, sizing, typography line-height
 - Per-component override via `snapToBaseline` property
 
+### Div Container States & Drop Rules
+
+Div elements have three distinct states that control their container behavior:
+
+#### 1. Regular Div (Default)
+- **Properties**: `isView = false/undefined`, `autoLayout.enabled = false/undefined`
+- **Drag-in behavior**: ❌ Cannot accept dropped elements (blocked)
+- **Drag-out behavior**: ❌ Children cannot be dragged out (locked inside)
+- **Move children**: ✅ Only via cut (Cmd/Ctrl+X) and paste (Cmd/Ctrl+V)
+- **Use case**: Static container for grouped elements that should stay together
+
+#### 2. View Div (Page Breakpoint)
+- **Properties**: `isView = true`, has `viewName` and `breakpointWidth`
+- **Drag-in behavior**: ✅ Can accept dropped elements
+- **Drag-out behavior**: ✅ Children can be dragged out freely
+- **Move children**: ✅ Via drag or cut/paste
+- **Use case**: Page breakpoint/artboard representing different screen sizes
+
+#### 3. Auto-Layout Div (Flexbox Container)
+- **Properties**: `autoLayout.enabled = true`
+- **Drag-in behavior**: ✅ Can accept dropped elements
+- **Drag-out behavior**: ✅ Children can be dragged out freely
+- **Move children**: ✅ Via drag (with reordering) or cut/paste
+- **Special features**:
+  - Child reordering with visual ghost positioning
+  - Flexbox-based layout (direction, gap, alignment)
+  - Live preview of child positions during drag
+- **Use case**: Dynamic flex container with automatic child positioning
+
+#### Paste-Inside Shortcut
+- **Cmd/Ctrl+Shift+V**: Force paste inside selected element
+- Works with all container types (including regular divs)
+- Bypasses drag restrictions by directly setting parent relationship
+
+**Implementation Details**:
+- Drop detection happens in `findDropParentAtPosition()` function
+- Regular divs force elements to stay via early return when `isRegularDiv = true`
+- Views and auto-layout divs use boundary detection for natural drag behavior
+- Cut/paste operations bypass container restrictions (DOM manipulation, not drag)
+
 ---
 
 ## Future Features (Not in MVP)

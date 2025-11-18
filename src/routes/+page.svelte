@@ -13,6 +13,7 @@
 	import Canvas from '$lib/components/canvas/Canvas.svelte';
 	import Toolbar from '$lib/components/canvas/Toolbar.svelte';
 	import PropertiesWindow from '$lib/components/canvas/PropertiesWindow.svelte';
+	import LayersWindow from '$lib/components/canvas/LayersWindow.svelte';
 	import ShortcutsModal from '$lib/components/canvas/ShortcutsModal.svelte';
 	import { setupKeyboardShortcuts } from '$lib/stores/design-store';
 
@@ -57,6 +58,9 @@
 
 	<!-- Properties window -->
 	<PropertiesWindow />
+
+	<!-- Layers window -->
+	<LayersWindow />
 
 	<!-- Keyboard shortcuts modal -->
 	<ShortcutsModal isOpen={showShortcutsModal} onClose={closeShortcutsModal} />
