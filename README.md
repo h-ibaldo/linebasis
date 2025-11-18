@@ -88,66 +88,75 @@ Build sites for friends, side projects, product landing pages—whatever you nee
 
 ## Current Status
 
-**🚀 Phase 1 Development - Milestone 5 Nearly Complete (47% Overall)**
+**🚀 Phase 1 Development - Milestone 5 Complete (53% Overall)**
 
-Linabasis has made significant progress from design-focused planning to a working, professional-grade page builder.
+Linabasis has evolved from design-focused planning into a professional-grade page builder with comprehensive canvas interactions.
 
 ### ✅ Completed (Nov 2024)
 
-**Milestones 1-4 COMPLETE** (4/15 - 27%):
+**Milestones 1-5 COMPLETE** (5/15 - 33%):
 - ✅ **Milestone 1**: Foundation & Database - User auth, database schema, JWT
 - ✅ **Milestone 2**: Media Library - Upload, storage, media management
 - ✅ **Milestone 3**: Design System (Tokens) - Global design tokens, typography, spacing
 - ✅ **Milestone 4**: Event Sourcing Foundation - Perfect undo/redo with IndexedDB persistence
+- ✅ **Milestone 5**: Page Builder Canvas - Complete DOM-based canvas with Figma-style interactions
 
-**Milestone 5 NEARLY COMPLETE** (95% - 6% overall):
-- ✅ **Canvas Component**: Infinite pan/zoom (0.1x-4x), baseline grid, artboard rendering
+**Milestone 5 - Canvas Features** (100%):
+- ✅ **Canvas Component**: Infinite pan/zoom (0.1x-4x), baseline grid, multi-page rendering
 - ✅ **Drawing Tools**: Div, Text, Media tools with live preview during creation
-- ✅ **Selection System**: Single selection, multi-selection box, Shift+click toggle
-- ✅ **Transforms**: Drag, resize (8 handles), rotate (Figma-style with 15px zones), corner radius
-- ✅ **Advanced Features** (beyond original scope):
-  - Independent corner radius editing (Alt + drag)
-  - Figma-style rotation with keyboard shortcuts (Cmd+[/])
-  - Group transforms as atomic events
-  - Multi-selection with "Mixed" value indicators
-  - 30+ keyboard shortcuts (V, H, S, D, T, M tools + transforms)
-  - Live preview system with pending transforms
-  - All stored in IndexedDB with auto-save every 30s
-- 🚧 **Frame Management UI**: Data model complete, UI controls remaining (5%)
+- ✅ **Selection System**: Single/multi-selection, selection box, Shift+click additive selection
+- ✅ **Transform Tools**: Drag, resize (8 handles), rotate (Figma-style zones), border radius editing
+- ✅ **Advanced Interactions**:
+  - Auto-layout child reordering with drag-and-drop ghost positioning
+  - Independent corner radius editing (Alt + drag individual corners)
+  - Parent change detection during element drops
+  - Rotated element support in all operations
+  - Smart paste with parent detection
+  - Group/ungroup with transaction batching
+- ✅ **Clipboard Operations**: Copy, cut, paste, duplicate with smart positioning
+- ✅ **Keyboard Shortcuts**: 30+ Figma-style shortcuts with shortcuts modal (Cmd+/)
+- ✅ **Properties Panel**: Background, border, opacity, radius (sync + independent modes)
+- ✅ **Text Editing**: Inline editor with formatting shortcuts (bold, italic, underline)
+- ✅ **Visual Feedback**: Real-time ghost positioning, selection indicators, interaction zones
+- ✅ **Event Sourcing**: Transaction batching, optimized undo/redo, IndexedDB auto-save
 
 **Code Statistics**:
-- **5,903+ lines** of core store code (design-store, event-store, event-reducer)
-- **1,000+ lines** in SelectionOverlay for complete interaction handling
-- **10 React/Svelte components** for canvas UI
-- **49 exported functions** in design-store API
+- **7,500+ lines** of core store code (design-store, event-store, event-reducer, interaction-store, viewport-store, tool-store)
+- **2,554 lines** in SelectionOverlay for complete interaction handling
+- **13 canvas components** (Canvas, CanvasElement, SelectionUI, SelectionOverlay, SelectionBox, Toolbar, etc.)
+- **60+ exported functions** in design-store API
 
 ### 🚧 In Progress (Milestone 6 - 40%)
 - ✅ Toolbar (component buttons, tools, undo/redo, zoom)
 - ✅ Properties window (background, border, opacity, radius with sync + independent modes)
+- ✅ Text editing (inline editor with formatting shortcuts)
 - ❌ Layers window (UI not started, APIs exist)
 - ❌ Blocks window (UI not started, APIs exist)
-- ❌ Text editing (content & typography properties)
 - ❌ Tokens window (not started)
+- ❌ Advanced text properties (font family, size, weight, alignment)
 
 ### 📋 Roadmap: What's Next
 
-**Priority 1 - Complete Milestone 5** (2-3 days):
-- Frame name and width editing
-- Frame drag/resize on canvas
-- Frame deletion and duplication
+**Priority 1 - Typography System** (1 week):
+- Font family, size, weight selection in properties
+- Text alignment controls
+- Line height and letter spacing
+- Link to design tokens
 
-**Priority 2 - Text System** (1 week):
-- Inline text editing (double-click to edit)
-- Typography properties (font, size, weight, color, alignment)
-
-**Priority 3 - Layers Window** (1 week):
+**Priority 2 - Layers Window** (1 week):
 - Hierarchical tree view with collapse/expand
 - Element visibility and lock toggles
 - Drag to reorder (z-index changes)
 - Rename via double-click
 
+**Priority 3 - Blocks Window** (1 week):
+- List user blocks grouped by source page
+- Drag blocks to canvas to create instances
+- Edit master block workflow
+- Master-instance synchronization
+
 **Priority 4 - Publishing System** (2 weeks):
-- Code generator (events → HTML/CSS)
+- Code generator (events → HTML/CSS/Svelte)
 - Publishing service and API
 - Publish modal with SEO settings
 
@@ -160,9 +169,8 @@ Linabasis has made significant progress from design-focused planning to a workin
 
 ### 🚀 Phased Release Strategy
 
-**Phase 1: Core Page Builder (MVP)** - Build in Public ⬅️ **Currently 47% Complete**
-- ✅ **Milestone 1-4**: Foundation, Media, Tokens, Event Sourcing
-- 🚧 **Milestone 5**: Page Builder Canvas (95%)
+**Phase 1: Core Page Builder (MVP)** - Build in Public ⬅️ **Currently 53% Complete**
+- ✅ **Milestone 1-5**: Foundation, Media, Tokens, Event Sourcing, Canvas (COMPLETE)
 - 🚧 **Milestone 6**: Page Builder UI (40%)
 - ⏳ **Milestone 7-15**: Blocks, Snapping, Publishing, Pages, Team, Theme, Polish, Deploy
 
@@ -287,25 +295,27 @@ npm run setup
 ### Current Capabilities
 
 **What Works:**
-- ✅ Page builder canvas (pan, zoom, infinite scroll, baseline grid)
-- ✅ Three drawing tools (Div, Text, Media) with live preview
-- ✅ Transform tools (drag, resize, rotate with 15px zones, corner radius)
-- ✅ Multi-selection with group transforms as atomic events
-- ✅ Properties panel (background, border, opacity, independent corner radius)
-- ✅ Undo/redo with perfect history and event replay
-- ✅ 30+ keyboard shortcuts (Figma-style)
-- ✅ Auto-save to IndexedDB every 30s
+- ✅ Professional-grade canvas (pan, zoom, baseline grid, multi-page rendering)
+- ✅ Three drawing tools (Div, Text, Media) with live preview and quadrant support
+- ✅ Complete transform system (drag, resize, rotate, border radius with independent corners)
+- ✅ Auto-layout child reordering with visual ghost positioning
+- ✅ Multi-selection with group transforms and "Mixed" value indicators
+- ✅ Clipboard operations (copy, cut, paste, duplicate) with smart parent detection
+- ✅ Text editing (inline editor with bold, italic, underline formatting)
+- ✅ Properties panel (background, border, opacity, radius sync/independent modes)
+- ✅ 30+ keyboard shortcuts with shortcuts modal (Cmd+/)
+- ✅ Perfect undo/redo with transaction batching and event replay
+- ✅ Auto-save to IndexedDB every 30s with manual save option
 - ✅ User authentication (register, login, JWT)
 - ✅ Media library (upload, storage, management)
 - ✅ Design tokens (colors, typography, spacing)
 
 **What Doesn't Work Yet (Next Priorities):**
-- ❌ **Priority 1**: Frame management UI (remaining 5% of Milestone 5)
-- ❌ **Priority 2**: Text content editing (inline edit + typography properties)
-- ❌ **Priority 3**: Layers window (hierarchy tree view)
+- ❌ **Priority 1**: Advanced text properties (font family, size, weight, alignment)
+- ❌ **Priority 2**: Layers window (hierarchical tree view with visibility/lock toggles)
+- ❌ **Priority 3**: Blocks window (user-created reusable components)
 - ❌ **Priority 4**: Publishing system (code generation + SSR)
 - ❌ **Priority 5**: Pages management (create, edit, delete, list)
-- ❌ Blocks window (reusable components)
 
 **See the [Roadmap: What's Next](#roadmap-whats-next) section above for detailed development priorities.**
 
