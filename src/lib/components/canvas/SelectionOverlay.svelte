@@ -82,6 +82,18 @@
 		// Elements can only leave their parent when moved completely beyond the parent's boundaries
 		if (originalParentId && state.elements[originalParentId]) {
 			const originalParent = state.elements[originalParentId];
+
+			// CRITICAL: Elements CANNOT be dragged out of regular divs (non-view, non-auto-layout)
+			// They can only leave via cut/paste operations
+			const isView = originalParent.isView === true;
+			const isAutoLayout = originalParent.autoLayout?.enabled === true;
+			const isRegularDiv = !isView && !isAutoLayout;
+
+			if (isRegularDiv) {
+				// Force element to stay in regular div - cannot drag out
+				return originalParentId;
+			}
+
 			const parentAbsPos = getAbsolutePosition(originalParent);
 			const parentLeft = parentAbsPos.x;
 			const parentRight = parentAbsPos.x + originalParent.size.width;
