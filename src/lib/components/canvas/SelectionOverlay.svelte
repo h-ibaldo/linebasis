@@ -23,6 +23,20 @@
 	export let selectedElements: Element[];
 	export let isPanning: boolean = false;
 
+	// Event listener cleanup registry to prevent memory leaks
+	// Stores cleanup functions for all active event listeners
+	const cleanupFunctions: Array<() => void> = [];
+
+	// Helper to register event listeners with automatic cleanup
+	function addTrackedEventListener<K extends keyof DocumentEventMap>(
+		target: EventTarget,
+		event: K,
+		handler: (event: DocumentEventMap[K]) => void
+	) {
+		target.addEventListener(event, handler as EventListener);
+		cleanupFunctions.push(() => target.removeEventListener(event, handler as EventListener));
+	}
+
 	// Local interaction state
 	let activeElementId: string | null = null;
 	let interactionMode: 'idle' | 'dragging' | 'resizing' | 'rotating' | 'radius' = 'idle';
@@ -36,6 +50,18 @@
 	let pendingRadius: number | null = null;
 	let rotationStartAngle: number = 0; // Initial angle at rotation start
 	let elementStartRotation: number = 0; // Element's rotation at start
+	let rotationReferenceCorner: 'nw' | 'ne' | 'se' | 'sw' = 'ne'; // Which corner to align with cursor during rotation
+	let rotationInitialOffset: number = 0; // Initial angular offset between cursor and corner to prevent jump
+
+	// Debug visualization for rotation
+	let debugCenter: { x: number; y: number } | null = null;
+	let debugCorner: { x: number; y: number } | null = null;
+	let debugCursor: { x: number; y: number } | null = null;
+	let debugCenterAngle: number = 0;
+	let debugCornerAngle: number = 0;
+	let debugCursorAngle: number = 0;
+	let debugCornerBaseAngle: number = 0;
+	let debugTargetRotation: number = 0;
 	let radiusCorner: 'nw' | 'ne' | 'se' | 'sw' | null = null; // Which corner is being adjusted
 	let radiusStartDistance: number = 0; // Initial distance from corner at drag start
 	let radiusInitialValue: number = 0; // Initial radius value at drag start
@@ -55,6 +81,50 @@
 	let reorderElementRotation: number = 0; // Rotation of element being reordered
 	let reorderElementSize: { width: number; height: number } = { width: 0, height: 0 }; // Size of element being reordered
 	let currentMouseScreen: { x: number; y: number } = { x: 0, y: 0 }; // Current mouse position for debug
+
+	// Screen-space debug helpers for rotation visualization (account for canvas DOM offset)
+	let debugCenterScreen: { x: number; y: number } | null = null;
+	let debugCornerScreen: { x: number; y: number } | null = null;
+	let debugCursorScreen: { x: number; y: number } | null = null;
+
+	$: {
+		if (interactionMode === 'rotating' && debugCenter && debugCorner) {
+			const canvasElement = document.querySelector('.canvas') as HTMLElement | null;
+			if (canvasElement) {
+				const canvasRect = canvasElement.getBoundingClientRect();
+
+				// Center and corner: convert from canvas-space (debugCenter/debugCorner) to screen-space
+				debugCenterScreen = {
+					x: canvasRect.left + viewport.x + debugCenter.x * viewport.scale,
+					y: canvasRect.top + viewport.y + debugCenter.y * viewport.scale
+				};
+
+				debugCornerScreen = {
+					x: canvasRect.left + viewport.x + debugCorner.x * viewport.scale,
+					y: canvasRect.top + viewport.y + debugCorner.y * viewport.scale
+				};
+
+				// Cursor: use actual OS cursor position directly (already in screen space)
+				debugCursorScreen = {
+					x: currentMouseScreen.x,
+					y: currentMouseScreen.y
+				};
+			} else {
+				debugCenterScreen = debugCornerScreen = debugCursorScreen = null;
+			}
+		} else {
+			debugCenterScreen = debugCornerScreen = debugCursorScreen = null;
+		}
+	}
+
+	// Note: DOM reordering during drag has been disabled as it causes flashing issues
+	// and is no longer needed with the new drop restrictions (views/auto-layout only).
+	// The visual stacking is handled by CSS z-index and position: absolute, which works
+	// correctly without DOM manipulation.
+	//
+	// Previous behavior: Temporarily moved dragged element above droppable target if behind
+	// Problem: Caused constant DOM reordering and flashing when dragging
+	// Solution: Removed DOM manipulation - rely on CSS positioning instead
 
 	// Parent change detection during drag (for dragging elements out of/into divs)
 	let potentialDropParentId: string | null = null; // Element being hovered over that could become new parent
@@ -76,71 +146,93 @@
 		if (!draggedElement) return null;
 
 		// Container types that can accept children
+		// Note: divs have special restrictions - only views or auto-layout divs can accept drops
 		const containerTypes = ['div', 'section', 'header', 'footer', 'article', 'aside', 'nav', 'main'];
 
-		// IMPORTANT: Check if element is still within its original parent's boundaries
-		// Elements can only leave their parent when moved completely beyond the parent's boundaries
+		// Get visual boundaries from DOM for accurate containment checking
+		const canvasElement = document.querySelector('.canvas') as HTMLElement | null;
+		const canvasRect = canvasElement?.getBoundingClientRect();
+		if (!canvasRect) return null;
+
+		// Get dragged element's visual bounding box from DOM
+		const draggedDomElement = document.querySelector(`[data-element-id="${draggedElementId}"]`);
+		if (!draggedDomElement) return null;
+		const draggedRect = draggedDomElement.getBoundingClientRect();
+		
+		// Convert to canvas space
+		const draggedVisualLeft = (draggedRect.left - canvasRect.left - viewport.x) / viewport.scale;
+		const draggedVisualRight = (draggedRect.right - canvasRect.left - viewport.x) / viewport.scale;
+		const draggedVisualTop = (draggedRect.top - canvasRect.top - viewport.y) / viewport.scale;
+		const draggedVisualBottom = (draggedRect.bottom - canvasRect.top - viewport.y) / viewport.scale;
+
+		// IMPORTANT: Check if element is still within its original parent's visual boundaries
+		// Use rotated rectangle check instead of bounding box for accurate detection
 		if (originalParentId && state.elements[originalParentId]) {
 			const originalParent = state.elements[originalParentId];
 
-			// CRITICAL: Elements CANNOT be dragged out of regular divs (non-view, non-auto-layout)
-			// They can only leave via cut/paste operations
-			const isView = originalParent.isView === true;
-			const isAutoLayout = originalParent.autoLayout?.enabled === true;
-			const isRegularDiv = !isView && !isAutoLayout;
+			// When checking if element should stay in CURRENT parent during drag,
+			// we DON'T apply drop restrictions - elements can stay in any container
+			// Drop restrictions only apply when finding a NEW parent below
+			if (containerTypes.includes(originalParent.type)) {
+				const parentRotation = getDisplayRotation(originalParent);
+				const parentRotationRad = parentRotation * (Math.PI / 180);
+				const parentAbsPos = getAbsolutePosition(originalParent);
+
+				// Parent's center in canvas space
+				const parentCenterX = parentAbsPos.x + originalParent.size.width / 2;
+				const parentCenterY = parentAbsPos.y + originalParent.size.height / 2;
+
+				// Check if ANY corner of dragged element is inside the rotated parent
+				const elementCorners = [
+					{ x: draggedVisualLeft, y: draggedVisualTop },      // Top-left
+					{ x: draggedVisualRight, y: draggedVisualTop },     // Top-right
+					{ x: draggedVisualRight, y: draggedVisualBottom },  // Bottom-right
+					{ x: draggedVisualLeft, y: draggedVisualBottom }    // Bottom-left
+				];
+
+				let anyCornerInside = false;
+				for (const corner of elementCorners) {
+					// Transform corner to parent's local coordinate system
+					const relX = corner.x - parentCenterX;
+					const relY = corner.y - parentCenterY;
+
+					const cos = Math.cos(-parentRotationRad);
+					const sin = Math.sin(-parentRotationRad);
+					const localX = relX * cos - relY * sin;
+					const localY = relX * sin + relY * cos;
+
+					// Check if corner is inside parent's bounds
+					const halfWidth = originalParent.size.width / 2;
+					const halfHeight = originalParent.size.height / 2;
+
+					if (localX > -halfWidth && localX < halfWidth && localY > -halfHeight && localY < halfHeight) {
+						anyCornerInside = true;
+						break;
+					}
+				}
+
+				// If ANY corner is still within original parent, keep the original parent
+				if (anyCornerInside) {
+					return originalParentId;
+				}
+
+			// Special rule for regular divs (not views, not auto-layout):
+			// Children cannot be dragged out - they're locked inside
+			// The only way to remove them is via copy/cut and paste outside
+			const isRegularDiv = originalParent.type === 'div' &&
+				!originalParent.isView &&
+				!originalParent.autoLayout?.enabled;
 
 			if (isRegularDiv) {
-				// Force element to stay in regular div - cannot drag out
+				// Force element to stay in parent even if all corners are outside
 				return originalParentId;
 			}
-
-			const parentAbsPos = getAbsolutePosition(originalParent);
-			const parentLeft = parentAbsPos.x;
-			const parentRight = parentAbsPos.x + originalParent.size.width;
-			const parentTop = parentAbsPos.y;
-			const parentBottom = parentAbsPos.y + originalParent.size.height;
-
-			const elementLeft = elementX;
-			const elementRight = elementX + elementWidth;
-			const elementTop = elementY;
-			const elementBottom = elementY + elementHeight;
-
-			// Check if ANY part of the element is still within the original parent's boundaries
-			const isStillWithinOriginalParent = !(
-				elementRight < parentLeft ||   // Completely to the left
-				elementLeft > parentRight ||    // Completely to the right
-				elementBottom < parentTop ||    // Completely above
-				elementTop > parentBottom       // Completely below
-			);
-
-			// If still within original parent boundaries, keep the original parent
-			if (isStillWithinOriginalParent) {
-				return originalParentId;
 			}
-
 		}
 
 		// Element has moved beyond its original parent (or had no parent)
 		// Now find overlapping containers to determine the new parent
-		const overlappingContainers: Array<{ element: Element; arrayIndex: number }> = [];
-
-		// Build a map of element IDs to their array positions
-		// For root elements, use view.elements array
-		// For nested elements, use parent.children array
-		const getArrayPosition = (el: Element): number => {
-			if (el.parentId) {
-				const parent = state.elements[el.parentId];
-				if (parent) {
-					return parent.children.indexOf(el.id);
-				}
-			} else {
-				const view = state.views[el.viewId];
-				if (view) {
-					return view.elements.indexOf(el.id);
-				}
-			}
-			return -1;
-		};
+		const overlappingContainers: Element[] = [];
 
 		for (const elementId in state.elements) {
 			const element = state.elements[elementId];
@@ -154,45 +246,69 @@
 			// Only consider container elements as potential parents
 			if (!containerTypes.includes(element.type)) continue;
 
-			// IMPORTANT: Only allow dropping into views OR auto-layout divs
-			// Regular divs cannot accept children (Figma-style behavior)
-			const isView = element.isView === true;
-			const isAutoLayout = element.autoLayout?.enabled === true;
-			if (!isView && !isAutoLayout) continue;
+			// Special restriction for divs: only allow drops into views or auto-layout divs
+			// This prevents the unnatural HTML behavior of arbitrary nesting
+			if (element.type === 'div') {
+				const isView = element.isView === true;
+				const hasAutoLayout = element.autoLayout?.enabled === true;
 
-			// Check if the dragged element's bounds overlap with this container's bounds
-			const absPos = getAbsolutePosition(element);
-			const containerLeft = absPos.x;
-			const containerRight = absPos.x + element.size.width;
-			const containerTop = absPos.y;
-			const containerBottom = absPos.y + element.size.height;
+				// Skip this div if it's not a view and doesn't have auto layout
+				if (!isView && !hasAutoLayout) {
+					continue;
+				}
+			}
 
-			const elementLeft = elementX;
-			const elementRight = elementX + elementWidth;
-			const elementTop = elementY;
-			const elementBottom = elementY + elementHeight;
-
-			// Check for complete containment (element must be 100% inside container)
-			const isFullyContained = (
-				elementLeft >= containerLeft &&
-				elementRight <= containerRight &&
-				elementTop >= containerTop &&
-				elementBottom <= containerBottom
-			);
+			// Check containment using actual rotated rectangle, not bounding box
+			// Get container's stored position and rotation
+			const containerAbsPos = getAbsolutePosition(element);
+			const containerRotation = getDisplayRotation(element);
+			const containerRotationRad = containerRotation * (Math.PI / 180);
+			
+			// Container's center in canvas space
+			const containerCenterX = containerAbsPos.x + element.size.width / 2;
+			const containerCenterY = containerAbsPos.y + element.size.height / 2;
+			
+			// Check if all four corners of dragged element's bounding box are inside the rotated container
+			// Transform each corner to container's local coordinate system and check bounds
+			const elementCorners = [
+				{ x: draggedVisualLeft, y: draggedVisualTop },      // Top-left
+				{ x: draggedVisualRight, y: draggedVisualTop },     // Top-right
+				{ x: draggedVisualRight, y: draggedVisualBottom }, // Bottom-right
+				{ x: draggedVisualLeft, y: draggedVisualBottom }    // Bottom-left
+			];
+			
+			let allCornersInside = true;
+			for (const corner of elementCorners) {
+				// Transform corner to container's local coordinate system (rotate by -containerRotation)
+				const relX = corner.x - containerCenterX;
+				const relY = corner.y - containerCenterY;
+				
+				const cos = Math.cos(-containerRotationRad);
+				const sin = Math.sin(-containerRotationRad);
+				const localX = relX * cos - relY * sin;
+				const localY = relX * sin + relY * cos;
+				
+				// Check if corner is inside container's bounds (with strict boundaries)
+				const halfWidth = element.size.width / 2;
+				const halfHeight = element.size.height / 2;
+				
+				if (!(localX > -halfWidth && localX < halfWidth && localY > -halfHeight && localY < halfHeight)) {
+					allCornersInside = false;
+					break;
+				}
+			}
+			
+			const isFullyContained = allCornersInside;
 
 			if (isFullyContained) {
-				overlappingContainers.push({
-					element,
-					arrayIndex: getArrayPosition(element)
-				});
+				overlappingContainers.push(element);
 			}
 		}
 
-		// Sort by array index (highest first = topmost layer)
-		// Higher array index means rendered later = appears on top
-		overlappingContainers.sort((a, b) => b.arrayIndex - a.arrayIndex);
+		// Sort by z-index (highest first) to get topmost container
+		overlappingContainers.sort((a, b) => (b.zIndex || 0) - (a.zIndex || 0));
 
-		const result = overlappingContainers.length > 0 ? overlappingContainers[0].element.id : null;
+		const result = overlappingContainers.length > 0 ? overlappingContainers[0].id : null;
 
 		// Return the topmost overlapping container (or null to drop at root)
 		return result;
@@ -365,13 +481,16 @@
 			pendingRadius,
 			pendingCornerRadii: cornerRadii,
 			groupTransforms: groupPendingTransforms,
-			editingElementId: null // SelectionOverlay doesn't handle text editing
+			editingElementId: null, // SelectionOverlay doesn't handle text editing
+			hiddenDuringTransition: $interactionState.hiddenDuringTransition // Preserve during reactive updates
 		});
 	}
 
 	// Drag start tracking
 	let dragStartScreen = { x: 0, y: 0 };
 	let elementStartCanvas = { x: 0, y: 0, width: 0, height: 0 };
+	let dragOffsetCanvas = { x: 0, y: 0 }; // Offset from cursor to element's top-left at drag start
+	let rotationStartCenter: { x: number; y: number; screenX: number; screenY: number } | null = null; // Fixed center at rotation start (for child elements)
 	let groupStartElements: Array<{ id: string; x: number; y: number; width: number; height: number; rotation: number }> = [];
 	let hasMovedPastThreshold = false; // Track if we've moved past the initial dead zone
 	let initialHandlePosition: Point | null = null; // The ideal position of the handle being dragged at start
@@ -379,11 +498,19 @@
 
 	/**
 	 * Normalize rotation angle to -180 to 180 degree range
-	 * Uses modulo operator for efficiency instead of while loops
+	 * Properly handles negative angles
 	 */
 	function normalizeRotation(rotation: number): number {
-		// Shift to 0-360 range, then back to -180 to 180
-		return ((rotation + 180) % 360) - 180;
+		// First normalize to 0-360 range
+		let normalized = rotation % 360;
+
+		// Handle negative modulo results (JavaScript preserves sign in modulo)
+		if (normalized < 0) normalized += 360;
+
+		// Convert to -180 to 180 range
+		if (normalized > 180) normalized -= 360;
+
+		return normalized;
 	}
 
 	// Calculate bounding box for multiple elements
@@ -817,6 +944,26 @@
 		return element.rotation || 0;
 	}
 
+	/**
+	 * Get all ancestors of an element (from root to immediate parent)
+	 * Returns array ordered from root ancestor to immediate parent
+	 */
+	function getAllAncestors(element: Element): Element[] {
+		const state = get(designState);
+		const ancestors: Element[] = [];
+		
+		let currentElement: Element | null = element;
+		while (currentElement?.parentId) {
+			const parent = state.elements[currentElement.parentId];
+			if (!parent) break;
+			ancestors.push(parent);
+			currentElement = parent;
+		}
+		
+		// Reverse to get order from root to immediate parent
+		return ancestors.reverse();
+	}
+
 	// Start group interaction (for multi-selection)
 	function startGroupInteraction(e: MouseEvent, handle?: string) {
 		const tool = get(currentTool);
@@ -840,6 +987,7 @@
 			};
 
 			const handleClick = (upEvent: MouseEvent) => {
+				// Remove from cleanup registry when manually cleaned up
 				document.removeEventListener('mousemove', checkMove);
 				document.removeEventListener('mouseup', handleClick);
 
@@ -935,8 +1083,9 @@
 			e.stopPropagation();
 			e.preventDefault();
 
-			document.addEventListener('mousemove', checkMove);
-			document.addEventListener('mouseup', handleClick);
+			// Use tracked listeners to ensure cleanup on component unmount
+			addTrackedEventListener(document, 'mousemove', checkMove);
+			addTrackedEventListener(document, 'mouseup', handleClick);
 			return;
 		}
 
@@ -970,24 +1119,63 @@
 			height: unrotatedBounds.height
 		};
 
-		if (handle === 'rotate') {
+		if (handle?.startsWith('rotate')) {
 			// Rotation mode
 			interactionMode = 'rotating';
+			
+			// Initialize mouse screen position for debug overlay
+			currentMouseScreen = { x: e.clientX, y: e.clientY };
 
-			// Calculate center point of selection
+			// Extract corner from handle (e.g., 'rotate-nw' -> 'nw')
+			if (handle.includes('-')) {
+				rotationReferenceCorner = handle.split('-')[1] as 'nw' | 'ne' | 'se' | 'sw';
+			}
+
+			// Calculate center point of selection in canvas space
 			const centerX = elementStartCanvas.x + elementStartCanvas.width / 2;
 			const centerY = elementStartCanvas.y + elementStartCanvas.height / 2;
 
-			// Convert mouse position to canvas space
-			const mouseCanvasX = (e.clientX - viewport.x) / viewport.scale;
-			const mouseCanvasY = (e.clientY - viewport.y) / viewport.scale;
+			// Get canvas rect for screen-space conversion
+			const canvasElement = document.querySelector('.canvas') as HTMLElement | null;
+			const canvasRect = canvasElement?.getBoundingClientRect();
 
-			// Calculate initial angle
-			rotationStartAngle = Math.atan2(mouseCanvasY - centerY, mouseCanvasX - centerX) * (180 / Math.PI);
+			// Convert center to screen space (matches how SelectionUI renders center)
+			const centerScreenX = canvasRect
+				? canvasRect.left + viewport.x + centerX * viewport.scale
+				: centerX;
+			const centerScreenY = canvasRect
+				? canvasRect.top + viewport.y + centerY * viewport.scale
+				: centerY;
+
+			// Calculate initial angle from center to cursor in SCREEN space
+			// (angles are preserved under translate+scale, so this matches canvas-space geometry)
+			rotationStartAngle = Math.atan2(e.clientY - centerScreenY, e.clientX - centerScreenX) * (180 / Math.PI);
 
 			// Store current rotation of first element (for groups, we'll rotate all together)
 			elementStartRotation = selectedElements[0].rotation || 0;
 			pendingRotation = elementStartRotation;
+
+			// Calculate corner base angle (in local/unrotated space)
+			const cornerOffsets = {
+				nw: { x: -elementStartCanvas.width / 2, y: -elementStartCanvas.height / 2 },
+				ne: { x: elementStartCanvas.width / 2, y: -elementStartCanvas.height / 2 },
+				se: { x: elementStartCanvas.width / 2, y: elementStartCanvas.height / 2 },
+				sw: { x: -elementStartCanvas.width / 2, y: elementStartCanvas.height / 2 }
+			};
+			const cornerOffset = cornerOffsets[rotationReferenceCorner];
+			const cornerBaseAngle = Math.atan2(cornerOffset.y, cornerOffset.x) * (180 / Math.PI);
+
+			// Calculate initial offset to prevent jump
+			// For groups, check if all elements share the same parent rotation
+			const state_for_parent = get(designState);
+			let parentRotation = 0;
+			if (selectedElements.length > 0) {
+				const firstElement = selectedElements[0];
+				const parent_at_start = firstElement.parentId ? state_for_parent.elements[firstElement.parentId] : null;
+				parentRotation = parent_at_start ? (parent_at_start.rotation || 0) : 0;
+			}
+			// Corner's visual angle = cornerBaseAngle + elementRotation + parentRotation
+			rotationInitialOffset = rotationStartAngle - (cornerBaseAngle + elementStartRotation + parentRotation);
 		} else {
 			// Resize mode
 			interactionMode = 'resizing';
@@ -1045,24 +1233,180 @@
 			height: size.height
 		};
 
-		if (handle === 'rotate') {
+		if (handle?.startsWith('rotate')) {
 			// Rotation mode
 			interactionMode = 'rotating';
+			
+			// Initialize mouse screen position for debug overlay
+			currentMouseScreen = { x: e.clientX, y: e.clientY };
 
-			// Calculate center point
-			const centerX = pos.x + size.width / 2;
-			const centerY = pos.y + size.height / 2;
+			// Extract corner from handle (e.g., 'rotate-nw' -> 'nw')
+			if (handle.includes('-')) {
+				rotationReferenceCorner = handle.split('-')[1] as 'nw' | 'ne' | 'se' | 'sw';
+			}
 
-			// Convert mouse position to canvas space
-			const mouseCanvasX = (e.clientX - viewport.x) / viewport.scale;
-			const mouseCanvasY = (e.clientY - viewport.y) / viewport.scale;
+			// Get canvas rect for screen-space conversion
+			const canvasElement = document.querySelector('.canvas') as HTMLElement | null;
+			const canvasRect = canvasElement?.getBoundingClientRect();
 
-			// Calculate initial angle
-			rotationStartAngle = Math.atan2(mouseCanvasY - centerY, mouseCanvasX - centerX) * (180 / Math.PI);
+			// For child elements, get actual DOM center to account for parent rotation
+			// For root elements, use calculated center
+			let centerX: number, centerY: number;
+			let centerScreenX: number, centerScreenY: number;
+			
+			if (element.parentId && canvasRect) {
+				// Child element: get actual center from DOM (accounts for parent rotation)
+				const domElement = document.querySelector(`[data-element-id="${element.id}"]`);
+				if (domElement) {
+					const rect = domElement.getBoundingClientRect();
+					// Center of bounding box is the element's center (rotation is around center)
+					const domCenterScreenX = rect.left + rect.width / 2;
+					const domCenterScreenY = rect.top + rect.height / 2;
+					
+					// Convert to canvas space
+					centerX = (domCenterScreenX - canvasRect.left - viewport.x) / viewport.scale;
+					centerY = (domCenterScreenY - canvasRect.top - viewport.y) / viewport.scale;
+					
+					// Screen space is just the DOM center
+					centerScreenX = domCenterScreenX;
+					centerScreenY = domCenterScreenY;
+				} else {
+					// Fallback: use calculated center
+					centerX = pos.x + size.width / 2;
+					centerY = pos.y + size.height / 2;
+					centerScreenX = canvasRect.left + viewport.x + centerX * viewport.scale;
+					centerScreenY = canvasRect.top + viewport.y + centerY * viewport.scale;
+				}
+			} else {
+				// Root element: use calculated center
+				centerX = pos.x + size.width / 2;
+				centerY = pos.y + size.height / 2;
+				centerScreenX = canvasRect
+					? canvasRect.left + viewport.x + centerX * viewport.scale
+					: centerX;
+				centerScreenY = canvasRect
+					? canvasRect.top + viewport.y + centerY * viewport.scale
+					: centerY;
+			}
+
+			// Also store mouse position in canvas space for debugging
+			const mouseCanvasX = canvasRect
+				? (e.clientX - canvasRect.left - viewport.x) / viewport.scale
+				: (e.clientX - viewport.x) / viewport.scale;
+			const mouseCanvasY = canvasRect
+				? (e.clientY - canvasRect.top - viewport.y) / viewport.scale
+				: (e.clientY - viewport.y) / viewport.scale;
+
+			// Store fixed center for use during rotation move (prevents inconsistencies)
+			rotationStartCenter = {
+				x: centerX,
+				y: centerY,
+				screenX: centerScreenX,
+				screenY: centerScreenY
+			};
+
+			// Calculate initial angle from center to cursor in SCREEN space
+			// (angles are preserved under translate+scale, so this matches canvas-space geometry)
+			rotationStartAngle = Math.atan2(e.clientY - centerScreenY, e.clientX - centerScreenX) * (180 / Math.PI);
 
 			// Store current rotation
 			elementStartRotation = element.rotation || 0;
 			pendingRotation = elementStartRotation;
+
+			// Calculate corner base angle (in local/unrotated space)
+			const cornerOffsets = {
+				nw: { x: -size.width / 2, y: -size.height / 2 },
+				ne: { x: size.width / 2, y: -size.height / 2 },
+				se: { x: size.width / 2, y: size.height / 2 },
+				sw: { x: -size.width / 2, y: size.height / 2 }
+			};
+			const cornerOffset = cornerOffsets[rotationReferenceCorner];
+			const cornerBaseAngle = Math.atan2(cornerOffset.y, cornerOffset.x) * (180 / Math.PI);
+
+			// Calculate initial offset to prevent jump
+			// For child elements with rotated parents, we need to apply rotations in correct order
+			const state_for_parent = get(designState);
+			const parent_at_start = element.parentId ? state_for_parent.elements[element.parentId] : null;
+			const parentRotation = parent_at_start ? (parent_at_start.rotation || 0) : 0;
+			
+			// Calculate actual visual corner angle at rotation start
+			// For child elements with rotated parents, apply rotations in order:
+			// 1. First rotate corner offset by element rotation (in element's local space)
+			// 2. Then transform by parent rotation (in parent's coordinate system)
+			const elementRotationRad = elementStartRotation * (Math.PI / 180);
+			const parentRotationRad = parentRotation * (Math.PI / 180);
+			
+			// Step 1: Rotate corner offset by element rotation
+			const elementRotatedCornerX = cornerOffset.x * Math.cos(elementRotationRad) - cornerOffset.y * Math.sin(elementRotationRad);
+			const elementRotatedCornerY = cornerOffset.x * Math.sin(elementRotationRad) + cornerOffset.y * Math.cos(elementRotationRad);
+			
+			// Step 2: Transform by parent rotation (if parent is rotated)
+			let rotatedCornerX: number, rotatedCornerY: number;
+			if (parentRotation !== 0) {
+				rotatedCornerX = elementRotatedCornerX * Math.cos(parentRotationRad) - elementRotatedCornerY * Math.sin(parentRotationRad);
+				rotatedCornerY = elementRotatedCornerX * Math.sin(parentRotationRad) + elementRotatedCornerY * Math.cos(parentRotationRad);
+			} else {
+				rotatedCornerX = elementRotatedCornerX;
+				rotatedCornerY = elementRotatedCornerY;
+			}
+			
+			// Add to center to get actual corner position
+			const cornerWorldX = centerX + rotatedCornerX;
+			const cornerWorldY = centerY + rotatedCornerY;
+			
+			// Calculate actual visual angle from center to rotated corner
+			const actualCornerAngleAtStart = Math.atan2(cornerWorldY - centerY, cornerWorldX - centerX) * (180 / Math.PI);
+			
+			// Initial offset = difference between cursor angle and actual visual corner angle
+			rotationInitialOffset = rotationStartAngle - actualCornerAngleAtStart;
+
+			// Get element's actual DOM center for comparison
+			const domElement = document.querySelector(`[data-element-id="${element.id}"]`);
+			let actualDOMCenter = { x: 0, y: 0 };
+			if (domElement && canvasElement) {
+				const rect = domElement.getBoundingClientRect();
+				const canvasRect = canvasElement.getBoundingClientRect();
+				// For rotated elements, getBoundingClientRect gives bounding box
+				// The center of the bounding box IS the element's center (rotation is around center)
+				actualDOMCenter.x = (rect.left + rect.width / 2 - canvasRect.left - viewport.x) / viewport.scale;
+				actualDOMCenter.y = (rect.top + rect.height / 2 - canvasRect.top - viewport.y) / viewport.scale;
+			}
+
+			// CONSOLE LOG: Rotation start
+			console.group('🎬 ROTATION START');
+			console.log('📦 Element STORED position:', element.position);
+			console.log('📦 Element STORED size:', element.size);
+			console.log('📦 Element DISPLAY position (from getDisplayPosition):', pos);
+			console.log('📦 Element DISPLAY size (from getDisplaySize):', size);
+			console.log('📍 Center (calculated from display pos + size/2):', { x: centerX, y: centerY });
+			console.log('📍 Center (if calculated from stored pos + stored size/2):', {
+				x: element.position.x + element.size.width / 2,
+				y: element.position.y + element.size.height / 2
+			});
+			console.log('📍 Center (ACTUAL from DOM getBoundingClientRect):', actualDOMCenter);
+			console.log('❌ Center ERROR (calculated - actual):', {
+				x: (centerX - actualDOMCenter.x).toFixed(2),
+				y: (centerY - actualDOMCenter.y).toFixed(2)
+			});
+			console.log('🔄 Element rotation:', element.rotation || 0, '°');
+			console.log('📐 Corner offset (local):', cornerOffset);
+			console.log('📐 Corner base angle:', cornerBaseAngle.toFixed(2), '°');
+			console.log('🔴 Cursor start position:', { x: mouseCanvasX.toFixed(2), y: mouseCanvasY.toFixed(2) });
+			console.log('🔴 Cursor start angle:', rotationStartAngle.toFixed(2), '°');
+			console.log('🎯 Element start rotation:', elementStartRotation.toFixed(2), '°');
+			console.log('🎯 Calculated initial offset:', rotationInitialOffset.toFixed(2), '°');
+			console.log('📏 Reference corner:', rotationReferenceCorner.toUpperCase());
+
+			// Check if element is in auto layout
+			const state_check = get(designState);
+			const parent_check = element.parentId ? state_check.elements[element.parentId] : null;
+			const parentRotation_check = parent_check ? (parent_check.rotation || 0) : 0;
+			console.log('👪 Parent:', parent_check ? parent_check.id : 'none');
+			console.log('👪 Parent rotation:', parentRotation_check, '°');
+			console.log('🔲 Parent has auto layout:', parent_check?.autoLayout?.enabled || false);
+			console.log('🚫 Element ignores auto layout:', element.autoLayout?.ignoreAutoLayout || false);
+			console.log('⚠️  TOTAL rotation (element + parent):', (elementStartRotation + parentRotation_check).toFixed(2), '°');
+			console.groupEnd();
 		} else if (handle?.startsWith('radius-')) {
 			// Corner radius mode
 			interactionMode = 'radius';
@@ -1302,6 +1646,31 @@
 				// Single element drag
 				pendingPosition = { ...pos };
 
+				// Calculate and store offset from cursor to element's center at drag start
+				// For rotated elements, we use center because getBoundingClientRect gives bounding box, not element origin
+				const canvasElement = document.querySelector('.canvas') as HTMLElement | null;
+				const canvasRect = canvasElement?.getBoundingClientRect();
+				const elementDom = document.querySelector(`[data-element-id="${element.id}"]`) as HTMLElement | null;
+				if (canvasRect && elementDom) {
+					const cursorCanvasX = (e.clientX - canvasRect.left - viewport.x) / viewport.scale;
+					const cursorCanvasY = (e.clientY - canvasRect.top - viewport.y) / viewport.scale;
+
+					// For rotated elements, getBoundingClientRect gives the bounding box, not the element's actual position
+					// So we use the element's center point (which is the rotation origin and stays consistent)
+					const elementRect = elementDom.getBoundingClientRect();
+					const elementCenterScreenX = elementRect.left + elementRect.width / 2;
+					const elementCenterScreenY = elementRect.top + elementRect.height / 2;
+					const elementCenterCanvasX = (elementCenterScreenX - canvasRect.left - viewport.x) / viewport.scale;
+					const elementCenterCanvasY = (elementCenterScreenY - canvasRect.top - viewport.y) / viewport.scale;
+
+					// Store offset from cursor to element's center
+					// We'll convert this back to top-left offset at drop time
+					dragOffsetCanvas = {
+						x: cursorCanvasX - elementCenterCanvasX,
+						y: cursorCanvasY - elementCenterCanvasY
+					};
+				}
+
 				// Initialize auto layout reordering state
 				reorderTargetIndex = null;
 				lastAppliedIndex = null;
@@ -1309,6 +1678,7 @@
 				// Store original parent for drag-out detection
 				originalParentId = element.parentId;
 				potentialDropParentId = null;
+				
 
 				// Check if element is in auto layout and can be reordered
 				const state = get(designState);
@@ -1629,25 +1999,68 @@
 				);
 			} else {
 				// Normal drag: update position based on delta from start
-				pendingPosition = {
-					x: elementStartCanvas.x + deltaCanvas.x,
-					y: elementStartCanvas.y + deltaCanvas.y
-				};
-
+				const state = get(designState);
+				const activeElement = state.elements[activeElementId!];
+				
+				// Calculate position based on delta from start (this automatically handles rotation based on current parent)
+				// The key is that elementStartCanvas is in absolute coordinates, and we calculate from there
+				let tempPendingPosition = pendingPosition || { x: elementStartCanvas.x, y: elementStartCanvas.y };
+				if (activeElement && activeElement.parentId) {
+					const ancestors = getAllAncestors(activeElement);
+					let cumulativeRotation = 0;
+					for (const ancestor of ancestors) {
+						cumulativeRotation += getDisplayRotation(ancestor);
+					}
+					cumulativeRotation = normalizeRotation(cumulativeRotation);
+					
+					if (cumulativeRotation !== 0) {
+						const rotationRad = -cumulativeRotation * (Math.PI / 180);
+						const cos = Math.cos(rotationRad);
+						const sin = Math.sin(rotationRad);
+						const transformedDelta = {
+							x: deltaCanvas.x * cos - deltaCanvas.y * sin,
+							y: deltaCanvas.x * sin + deltaCanvas.y * cos
+						};
+						tempPendingPosition = {
+							x: elementStartCanvas.x + transformedDelta.x,
+							y: elementStartCanvas.y + transformedDelta.y
+						};
+					} else {
+						tempPendingPosition = {
+							x: elementStartCanvas.x + deltaCanvas.x,
+							y: elementStartCanvas.y + deltaCanvas.y
+						};
+					}
+				} else {
+					tempPendingPosition = {
+						x: elementStartCanvas.x + deltaCanvas.x,
+						y: elementStartCanvas.y + deltaCanvas.y
+					};
+				}
+				
 				// Detect potential drop parent for single element drags (not groups, not auto layout)
-				if (!isGroupInteraction && activeElementId && pendingPosition) {
+				if (!isGroupInteraction && activeElementId && tempPendingPosition) {
 					// Get the dragged element's size to check for overlap with potential parents
-					const state = get(designState);
 					const draggedElement = state.elements[activeElementId];
 					if (draggedElement) {
-						potentialDropParentId = findDropParentAtPosition(
-							pendingPosition.x,
-							pendingPosition.y,
+						const detectedParentId = findDropParentAtPosition(
+							tempPendingPosition.x,
+							tempPendingPosition.y,
 							draggedElement.size.width,
 							draggedElement.size.height,
 							activeElementId
 						);
+						
+						// Just track potential parent - don't change during drag (change on drop to prevent issues)
+						// The reactive block will handle temporary DOM reordering if needed
+						potentialDropParentId = detectedParentId;
+						
+						pendingPosition = tempPendingPosition;
+					} else {
+						pendingPosition = tempPendingPosition;
 					}
+				} else {
+					pendingPosition = tempPendingPosition;
 				}
 
 				// Update pending transforms for all group elements
@@ -1925,8 +2338,8 @@
 			if (activeElement) {
 				const state = get(designState);
 				const parent = activeElement.parentId ? state.elements[activeElement.parentId] : null;
-				const parentHasAutoLayout = !!((parent as any)?.autoLayout?.enabled);
-				const childIgnoresAutoLayout = !!((activeElement as any).autoLayout?.ignoreAutoLayout);
+				const parentHasAutoLayout = !!(parent?.autoLayout?.enabled);
+				const childIgnoresAutoLayout = !!(activeElement.autoLayout?.ignoreAutoLayout);
 				const isInAutoLayout = parentHasAutoLayout && !childIgnoresAutoLayout;
 
 				if (isInAutoLayout) {
@@ -1993,52 +2406,145 @@
 				);
 			}
 		} else if (interactionMode === 'rotating') {
-			// Get current element to check if in auto layout
-			const activeElement = selectedElements.find(el => el.id === activeElementId);
-			const state = get(designState);
-			const parent = activeElement?.parentId ? state.elements[activeElement.parentId] : null;
-			const parentHasAutoLayout = !!((parent as any)?.autoLayout?.enabled);
-			const childIgnoresAutoLayout = !!((activeElement as any)?.autoLayout?.ignoreAutoLayout);
-			const isInAutoLayout = parentHasAutoLayout && !childIgnoresAutoLayout;
+			// Track latest screen-space cursor position for debug overlay
+			currentMouseScreen = { x: e.clientX, y: e.clientY };
 
-			// For auto layout, read center from DOM (flexbox repositions element as it rotates)
-			// For others, use fixed center calculated at start
+			// Use fixed center stored at rotation start (prevents inconsistencies)
+			// For child elements, this center was calculated from DOM accounting for parent rotation
+			// For root elements, this center was calculated from position
 			let centerX: number, centerY: number;
-			if (isInAutoLayout && activeElement) {
-				const currentPos = getAbsolutePosition(activeElement);
-				const currentSize = getActualSize(activeElement);
-				centerX = currentPos.x + currentSize.width / 2;
-				centerY = currentPos.y + currentSize.height / 2;
+			let centerScreenX: number, centerScreenY: number;
+			
+			if (rotationStartCenter) {
+				// Use stored fixed center from rotation start
+				centerX = rotationStartCenter.x;
+				centerY = rotationStartCenter.y;
+				centerScreenX = rotationStartCenter.screenX;
+				centerScreenY = rotationStartCenter.screenY;
 			} else {
+				// Fallback: calculate center (shouldn't happen, but safety check)
+				const canvasElement = document.querySelector('.canvas') as HTMLElement | null;
+				const canvasRect = canvasElement?.getBoundingClientRect();
 				centerX = elementStartCanvas.x + elementStartCanvas.width / 2;
 				centerY = elementStartCanvas.y + elementStartCanvas.height / 2;
+				centerScreenX = canvasRect
+					? canvasRect.left + viewport.x + centerX * viewport.scale
+					: centerX;
+				centerScreenY = canvasRect
+					? canvasRect.top + viewport.y + centerY * viewport.scale
+					: centerY;
 			}
 
-			// Convert current mouse position to canvas space
-			const mouseCanvasX = (e.clientX - viewport.x) / viewport.scale;
-			const mouseCanvasY = (e.clientY - viewport.y) / viewport.scale;
+			// Get canvas rect for mouse position conversion
+			const canvasElement = document.querySelector('.canvas') as HTMLElement | null;
+			const canvasRect = canvasElement?.getBoundingClientRect();
 
-			// Calculate current angle
-			const currentAngle = Math.atan2(mouseCanvasY - centerY, mouseCanvasX - centerX) * (180 / Math.PI);
+			// Convert current mouse position to canvas space for debugging
+			const mouseCanvasX = canvasRect
+				? (e.clientX - canvasRect.left - viewport.x) / viewport.scale
+				: (e.clientX - viewport.x) / viewport.scale;
+			const mouseCanvasY = canvasRect
+				? (e.clientY - canvasRect.top - viewport.y) / viewport.scale
+				: (e.clientY - viewport.y) / viewport.scale;
 
-			// Calculate rotation delta
-			let angleDelta = currentAngle - rotationStartAngle;
+			// Calculate current cursor angle from center in SCREEN space
+			const cursorAngle = Math.atan2(e.clientY - centerScreenY, e.clientX - centerScreenX) * (180 / Math.PI);
+
+			// Calculate base angle from center to the reference corner (in local/unrotated space)
+			const cornerOffsets = {
+				nw: { x: -elementStartCanvas.width / 2, y: -elementStartCanvas.height / 2 },
+				ne: { x: elementStartCanvas.width / 2, y: -elementStartCanvas.height / 2 },
+				se: { x: elementStartCanvas.width / 2, y: elementStartCanvas.height / 2 },
+				sw: { x: -elementStartCanvas.width / 2, y: elementStartCanvas.height / 2 }
+			};
+			const cornerOffset = cornerOffsets[rotationReferenceCorner];
+			const cornerBaseAngle = Math.atan2(cornerOffset.y, cornerOffset.x) * (180 / Math.PI);
+
+			// Get parent rotation to account for it in target rotation calculation
+			// For groups, use first element's parent rotation (same as in rotation start)
+			const state_for_parent = get(designState);
+			let parentRotation = 0;
+			if (isGroupInteraction && selectedElements.length > 0) {
+				const firstElement = selectedElements[0];
+				const parentForRotation = firstElement.parentId ? state_for_parent.elements[firstElement.parentId] : null;
+				parentRotation = parentForRotation ? (parentForRotation.rotation || 0) : 0;
+			} else if (activeElementId) {
+				const activeElementForRotation = state_for_parent.elements[activeElementId];
+				const parentForRotation = activeElementForRotation?.parentId ? state_for_parent.elements[activeElementForRotation.parentId] : null;
+				parentRotation = parentForRotation ? (parentForRotation.rotation || 0) : 0;
+			}
+
+			// Calculate rotation to make corner point toward cursor
+			// For child elements with rotated parents, we need to account for parent rotation
+			// The visual corner angle = cornerBaseAngle + targetRotation + parentRotation
+			// We want: visual corner angle = cursorAngle - rotationInitialOffset
+			// So: cursorAngle - rotationInitialOffset = cornerBaseAngle + targetRotation + parentRotation
+			// Therefore: targetRotation = cursorAngle - cornerBaseAngle - parentRotation - rotationInitialOffset
+			let targetRotation = cursorAngle - cornerBaseAngle - parentRotation - rotationInitialOffset;
+
+			// DEBUG: Calculate actual corner position in world space
+			// Get parent rotation for debug (same as above)
+			let parentRotationForDebug = parentRotation;
+			// Total visual rotation includes both element and parent rotation
+			const totalVisualRotation = (pendingRotation || 0) + parentRotationForDebug;
+			const currentRotationRad = totalVisualRotation * (Math.PI / 180);
+			const rotatedCornerX = centerX + cornerOffset.x * Math.cos(currentRotationRad) - cornerOffset.y * Math.sin(currentRotationRad);
+			const rotatedCornerY = centerY + cornerOffset.x * Math.sin(currentRotationRad) + cornerOffset.y * Math.cos(currentRotationRad);
+			const actualCornerAngle = Math.atan2(rotatedCornerY - centerY, rotatedCornerX - centerX) * (180 / Math.PI);
+
+			// CONSOLE LOG DEBUGGING
+			console.group('🔄 ROTATION DEBUG');
+			console.log('📦 Element Canvas:', elementStartCanvas);
+			console.log('📍 Center (calculated):', { x: centerX, y: centerY });
+			console.log('📐 Corner offset (local space):', cornerOffset);
+			console.log('📐 Corner base angle (local):', cornerBaseAngle.toFixed(2), '°');
+			console.log('👪 Parent rotation:', parentRotationForDebug.toFixed(2), '°');
+			console.log('🔄 Element rotation (pending):', (pendingRotation || 0).toFixed(2), '°');
+			console.log('🔄 Total visual rotation (element + parent):', totalVisualRotation.toFixed(2), '°');
+			console.log('🟢 Corner position (world space):', { x: rotatedCornerX.toFixed(2), y: rotatedCornerY.toFixed(2) });
+			console.log('🟢 Corner actual angle:', actualCornerAngle.toFixed(2), '°');
+			console.log('🔴 Cursor position (canvas):', { x: mouseCanvasX.toFixed(2), y: mouseCanvasY.toFixed(2) });
+			console.log('🔴 Cursor angle:', cursorAngle.toFixed(2), '°');
+			console.log('⚠️  Angular delta (cursor - corner):', (cursorAngle - actualCornerAngle).toFixed(2), '°');
+			console.log('🎯 Initial offset:', rotationInitialOffset.toFixed(2), '°');
+			console.log('🎯 Element start rotation:', elementStartRotation.toFixed(2), '°');
+			console.log('🎯 Target rotation:', targetRotation.toFixed(2), '°');
+			console.log('📏 Reference corner:', rotationReferenceCorner.toUpperCase());
+			console.groupEnd();
+
+			// Store debug values for visualization
+			debugCenter = { x: centerX, y: centerY };
+			debugCorner = { x: rotatedCornerX, y: rotatedCornerY };
+			debugCursor = { x: mouseCanvasX, y: mouseCanvasY };
+			debugCursorAngle = cursorAngle;
+			debugCornerAngle = actualCornerAngle;
+			debugCornerBaseAngle = cornerBaseAngle;
+			debugTargetRotation = targetRotation;
 
 			// Apply Shift key snap to 15° increments
 			if (e.shiftKey) {
-				angleDelta = Math.round(angleDelta / 15) * 15;
+				targetRotation = Math.round(targetRotation / 15) * 15;
 			}
 
-			// Calculate new rotation
-			pendingRotation = normalizeRotation(elementStartRotation + angleDelta);
+			// Normalize and apply rotation
+			pendingRotation = normalizeRotation(targetRotation);
 
 			// For auto layout, update position from DOM (element moves as it rotates)
-			if (isInAutoLayout && activeElement) {
-				setTimeout(() => {
-					const actualPos = getAbsolutePosition(activeElement);
-					pendingPosition = actualPos;
-				}, 0);
-				pendingPosition = getAbsolutePosition(activeElement);
+			const activeElement = selectedElements.find(el => el.id === activeElementId);
+			if (activeElement) {
+				const state_for_autolayout = get(designState);
+				const parent_for_autolayout = activeElement.parentId ? state_for_autolayout.elements[activeElement.parentId] : null;
+				const parentHasAutoLayout = !!(parent_for_autolayout?.autoLayout?.enabled);
+				const childIgnoresAutoLayout = !!(activeElement?.autoLayout?.ignoreAutoLayout);
+				const isInAutoLayout = parentHasAutoLayout && !childIgnoresAutoLayout;
+				
+				if (isInAutoLayout) {
+					setTimeout(() => {
+						const actualPos = getAbsolutePosition(activeElement);
+						pendingPosition = actualPos;
+					}, 0);
+					pendingPosition = getAbsolutePosition(activeElement);
+				}
 			}
 
 			// Update pending transforms for all group elements during rotation
@@ -2216,9 +2722,22 @@
 		}
 	}
 
-	async function handleMouseUp() {
+	async function handleMouseUp(e?: MouseEvent) {
 		if (interactionMode === 'idle') return;
 		if (!isGroupInteraction && !activeElementId) return;
+		
+		// Get cursor position in canvas coordinates at drop time
+		let cursorCanvasPos: { x: number; y: number } | null = null;
+		if (e) {
+			const canvasElement = document.querySelector('.canvas') as HTMLElement | null;
+			const canvasRect = canvasElement?.getBoundingClientRect();
+			if (canvasRect) {
+				cursorCanvasPos = {
+					x: (e.clientX - canvasRect.left - viewport.x) / viewport.scale,
+					y: (e.clientY - canvasRect.top - viewport.y) / viewport.scale
+				};
+			}
+		}
 
 		// Check if actually moved beyond threshold
 		const movedX = pendingPosition ? Math.abs(pendingPosition.x - elementStartCanvas.x) : 0;
@@ -2328,63 +2847,84 @@
 						if (!reorderParentId) {
 							// Check if parent changed during drag (drag out of/into div)
 							if (potentialDropParentId !== originalParentId) {
-								// Parent changed - use reorderElement to change parent and position
-								const state = get(designState);
-								const newParent = potentialDropParentId ? state.elements[potentialDropParentId] : null;
-								const oldParent = originalParentId ? state.elements[originalParentId] : null;
 
-								// Calculate the correct index for the new position
-								let newIndex = 0;
+								// Use cursor position as drop reference, maintaining the offset from drag start
+								// Always prefer cursor position to ensure accurate drop location
+								const dropPosition = cursorCanvasPos || pendingPosition;
 
-								// When dragging OUT of a parent (moving to its grandparent or root)
-								if (originalParentId && !potentialDropParentId) {
-									// Element is being moved to root, position it right after its former parent
-									// Get the root elements from the view
-									const currentView = state.views[activeElement.viewId];
-									if (currentView && oldParent) {
-										const rootElements = currentView.elements;
-										const oldParentIndex = rootElements.indexOf(originalParentId);
-										// Place right after the former parent (higher index = later in DOM = above in layers)
-										newIndex = oldParentIndex !== -1 ? oldParentIndex + 1 : rootElements.length;
-									}
-								} else if (originalParentId && potentialDropParentId) {
-									// Moving from one parent to another parent
-									// Check if the new parent is the grandparent (dragging up one level)
-									if (oldParent && oldParent.parentId === potentialDropParentId) {
-										// Dragging out to grandparent - place after former parent
-										const grandparentChildren = newParent ? newParent.children : [];
-										const oldParentIndex = grandparentChildren.indexOf(originalParentId);
-										newIndex = oldParentIndex !== -1 ? oldParentIndex + 1 : grandparentChildren.length;
-									} else {
-										// Moving to a different parent - place at end
-										newIndex = newParent ? newParent.children.length : 0;
-									}
-								} else {
-									// Moving into a parent from root or between roots
-									newIndex = newParent ? newParent.children.length : 0;
+								if (!cursorCanvasPos) {
+									console.warn('cursorCanvasPos not available at drop time, using pendingPosition');
 								}
 
+								// Calculate element's center position from cursor: cursor position minus the drag offset
+								// dragOffsetCanvas is stored as cursor-to-center offset (see drag start calculation)
+								const elementCenterCanvas = {
+									x: dropPosition.x - dragOffsetCanvas.x,
+									y: dropPosition.y - dragOffsetCanvas.y
+								};
+
+								// Convert center to top-left: subtract half width and height
+								const elementTopLeftCanvas = {
+									x: elementCenterCanvas.x - activeElement.size.width / 2,
+									y: elementCenterCanvas.y - activeElement.size.height / 2
+								};
+								
 								// Calculate position relative to new parent
-								let relativePos;
-								if (potentialDropParentId && newParent) {
+								const state_for_drop = get(designState);
+								const newParent = potentialDropParentId ? state_for_drop.elements[potentialDropParentId] : null;
+								let relativePos: { x: number; y: number };
+								
+								if (newParent) {
+									// Convert element's top-left position to relative position for new parent
 									const newParentAbsPos = getAbsolutePosition(newParent);
-									relativePos = {
-										x: pendingPosition.x - newParentAbsPos.x,
-										y: pendingPosition.y - newParentAbsPos.y
-									};
+									const newParentRotation = getDisplayRotation(newParent);
+									
+									// Get parent's center in canvas space
+									const parentCenterX = newParentAbsPos.x + newParent.size.width / 2;
+									const parentCenterY = newParentAbsPos.y + newParent.size.height / 2;
+									
+									// Get element's center in canvas space
+									const elementCenterX = elementTopLeftCanvas.x + activeElement.size.width / 2;
+									const elementCenterY = elementTopLeftCanvas.y + activeElement.size.height / 2;
+									
+									// Offset from parent center to element center (in world/canvas space)
+									const dx = elementCenterX - parentCenterX;
+									const dy = elementCenterY - parentCenterY;
+									
+									if (newParentRotation !== 0) {
+										// Transform to parent's local space (inverse rotation)
+										const angleRad = -newParentRotation * (Math.PI / 180);
+										const localDx = dx * Math.cos(angleRad) - dy * Math.sin(angleRad);
+										const localDy = dx * Math.sin(angleRad) + dy * Math.cos(angleRad);
+										
+										// Convert from center-relative to top-left relative (in parent's local space)
+										relativePos = {
+											x: localDx + newParent.size.width / 2 - activeElement.size.width / 2,
+											y: localDy + newParent.size.height / 2 - activeElement.size.height / 2
+										};
+									} else {
+										// Parent not rotated - simple subtraction
+										relativePos = {
+											x: elementTopLeftCanvas.x - newParentAbsPos.x,
+											y: elementTopLeftCanvas.y - newParentAbsPos.y
+										};
+									}
 								} else {
-									// Dropping at root - use absolute position
-									relativePos = pendingPosition;
+									// Dropping at root - element top-left is already in absolute coordinates
+									// The elementTopLeftCanvas was calculated from cursor position minus offset,
+									// so it correctly maintains the cursor-to-element relationship
+									relativePos = elementTopLeftCanvas;
 								}
-
-								// Reorder to new parent with calculated index
-								await reorderElement(activeElementId, potentialDropParentId, newIndex);
-
-								// Then move to the correct position within that parent
+								
+								// Change parent and move position
+								// Note: reorderElement will handle the permanent DOM reordering
+								await reorderElement(activeElementId, potentialDropParentId, 0);
 								await moveElement(activeElementId, relativePos);
+								
+								// Clear original DOM position tracking since element was dropped inside
+								
 							} else {
 								// Parent didn't change - just move within same parent
-								// Convert absolute position to parent-relative position
 								const relativePos = absoluteToRelativePosition(activeElement, pendingPosition);
 								await moveElement(activeElementId, relativePos);
 							}
@@ -2476,6 +3016,7 @@
 		pendingSize = null;
 		pendingRotation = null;
 		pendingRadius = null;
+		rotationStartCenter = null;
 		radiusCorner = null;
 		radiusStartDistance = 0;
 		radiusInitialValue = 0;
@@ -2496,41 +3037,100 @@
 		reorderElementRotation = 0;
 		reorderElementSize = { width: 0, height: 0 };
 		potentialDropParentId = null;
-		originalParentId = null;
+
+		// Clear debug values
+		debugCenter = null;
+		debugCorner = null;
+		debugCursor = null;
 
 		document.removeEventListener('mousemove', handleMouseMove);
 		document.removeEventListener('mouseup', handleMouseUp);
 	}
 
-	// Cleanup on destroy
+	// Cleanup on destroy - remove all event listeners to prevent memory leaks
 	onDestroy(() => {
+		// Clean up all tracked event listeners
+		cleanupFunctions.forEach(cleanup => cleanup());
+		cleanupFunctions.length = 0;
+
+		// Also clean up the main handlers as a safety measure
 		document.removeEventListener('mousemove', handleMouseMove);
 		document.removeEventListener('mouseup', handleMouseUp);
 	});
 </script>
 
-<!-- Render selection UI (hide when text is being edited or during auto layout reordering) -->
-{#if $interactionState.mode !== 'editing-text'}
-	{#if selectedElements.length === 1 && !(interactionMode === 'dragging' && reorderParentId)}
+<!-- Render selection UI (hide when text is being edited, during rotation, during auto layout reordering, or during parent change transition) -->
+	{#if $interactionState.mode !== 'editing-text'}
+	{#if selectedElements.length === 1 && !(interactionMode === 'dragging' && reorderParentId) && interactionMode !== 'rotating' && !$interactionState.hiddenDuringTransition}
 		<!-- Single element selection (hidden during auto layout reordering - ghost shows instead) -->
+		{@const selectedElement = selectedElements[0]}
+		{@const state = get(designState)}
+		{@const parent = selectedElement.parentId ? state.elements[selectedElement.parentId] : null}
+		{@const parentHasAutoLayout = parent?.autoLayout?.enabled || false}
+		{@const childIgnoresAutoLayout = selectedElement.autoLayout?.ignoreAutoLayout || false}
+		{@const isInAutoLayout = parentHasAutoLayout && !childIgnoresAutoLayout}
+		{@const parentTransform = parent ? {
+			position: getAbsolutePosition(parent),
+			rotation: getDisplayRotation(parent),
+			size: getDisplaySize(parent)
+		} : null}
+		{@const relativePendingPosition = (() => {
+			// If element is being dragged and has pending position
+			if (activeElementId === selectedElement.id && pendingPosition) {
+				// If element has a parent, convert absolute position to relative
+				if (parent) {
+					return absoluteToRelativePosition(selectedElement, pendingPosition);
+				}
+				// If element has no parent (root-level), pendingPosition is already absolute
+				return pendingPosition;
+			}
+			// For auto layout children, get actual rendered position from DOM
+			if (isInAutoLayout && parent) {
+				const domElement = document.querySelector(`[data-element-id="${selectedElement.id}"]`);
+				const parentDomElement = document.querySelector(`[data-element-id="${parent.id}"]`);
+				if (domElement && parentDomElement) {
+					const elementRect = domElement.getBoundingClientRect();
+					const parentRect = parentDomElement.getBoundingClientRect();
+					const canvasElement = document.querySelector('.canvas');
+					if (canvasElement) {
+						const canvasRect = canvasElement.getBoundingClientRect();
+						// Get element's top-left in screen space
+						const elementScreenX = elementRect.left;
+						const elementScreenY = elementRect.top;
+						// Get parent's top-left in screen space
+						const parentScreenX = parentRect.left;
+						const parentScreenY = parentRect.top;
+						// Convert to canvas space
+						const elementCanvasX = (elementScreenX - canvasRect.left - viewport.x) / viewport.scale;
+						const elementCanvasY = (elementScreenY - canvasRect.top - viewport.y) / viewport.scale;
+						const parentCanvasX = (parentScreenX - canvasRect.left - viewport.x) / viewport.scale;
+						const parentCanvasY = (parentScreenY - canvasRect.top - viewport.y) / viewport.scale;
+						// Calculate relative position (top-left to top-left)
+						return {
+							x: elementCanvasX - parentCanvasX,
+							y: elementCanvasY - parentCanvasY
+						};
+					}
+				}
+			}
+			// Default: use element's stored position (already relative to parent)
+			return null;
+		})()}
 		<SelectionUI
-			element={{
-				...selectedElements[0],
-				position: getAbsolutePosition(selectedElements[0]),
-				size: displaySizeForSelection || selectedElements[0].size
-			}}
+			element={selectedElement}
 			{viewport}
 			{isPanning}
-			pendingPosition={activeElementId === selectedElements[0].id ? pendingPosition : null}
-			pendingSize={activeElementId === selectedElements[0].id ? pendingSize : null}
-			pendingRadius={activeElementId === selectedElements[0].id ? pendingRadius : null}
-			activeRadiusCorner={activeElementId === selectedElements[0].id ? radiusCorner : null}
-			radiusCornersIndependent={activeElementId === selectedElements[0].id ? radiusCornersIndependent : false}
-			radiusFrozenValues={activeElementId === selectedElements[0].id ? radiusFrozenValues : null}
-			rotation={commonRotation || 0}
-			onMouseDown={(e, handle) => handleMouseDown(e, selectedElements[0], handle)}
+			pendingPosition={relativePendingPosition}
+			pendingSize={activeElementId === selectedElement.id ? pendingSize : null}
+			pendingRadius={activeElementId === selectedElement.id ? pendingRadius : null}
+			activeRadiusCorner={activeElementId === selectedElement.id ? radiusCorner : null}
+			radiusCornersIndependent={activeElementId === selectedElement.id ? radiusCornersIndependent : false}
+			radiusFrozenValues={activeElementId === selectedElement.id ? radiusFrozenValues : null}
+			rotation={getDisplayRotation(selectedElement)}
+			{parentTransform}
+			onMouseDown={(e, handle) => handleMouseDown(e, selectedElement, handle)}
 		/>
-	{:else if selectedElements.length > 1 && groupBounds}
+	{:else if selectedElements.length > 1 && groupBounds && interactionMode !== 'rotating' && !$interactionState.hiddenDuringTransition}
 		<!-- Multi-element selection - single bounding box -->
 		<!-- Note: groupBounds already accounts for rotated elements by calculating their corners -->
 		<!-- groupBounds is reactive to groupPendingTransforms, so it updates in real-time during interactions -->
@@ -2545,7 +3145,8 @@
 				styles: {},
 				typography: {},
 				spacing: {},
-				children: []
+				children: [],
+				zIndex: 0
 			}}
 			{viewport}
 			{isPanning}
@@ -2558,14 +3159,13 @@
 	{/if}
 {/if}
 
-<!-- Rotation angle display -->
-{#if interactionMode === 'rotating' && pendingRotation !== null}
+<!-- Rotation angle display - follows cursor -->
+{#if interactionMode === 'rotating' && pendingRotation !== null && currentMouseScreen.x !== 0 && currentMouseScreen.y !== 0}
 	<div
 		style="
-			position: absolute;
-			left: {viewport.x + (elementStartCanvas.x + elementStartCanvas.width / 2) * viewport.scale}px;
-			top: {viewport.y + (elementStartCanvas.y + elementStartCanvas.height / 2) * viewport.scale - 60}px;
-			transform: translateX(-50%);
+			position: fixed;
+			left: {currentMouseScreen.x + 20}px;
+			top: {currentMouseScreen.y - 30}px;
 			background: #1e293b;
 			color: white;
 			padding: 4px 12px;
@@ -2576,6 +3176,7 @@
 			pointer-events: none;
 			white-space: nowrap;
 			box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+			z-index: 10001;
 		"
 	>
 		{Math.round(pendingRotation)}°
@@ -2624,3 +3225,140 @@
 		</div>
 	{/if}
 {/if}
+
+<!-- DEBUG: Rotation visualization -->
+{#if interactionMode === 'rotating' && debugCenterScreen && debugCornerScreen && debugCursorScreen}
+	<svg
+		style="
+			position: fixed;
+			top: 0;
+			left: 0;
+			width: 100vw;
+			height: 100vh;
+			pointer-events: none;
+			z-index: 100000;
+		"
+	>
+
+		<!-- Line from center to cursor (RED) -->
+		<line
+			x1={debugCenterScreen.x}
+			y1={debugCenterScreen.y}
+			x2={debugCursorScreen.x}
+			y2={debugCursorScreen.y}
+			stroke="red"
+			stroke-width="2"
+			opacity="0.7"
+		/>
+
+		<!-- Line from center to corner (GREEN) -->
+		<line
+			x1={debugCenterScreen.x}
+			y1={debugCenterScreen.y}
+			x2={debugCornerScreen.x}
+			y2={debugCornerScreen.y}
+			stroke="lime"
+			stroke-width="2"
+			opacity="0.7"
+		/>
+
+		<!-- Center point (BLUE) -->
+		<circle cx={debugCenterScreen.x} cy={debugCenterScreen.y} r="6" fill="blue" opacity="0.8" />
+
+		<!-- Corner point (GREEN) -->
+		<circle cx={debugCornerScreen.x} cy={debugCornerScreen.y} r="6" fill="lime" opacity="0.8" />
+
+		<!-- Cursor point (RED) -->
+		<circle cx={debugCursorScreen.x} cy={debugCursorScreen.y} r="6" fill="red" opacity="0.8" />
+
+		<!-- Labels -->
+		<text x={debugCenterScreen.x + 10} y={debugCenterScreen.y - 10} fill="blue" font-size="12" font-weight="bold">
+			CENTER
+		</text>
+		<text x={debugCornerScreen.x + 10} y={debugCornerScreen.y - 10} fill="lime" font-size="12" font-weight="bold">
+			CORNER ({rotationReferenceCorner.toUpperCase()})
+		</text>
+		<text x={debugCursorScreen.x + 10} y={debugCursorScreen.y + 20} fill="red" font-size="12" font-weight="bold">
+			CURSOR
+		</text>
+
+		<!-- Angle information -->
+		<g transform="translate(20, 80)">
+			<rect x="0" y="0" width="320" height="180" fill="black" opacity="0.8" rx="5" />
+			<text x="10" y="20" fill="white" font-size="12" font-family="monospace">
+				Corner Base Angle: {debugCornerBaseAngle.toFixed(2)}°
+			</text>
+			<text x="10" y="40" fill="white" font-size="12" font-family="monospace">
+				Cursor Angle: {debugCursorAngle.toFixed(2)}°
+			</text>
+			<text x="10" y="60" fill="lime" font-size="12" font-family="monospace">
+				Actual Corner Angle: {debugCornerAngle.toFixed(2)}°
+			</text>
+			<text x="10" y="80" fill="yellow" font-size="12" font-family="monospace">
+				Angular Delta: {(debugCursorAngle - debugCornerAngle).toFixed(2)}°
+			</text>
+			<text x="10" y="100" fill="white" font-size="12" font-family="monospace">
+				Initial Offset: {rotationInitialOffset.toFixed(2)}°
+			</text>
+			<text x="10" y="120" fill="white" font-size="12" font-family="monospace">
+				Element Start Rotation: {elementStartRotation.toFixed(2)}°
+			</text>
+			<text x="10" y="140" fill="white" font-size="12" font-family="monospace">
+				Target Rotation: {debugTargetRotation.toFixed(2)}°
+			</text>
+			<text x="10" y="160" fill="cyan" font-size="12" font-family="monospace">
+				Pending Rotation: {(pendingRotation || 0).toFixed(2)}°
+			</text>
+		</g>
+	</svg>
+{/if}
+
+<!-- Drop parent boundary visualization - show wrapper boundaries when dragging inside -->
+{#if interactionMode === 'dragging' && potentialDropParentId}
+	{@const state = $designState}
+	{@const dropParent = state.elements[potentialDropParentId]}
+	{#if dropParent}
+		{@const canvasElement = document.querySelector('.canvas')}
+		{#if canvasElement}
+			{@const canvasRect = canvasElement.getBoundingClientRect()}
+			{@const parentAbsPos = getAbsolutePosition(dropParent)}
+			{@const parentRotation = dropParent.rotation || 0}
+			{@const parentSize = dropParent.size}
+
+			{@const parentScreenLeft = canvasRect.left + viewport.x + parentAbsPos.x * viewport.scale}
+			{@const parentScreenTop = canvasRect.top + viewport.y + parentAbsPos.y * viewport.scale}
+			{@const parentScreenWidth = parentSize.width * viewport.scale}
+			{@const parentScreenHeight = parentSize.height * viewport.scale}
+			{@const parentCenterX = parentScreenWidth / 2}
+			{@const parentCenterY = parentScreenHeight / 2}
+
+			{@const draggedElement = activeElementId ? state.elements[activeElementId] : null}
+			{@const isSameAsOriginalParent = draggedElement && draggedElement.parentId === potentialDropParentId}
+			{@const isView = dropParent.isView === true}
+			{@const hasAutoLayout = dropParent.autoLayout?.enabled === true}
+			{@const isRegularDiv = dropParent.type === 'div' && !isView && !hasAutoLayout}
+
+			{@const shouldHideHighlight = isSameAsOriginalParent && isView}
+			{@const shouldShowMinimalHighlight = isSameAsOriginalParent && isRegularDiv}
+
+			{#if !shouldHideHighlight}
+				<div
+					style="
+						position: fixed;
+						left: {parentScreenLeft}px;
+						top: {parentScreenTop}px;
+						width: {parentScreenWidth}px;
+						height: {parentScreenHeight}px;
+						border: {shouldShowMinimalHighlight ? '1px dotted #3b82f6' : '2px dashed #3b82f6'};
+						background: {shouldShowMinimalHighlight ? 'transparent' : 'rgba(59, 130, 246, 0.05)'};
+						pointer-events: none;
+						box-sizing: border-box;
+						z-index: 9999;
+						{parentRotation ? `transform: rotate(${parentRotation}deg); transform-origin: ${parentCenterX}px ${parentCenterY}px;` : ''}
+					"
+				/>
+			{/if}
+		{/if}
+	{/if}
+{/if}
+
