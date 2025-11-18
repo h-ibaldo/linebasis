@@ -122,7 +122,25 @@
 
 		// Element has moved beyond its original parent (or had no parent)
 		// Now find overlapping containers to determine the new parent
-		const overlappingContainers: Element[] = [];
+		const overlappingContainers: Array<{ element: Element; arrayIndex: number }> = [];
+
+		// Build a map of element IDs to their array positions
+		// For root elements, use view.elements array
+		// For nested elements, use parent.children array
+		const getArrayPosition = (el: Element): number => {
+			if (el.parentId) {
+				const parent = state.elements[el.parentId];
+				if (parent) {
+					return parent.children.indexOf(el.id);
+				}
+			} else {
+				const view = state.views[el.viewId];
+				if (view) {
+					return view.elements.indexOf(el.id);
+				}
+			}
+			return -1;
+		};
 
 		for (const elementId in state.elements) {
 			const element = state.elements[elementId];
@@ -163,14 +181,18 @@
 			);
 
 			if (isFullyContained) {
-				overlappingContainers.push(element);
+				overlappingContainers.push({
+					element,
+					arrayIndex: getArrayPosition(element)
+				});
 			}
 		}
 
-		// Sort by z-index (highest first) to get topmost container
-		overlappingContainers.sort((a, b) => (b.zIndex || 0) - (a.zIndex || 0));
+		// Sort by array index (highest first = topmost layer)
+		// Higher array index means rendered later = appears on top
+		overlappingContainers.sort((a, b) => b.arrayIndex - a.arrayIndex);
 
-		const result = overlappingContainers.length > 0 ? overlappingContainers[0].id : null;
+		const result = overlappingContainers.length > 0 ? overlappingContainers[0].element.id : null;
 
 		// Return the topmost overlapping container (or null to drop at root)
 		return result;
@@ -2523,8 +2545,7 @@
 				styles: {},
 				typography: {},
 				spacing: {},
-				children: [],
-				zIndex: 0
+				children: []
 			}}
 			{viewport}
 			{isPanning}

@@ -11,6 +11,7 @@
 	import {
 		designState,
 		selectElement,
+		selectElements,
 		selectedElements,
 		addToSelection,
 		removeFromSelection,
@@ -82,14 +83,25 @@ type DocumentWithCaret = Document & {
 			return;
 		}
 
+		// Check if this element belongs to a group
+		const state = get(designState);
+		const clickedElement = state.elements[element.id];
+		const groupId = clickedElement?.groupId;
+
 		// Check if this element is part of a multi-selection
 		const currentSelection = get(selectedElements).map(el => el.id);
 		const isPartOfMultiSelection = currentSelection.length > 1 && currentSelection.includes(element.id);
 
 		// If clicking on an element that's part of a multi-selection, keep the selection
-		// and start dragging all selected elements. Otherwise, select only this element.
+		// and start dragging all selected elements. Otherwise, select element(s).
 		if (!isPartOfMultiSelection) {
-			selectElement(element.id);
+			// If element belongs to a group, select all elements in that group
+			if (groupId && state.groups[groupId]) {
+				const groupElementIds = state.groups[groupId].elementIds;
+				selectElements(groupElementIds);
+			} else {
+				selectElement(element.id);
+			}
 		}
 
 		// If scale tool, start scaling from any click (not just handles)
@@ -407,10 +419,10 @@ type DocumentWithCaret = Document & {
 		// Position and size - use pending values during interaction
 		if (isBeingDragged && !isAutoLayoutChildDragging) {
 			// Non-auto-layout element being dragged: use absolute positioning to follow cursor
+			// Note: DOM order determines stacking, no z-index manipulation needed
 			styles.push(`position: absolute`);
 			styles.push(`left: ${displayPosition.x}px`);
 			styles.push(`top: ${displayPosition.y}px`);
-			styles.push(`z-index: 10000`);
 		} else if (useRelativePosition) {
 			// Auto layout: children use relative positioning
 			styles.push(`position: relative`);
@@ -458,10 +470,8 @@ type DocumentWithCaret = Document & {
 		}
 		styles.push(`cursor: ${elementCursor}`);
 
-		// Z-index for stacking order
-		if (element.zIndex !== undefined) {
-			styles.push(`z-index: ${element.zIndex}`);
-		}
+		// Stacking order is determined by DOM position (no z-index needed)
+		// Elements later in the children array appear on top
 
 		// Rotation
 		if (displayRotation) {

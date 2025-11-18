@@ -175,8 +175,8 @@ function handleCreateElement(state: DesignState, event: CreateElementEvent): Des
 	const { elementId, parentId, viewId, elementType, position, size, styles, content } =
 		event.payload;
 
-	// Calculate next z-index: find highest z-index among all elements and add 1
-	const maxZIndex = Math.max(0, ...Object.values(state.elements).map(el => el.zIndex || 0));
+	// New elements are added to end of array (visual top layer)
+	// Array position determines stacking: index 0 = bottom, last = top
 
 	const element: Element = {
 		id: elementId,
@@ -190,8 +190,7 @@ function handleCreateElement(state: DesignState, event: CreateElementEvent): Des
 		spacing: {},
 		autoLayout: {},
 		content,
-		children: [],
-		zIndex: maxZIndex + 1
+		children: []
 	};
 
 	// Add element to state
@@ -368,10 +367,10 @@ function handleReorderElement(state: DesignState, event: ReorderElementEvent): D
 	// Update element parent
 	// When moving to a parent element, clear viewId (element is now nested)
 	// When moving to view root (parentId = null), keep existing viewId
+	// newIndex is used for array position insertion (not z-index)
 	newElements[elementId] = {
 		...element,
 		parentId: newParentId,
-		zIndex: newIndex,
 		...(newParentId !== null && { viewId: '' })
 	};
 
@@ -501,17 +500,87 @@ function handleGroupElements(state: DesignState, event: GroupElementsEvent): Des
 		elementIds
 	};
 
-	// Update elements to reference the group
-	const newElements = { ...state.elements };
-	for (const elementId of elementIds) {
-		const element = newElements[elementId];
-		if (element) {
-			newElements[elementId] = {
-				...element,
-				groupId
+	const elementsToGroup = elementIds
+		.map(id => state.elements[id])
+		.filter(Boolean);
+
+	if (elementsToGroup.length === 0) return state;
+
+	// Check if elements have a common parent
+	const parentId = elementsToGroup[0].parentId;
+	const allSameParent = elementsToGroup.every(el => el.parentId === parentId);
+
+	let newViews = state.views;
+	let newElements = { ...state.elements };
+
+	if (allSameParent && parentId) {
+		// Elements have a parent - reorder in parent's children array
+		const parent = state.elements[parentId];
+		if (parent) {
+			const allChildIds = [...parent.children];
+
+			// Find the highest array position (topmost layer) among grouped elements
+			const groupedIndices = elementIds.map(id => allChildIds.indexOf(id)).filter(i => i !== -1);
+			const topmostIndex = Math.max(...groupedIndices);
+
+			// Remove grouped element IDs
+			const filteredChildIds = allChildIds.filter(id => !elementIds.includes(id));
+
+			// Insert grouped elements as a sequence at the topmost position
+			// Elements inserted maintain their relative order from elementIds array
+			const newChildIds = [
+				...filteredChildIds.slice(0, topmostIndex),
+				...elementIds,
+				...filteredChildIds.slice(topmostIndex)
+			];
+
+			// Update parent's children array
+			newElements[parentId] = {
+				...parent,
+				children: newChildIds
+			};
+		}
+	} else if (allSameParent && !parentId) {
+		// Root elements - reorder in view's elements array
+		const viewId = elementsToGroup[0].viewId;
+		const view = state.views[viewId];
+
+		if (view) {
+			const allRootIds = [...view.elements];
+
+			// Find the highest array position (topmost layer) among grouped elements
+			const groupedIndices = elementIds.map(id => allRootIds.indexOf(id)).filter(i => i !== -1);
+			const topmostIndex = Math.max(...groupedIndices);
+
+			// Remove grouped element IDs
+			const filteredRootIds = allRootIds.filter(id => !elementIds.includes(id));
+
+			// Insert grouped elements as a sequence at the topmost position
+			// Elements inserted maintain their relative order from elementIds array
+			const newRootIds = [
+				...filteredRootIds.slice(0, topmostIndex),
+				...elementIds,
+				...filteredRootIds.slice(topmostIndex)
+			];
+
+			// Update view's elements array
+			newViews = {
+				...state.views,
+				[viewId]: {
+					...view,
+					elements: newRootIds
+				}
 			};
 		}
 	}
+
+	// Update elements to reference the group (no z-index needed)
+	elementsToGroup.forEach((element) => {
+		newElements[element.id] = {
+			...element,
+			groupId
+		};
+	});
 
 	return {
 		...state,
@@ -519,7 +588,8 @@ function handleGroupElements(state: DesignState, event: GroupElementsEvent): Des
 			...state.groups,
 			[groupId]: group
 		},
-		elements: newElements
+		elements: newElements,
+		views: newViews
 	};
 }
 

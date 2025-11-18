@@ -549,7 +549,8 @@ export interface Element {
 	href?: string;
 	src?: string;
 	children: string[]; // Child element IDs
-	zIndex: number;
+	// NOTE: NO zIndex - DOM order determined by position in view.elements or parent.children arrays
+	// Array index 0 = bottom layer, last index = top layer (standard HTML rendering)
 	isView?: boolean; // Whether this div is a view (page/breakpoint)
 	viewName?: string; // Name of the view if isView is true
 	breakpointWidth?: number; // Width of the view if isView is true

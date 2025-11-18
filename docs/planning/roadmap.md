@@ -537,7 +537,7 @@ The following features were implemented during Milestone 5 that significantly ex
   - [ ] Resizable window (drag edges)
   - [ ] Minimize/maximize/close buttons
   - [ ] Remember position in localStorage
-  - [ ] Bring to front on click (z-index management)
+  - [ ] Bring to front on click (window stacking management)
   - [ ] Snap to edges (optional)
 
 #### 6.2 Toolbar (Fixed Top) ✅ COMPLETE
@@ -556,12 +556,12 @@ The following features were implemented during Milestone 5 that significantly ex
 - [ ] Tree view of all elements in current frame
 - [ ] Nested structure (children indented)
 - [ ] Click to select element
-- [ ] Drag to reorder (change z-index)
+- [ ] Drag to reorder (change array position in DOM)
 - [ ] Eye icon to hide/show element
 - [ ] Lock icon to lock element (prevent editing)
 - [ ] Rename element (double-click)
 
-**Note**: Core functionality for layers exists in design-store (z-index, visibility, locking), UI not built
+**Note**: Core functionality for layers exists in design-store (array-based stacking, visibility, locking), UI not built
 
 #### 6.4 Properties Window ✅ COMPLETE (Basic)
 - [x] **Div Properties**: Background, border, opacity, border radius (sync + independent)

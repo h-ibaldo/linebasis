@@ -146,7 +146,7 @@ Linabasis has evolved from design-focused planning into a professional-grade pag
 **Priority 2 - Layers Window** (1 week):
 - Hierarchical tree view with collapse/expand
 - Element visibility and lock toggles
-- Drag to reorder (z-index changes)
+- Drag to reorder (array position changes)
 - Rename via double-click
 
 **Priority 3 - Blocks Window** (1 week):
