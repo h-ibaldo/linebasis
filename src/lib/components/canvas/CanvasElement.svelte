@@ -354,9 +354,21 @@ type DocumentWithCaret = Document & {
 			return $interactionState.groupTransforms.get(element.id)!.position;
 		}
 
-		// Pending position from SelectionOverlay is in absolute coordinates, convert to relative
+		// Pending position from SelectionOverlay during drag is in absolute coordinates
+		// When dragging (not auto-layout reordering), use absolute position directly
+		// because element might be transitioning between parents
 		if ($interactionState.activeElementId === element.id && $interactionState.pendingPosition) {
-			return absoluteToRelativePosition($interactionState.pendingPosition);
+			// Check if this is auto layout child dragging for reordering
+			const parent = element.parentId ? $designState.elements[element.parentId] : null;
+			const isAutoLayoutReorder = parent?.autoLayout?.enabled && !element.autoLayout?.ignoreAutoLayout;
+
+			if (isAutoLayoutReorder) {
+				// Auto layout reordering: convert to relative
+				return absoluteToRelativePosition($interactionState.pendingPosition);
+			} else {
+				// Regular drag: use absolute position directly (element will be positioned absolutely)
+				return $interactionState.pendingPosition;
+			}
 		}
 
 		// Default: use element's stored position (already relative)

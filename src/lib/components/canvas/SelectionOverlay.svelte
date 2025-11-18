@@ -1645,24 +1645,29 @@
 			} else {
 				// Single element drag
 				pendingPosition = { ...pos };
-				
-				// Calculate and store offset from cursor to element's top-left at drag start
-				// Use DOM position to account for all rotations and transforms
+
+				// Calculate and store offset from cursor to element's center at drag start
+				// For rotated elements, we use center because getBoundingClientRect gives bounding box, not element origin
 				const canvasElement = document.querySelector('.canvas') as HTMLElement | null;
 				const canvasRect = canvasElement?.getBoundingClientRect();
 				const elementDom = document.querySelector(`[data-element-id="${element.id}"]`) as HTMLElement | null;
 				if (canvasRect && elementDom) {
 					const cursorCanvasX = (e.clientX - canvasRect.left - viewport.x) / viewport.scale;
 					const cursorCanvasY = (e.clientY - canvasRect.top - viewport.y) / viewport.scale;
-					
-					// Get element's actual visual position from DOM (accounts for all rotations)
+
+					// For rotated elements, getBoundingClientRect gives the bounding box, not the element's actual position
+					// So we use the element's center point (which is the rotation origin and stays consistent)
 					const elementRect = elementDom.getBoundingClientRect();
-					const elementVisualCanvasX = (elementRect.left - canvasRect.left - viewport.x) / viewport.scale;
-					const elementVisualCanvasY = (elementRect.top - canvasRect.top - viewport.y) / viewport.scale;
-					
+					const elementCenterScreenX = elementRect.left + elementRect.width / 2;
+					const elementCenterScreenY = elementRect.top + elementRect.height / 2;
+					const elementCenterCanvasX = (elementCenterScreenX - canvasRect.left - viewport.x) / viewport.scale;
+					const elementCenterCanvasY = (elementCenterScreenY - canvasRect.top - viewport.y) / viewport.scale;
+
+					// Store offset from cursor to element's center
+					// We'll convert this back to top-left offset at drop time
 					dragOffsetCanvas = {
-						x: cursorCanvasX - elementVisualCanvasX,
-						y: cursorCanvasY - elementVisualCanvasY
+						x: cursorCanvasX - elementCenterCanvasX,
+						y: cursorCanvasY - elementCenterCanvasY
 					};
 				}
 
@@ -2842,20 +2847,26 @@
 						if (!reorderParentId) {
 							// Check if parent changed during drag (drag out of/into div)
 							if (potentialDropParentId !== originalParentId) {
-								
+
 								// Use cursor position as drop reference, maintaining the offset from drag start
 								// Always prefer cursor position to ensure accurate drop location
 								const dropPosition = cursorCanvasPos || pendingPosition;
-								
+
 								if (!cursorCanvasPos) {
 									console.warn('cursorCanvasPos not available at drop time, using pendingPosition');
 								}
-								
-								// Calculate element's top-left position: cursor position minus the drag offset
-								// This maintains the same cursor-to-element offset that was established at drag start
-								const elementTopLeftCanvas = {
+
+								// Calculate element's center position from cursor: cursor position minus the drag offset
+								// dragOffsetCanvas is stored as cursor-to-center offset (see drag start calculation)
+								const elementCenterCanvas = {
 									x: dropPosition.x - dragOffsetCanvas.x,
 									y: dropPosition.y - dragOffsetCanvas.y
+								};
+
+								// Convert center to top-left: subtract half width and height
+								const elementTopLeftCanvas = {
+									x: elementCenterCanvas.x - activeElement.size.width / 2,
+									y: elementCenterCanvas.y - activeElement.size.height / 2
 								};
 								
 								// Calculate position relative to new parent
