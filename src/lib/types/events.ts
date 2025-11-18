@@ -19,6 +19,9 @@ export type EventType =
 	| 'ROTATE_ELEMENT'
 	| 'REORDER_ELEMENT'
 	| 'TOGGLE_VIEW'
+	| 'TOGGLE_VISIBILITY'
+	| 'TOGGLE_LOCK'
+	| 'RENAME_ELEMENT'
 	| 'GROUP_MOVE_ELEMENTS'
 	| 'GROUP_RESIZE_ELEMENTS'
 	| 'GROUP_ROTATE_ELEMENTS'
@@ -134,6 +137,30 @@ export interface ToggleViewEvent extends BaseEvent {
 		isView: boolean;
 		viewName?: string;
 		breakpointWidth?: number;
+	};
+}
+
+export interface ToggleVisibilityEvent extends BaseEvent {
+	type: 'TOGGLE_VISIBILITY';
+	payload: {
+		elementId: string;
+		visible: boolean;
+	};
+}
+
+export interface ToggleLockEvent extends BaseEvent {
+	type: 'TOGGLE_LOCK';
+	payload: {
+		elementId: string;
+		locked: boolean;
+	};
+}
+
+export interface RenameElementEvent extends BaseEvent {
+	type: 'RENAME_ELEMENT';
+	payload: {
+		elementId: string;
+		name: string;
 	};
 }
 
@@ -374,6 +401,9 @@ export type DesignEvent =
 	| RotateElementEvent
 	| ReorderElementEvent
 	| ToggleViewEvent
+	| ToggleVisibilityEvent
+	| ToggleLockEvent
+	| RenameElementEvent
 	| GroupMoveElementsEvent
 	| GroupResizeElementsEvent
 	| GroupRotateElementsEvent
@@ -501,12 +531,15 @@ export interface AutoLayoutStyle {
 export interface Element {
 	id: string;
 	type: ElementType;
+	name?: string; // Custom name for the element (for layers panel)
 	parentId: string | null;
 	viewId: string; // Elements belong to views (breakpoint views)
 	groupId?: string | null; // Group ID if element belongs to a group
 	position: Position;
 	size: Size;
 	rotation?: number; // Rotation angle in degrees (default 0)
+	visible?: boolean; // Whether element is visible (default true)
+	locked?: boolean; // Whether element is locked (default false)
 	styles: Partial<ElementStyles>;
 	typography: Partial<TypographyStyle>;
 	spacing: Partial<SpacingStyle>;

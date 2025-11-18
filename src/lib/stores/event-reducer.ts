@@ -22,6 +22,9 @@ import type {
 	RotateElementEvent,
 	ReorderElementEvent,
 	ToggleViewEvent,
+	ToggleVisibilityEvent,
+	ToggleLockEvent,
+	RenameElementEvent,
 	GroupMoveElementsEvent,
 	GroupResizeElementsEvent,
 	GroupRotateElementsEvent,
@@ -98,6 +101,12 @@ export function reduceEvent(state: DesignState, event: DesignEvent): DesignState
 			return handleReorderElement(state, event);
 		case 'TOGGLE_VIEW':
 			return handleToggleView(state, event);
+		case 'TOGGLE_VISIBILITY':
+			return handleToggleVisibility(state, event);
+		case 'TOGGLE_LOCK':
+			return handleToggleLock(state, event);
+		case 'RENAME_ELEMENT':
+			return handleRenameElement(state, event);
 		case 'GROUP_MOVE_ELEMENTS':
 			return handleGroupMoveElements(state, event);
 		case 'GROUP_RESIZE_ELEMENTS':
@@ -646,6 +655,60 @@ function handleToggleView(state: DesignState, event: ToggleViewEvent): DesignSta
 				isView,
 				viewName: viewName || element.viewName,
 				breakpointWidth: breakpointWidth || element.breakpointWidth || 1440
+			}
+		}
+	};
+}
+
+function handleToggleVisibility(state: DesignState, event: ToggleVisibilityEvent): DesignState {
+	const { elementId, visible } = event.payload;
+	const element = state.elements[elementId];
+
+	if (!element) return state;
+
+	return {
+		...state,
+		elements: {
+			...state.elements,
+			[elementId]: {
+				...element,
+				visible
+			}
+		}
+	};
+}
+
+function handleToggleLock(state: DesignState, event: ToggleLockEvent): DesignState {
+	const { elementId, locked } = event.payload;
+	const element = state.elements[elementId];
+
+	if (!element) return state;
+
+	return {
+		...state,
+		elements: {
+			...state.elements,
+			[elementId]: {
+				...element,
+				locked
+			}
+		}
+	};
+}
+
+function handleRenameElement(state: DesignState, event: RenameElementEvent): DesignState {
+	const { elementId, name } = event.payload;
+	const element = state.elements[elementId];
+
+	if (!element) return state;
+
+	return {
+		...state,
+		elements: {
+			...state.elements,
+			[elementId]: {
+				...element,
+				name
 			}
 		}
 	};

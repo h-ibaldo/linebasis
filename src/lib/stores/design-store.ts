@@ -716,6 +716,42 @@ export async function toggleView(
 	});
 }
 
+export async function toggleVisibility(elementId: string, visible: boolean): Promise<void> {
+	await dispatch({
+		id: uuidv4(),
+		type: 'TOGGLE_VISIBILITY',
+		timestamp: Date.now(),
+		payload: {
+			elementId,
+			visible
+		}
+	});
+}
+
+export async function toggleLock(elementId: string, locked: boolean): Promise<void> {
+	await dispatch({
+		id: uuidv4(),
+		type: 'TOGGLE_LOCK',
+		timestamp: Date.now(),
+		payload: {
+			elementId,
+			locked
+		}
+	});
+}
+
+export async function renameElement(elementId: string, name: string): Promise<void> {
+	await dispatch({
+		id: uuidv4(),
+		type: 'RENAME_ELEMENT',
+		timestamp: Date.now(),
+		payload: {
+			elementId,
+			name
+		}
+	});
+}
+
 // ============================================================================
 // Selection
 // ============================================================================
