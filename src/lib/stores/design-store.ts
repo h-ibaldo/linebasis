@@ -1812,6 +1812,43 @@ export function selectAll(): void {
 }
 
 // ============================================================================
+// Layer Management (Visibility, Lock, Rename)
+// ============================================================================
+
+/**
+ * Toggle element visibility
+ */
+export async function toggleVisibility(elementId: string, visible: boolean): Promise<void> {
+	await dispatch({
+		type: 'UPDATE_ELEMENT',
+		elementId,
+		updates: { visible }
+	});
+}
+
+/**
+ * Toggle element lock state
+ */
+export async function toggleLock(elementId: string, locked: boolean): Promise<void> {
+	await dispatch({
+		type: 'UPDATE_ELEMENT',
+		elementId,
+		updates: { locked }
+	});
+}
+
+/**
+ * Rename element (set custom name)
+ */
+export async function renameElement(elementId: string, name: string): Promise<void> {
+	await dispatch({
+		type: 'UPDATE_ELEMENT',
+		elementId,
+		updates: { name }
+	});
+}
+
+// ============================================================================
 // Keyboard Shortcuts
 // ============================================================================
 
