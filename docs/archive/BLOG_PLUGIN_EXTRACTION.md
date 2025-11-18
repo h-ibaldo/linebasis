@@ -7,7 +7,7 @@
 
 ## 🎉 What Was Accomplished
 
-Successfully extracted the entire blog system from the LineBasis core into a standalone, optional plugin: **@linebasis/blog**
+Successfully extracted the entire blog system from the Linabasis core into a standalone, optional plugin: **@linebasis/blog**
 
 ---
 
@@ -243,7 +243,7 @@ The blog plugin manifest defines:
 - Isolated codebase (easier to maintain)
 - Can extend/fork blog plugin
 
-### **For LineBasis**
+### **For Linabasis**
 - Proof of concept for plugin system
 - Foundation for marketplace
 - Competitive advantage vs WordPress
@@ -252,7 +252,7 @@ The blog plugin manifest defines:
 
 ## 🚀 Marketing Position
 
-> **LineBasis: Designer-first, Plugin-based CMS**
+> **Linabasis: Designer-first, Plugin-based CMS**
 >
 > Start with a lightweight core (Designer + Auth + Pages).
 > Add what you need: Blog, E-commerce, Forms, Analytics.
@@ -287,4 +287,4 @@ Ready to proceed with plugin management UI.
 
 ---
 
-**LineBasis is becoming the WordPress of the modern web!** 🚀
+**Linabasis is becoming the WordPress of the modern web!** 🚀

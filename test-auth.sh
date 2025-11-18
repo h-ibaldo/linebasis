@@ -1,10 +1,10 @@
 #!/bin/bash
 
-# LineBasis Auth API Test Script
+# Linabasis Auth API Test Script
 # Tests the authentication endpoints
 
 BASE_URL="http://localhost:5173"
-echo "Testing LineBasis Auth API at $BASE_URL"
+echo "Testing Linabasis Auth API at $BASE_URL"
 echo "========================================="
 echo ""
 

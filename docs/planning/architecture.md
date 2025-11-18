@@ -1,6 +1,6 @@
-# LineBasis Architecture
+# Linabasis Architecture
 
-This document defines the technical architecture for LineBasis - a modern CMS with a professional page builder. The architecture is designed to support local-first design workflows, event sourcing for perfect undo/redo, and dynamic code generation for published pages.
+This document defines the technical architecture for Linabasis - a modern CMS with a professional page builder. The architecture is designed to support local-first design workflows, event sourcing for perfect undo/redo, and dynamic code generation for published pages.
 
 ## Table of Contents
 
@@ -27,7 +27,7 @@ This document defines the technical architecture for LineBasis - a modern CMS wi
 
 ## System Overview
 
-LineBasis is a **local-first, event-sourced CMS** with a professional page builder that generates production-ready Svelte components.
+Linabasis is a **local-first, event-sourced CMS** with a professional page builder that generates production-ready Svelte components.
 
 ### Key Characteristics
 
@@ -43,7 +43,7 @@ LineBasis is a **local-first, event-sourced CMS** with a professional page build
 1. **Designer Performance**: Instant interactions, zero server latency during design
 2. **Perfect Undo/Redo**: Complete design history via event sourcing
 3. **Code Quality**: Generated code is clean, semantic, performant
-4. **Flexibility**: Support both dynamic sites (LineBasis-hosted) and static exports
+4. **Flexibility**: Support both dynamic sites (Linabasis-hosted) and static exports
 5. **Scalability**: Handle thousands of pages and media files
 6. **Security**: Role-based access, secure authentication, input validation
 
@@ -101,7 +101,7 @@ Complexity emerges from composition, not component variety.
 
 ## System Architecture
 
-LineBasis uses a **client-server architecture** with clear separation between design-time (client) and runtime (server).
+Linabasis uses a **client-server architecture** with clear separation between design-time (client) and runtime (server).
 
 ### High-Level Architecture
 
@@ -186,7 +186,7 @@ UI Re-renders
 ```
 User Clicks "Publish"
     |
-Publish Modal Opens (slug, SEO, breakpoints)
+Publish Modal Opens (slug, SEO)
     |
 Client Sends: POST /api/pages/publish
     {
@@ -242,7 +242,7 @@ Browser Receives Page
 
 ## Event Sourcing System
 
-Event sourcing is at the core of LineBasis's architecture. All design actions are represented as events.
+Event sourcing is at the core of Linabasis's architecture. All design actions are represented as events.
 
 ### Event Structure
 
@@ -359,7 +359,7 @@ This reduces replay time while preserving recent history.
 
 ## Database Schema
 
-LineBasis uses Prisma ORM with SQLite (development) and PostgreSQL (production). The schema is designed to support the event-sourced architecture while maintaining queryability.
+Linabasis uses Prisma ORM with SQLite (development) and PostgreSQL (production). The schema is designed to support the event-sourced architecture while maintaining queryability.
 
 ### Core Models
 
@@ -430,9 +430,6 @@ model Frame {
   // Design data specific to this breakpoint
   designEvents    String  // JSON: Events for this frame
   
-  // Publishing
-  isPublished     Boolean @default(false)
-  
   // Timestamps
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
@@ -442,7 +439,6 @@ model Frame {
   
   @@index([pageId])
   @@index([breakpointWidth])
-  @@index([isPublished])
 }
 ```
 
@@ -582,7 +578,7 @@ model PageRevision {
 
 #### Team
 
-Represents a LineBasis site installation. One site = one team.
+Represents a Linabasis site installation. One site = one team.
 
 ```prisma
 model Team {
@@ -905,7 +901,7 @@ Plugin (Blog)
 
 ## Component Architecture
 
-LineBasis components have a unique dual-mode design: they function both as **editor components** (design-time) and **live components** (runtime).
+Linabasis components have a unique dual-mode design: they function both as **editor components** (design-time) and **live components** (runtime).
 
 ### Dual-Mode Components
 
@@ -1121,7 +1117,7 @@ Images and videos with responsive support.
 
 ### Default Blocks
 
-Blocks are pre-built combinations of components. Two default blocks ship with LineBasis:
+Blocks are pre-built combinations of components. Two default blocks ship with Linabasis:
 
 #### Form Builder Block
 
@@ -1497,7 +1493,7 @@ exported-site.zip
 
 ## Responsive Design Strategy
 
-LineBasis uses **mobile-first CSS media queries** for responsive design, not conditional component rendering.
+Linabasis uses **mobile-first CSS media queries** for responsive design, not conditional component rendering.
 
 ### Design Workflow
 
@@ -1716,7 +1712,7 @@ function expandBlocks(events: DesignEvent[], instances: BlockInstance[]): Design
 
 ## Theme System
 
-Themes package pages, blocks, design tokens, media, and template assignments for portability between LineBasis installations.
+Themes package pages, blocks, design tokens, media, and template assignments for portability between Linabasis installations.
 
 ### Theme Structure
 
@@ -1851,7 +1847,7 @@ async function importThemeFromZip(zipFile: File): Promise<void> {
 
 ```typescript
 async function importThemeFromAPI(remoteUrl: string, apiKey: string): Promise<void> {
-  // Fetch theme from remote LineBasis installation
+  // Fetch theme from remote Linabasis installation
   const response = await fetch(`${remoteUrl}/api/themes/export?apiKey=${apiKey}`);
   const theme: Theme = await response.json();
   
@@ -1890,7 +1886,7 @@ async function importPage(pageData: ThemePageData): Promise<void> {
 
 ## Authentication & Authorization
 
-LineBasis uses JWT-based authentication with role-based access control (RBAC).
+Linabasis uses JWT-based authentication with role-based access control (RBAC).
 
 ### Authentication Flow
 
@@ -2081,7 +2077,7 @@ export const DELETE = requireRole('designer', async ({ params, locals }) => {
 
 ## Plugin Architecture
 
-LineBasis supports plugins via Prisma schema composition and dynamic route/hook registration.
+Linabasis supports plugins via Prisma schema composition and dynamic route/hook registration.
 
 ### Plugin Structure
 
@@ -2720,7 +2716,7 @@ volumes:
 
 ## Summary
 
-LineBasis architecture is designed for:
+Linabasis architecture is designed for:
 
 1. **Local-first design** with IndexedDB and auto-save
 2. **Event sourcing** for perfect undo/redo and audit trails
@@ -2733,7 +2729,7 @@ LineBasis architecture is designed for:
 9. **Performance** through caching and optimization
 10. **Scalability** via horizontal and vertical scaling
 
-The architecture supports both LineBasis-hosted sites (dynamic Svelte components) and static exports (HTML/CSS download), providing maximum flexibility for users.
+The architecture supports both Linabasis-hosted sites (dynamic Svelte components) and static exports (HTML/CSS download), providing maximum flexibility for users.
 
 ---
 
@@ -2747,7 +2743,7 @@ Custom blocks allow developers to create coded Svelte components that appear in 
 
 ### Overview
 
-LineBasis supports three types of blocks:
+Linabasis supports three types of blocks:
 
 1. **User Blocks** - Created in designer by selecting elements → "Convert to Block"
 2. **Custom Blocks** - Developer-coded Svelte components (local or plugin-provided)
@@ -3327,7 +3323,7 @@ export const manifest: Plugin = {
   id: '@linebasis/blog',
   name: 'Blog',
   version: '1.0.0',
-  isCore: true, // Ships with LineBasis but can be disabled
+  isCore: true, // Ships with Linabasis but can be disabled
   
   // Database models
   schema: './prisma/schema.prisma',
@@ -3413,7 +3409,7 @@ export const manifest: Plugin = {
 
 ## Summary: Custom Blocks
 
-Custom blocks enable developers to extend LineBasis with coded Svelte components while maintaining the visual editing experience:
+Custom blocks enable developers to extend Linabasis with coded Svelte components while maintaining the visual editing experience:
 
 - **Two methods**: Manifest-based OR component-based metadata
 - **Two locations**: Local (`/blocks/`) OR plugin (`plugins/*/blocks/`)

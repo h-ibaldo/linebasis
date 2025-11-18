@@ -179,7 +179,7 @@ export const manifest: PluginManifest = {
   name: 'Blog System',
   version: '1.0.0',
   description: 'Full-featured blog with posts, categories, tags, and SEO',
-  author: 'LineBasis Team',
+  author: 'Linabasis Team',
   license: 'MIT',
 
   requires: {
@@ -293,7 +293,7 @@ export default manifest;
 7. Test plugin loading
 
 This will result in:
-- LineBasis core (minimal)
+- Linabasis core (minimal)
 - @linebasis/blog (optional plugin)
 - Proof of concept for plugin architecture
 

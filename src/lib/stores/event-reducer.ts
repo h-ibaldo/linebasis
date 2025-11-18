@@ -10,17 +10,32 @@ import type {
 	DesignEvent,
 	DesignState,
 	Element,
+	View,
 	Page,
+	Group,
 	Component,
 	CreateElementEvent,
 	UpdateElementEvent,
 	DeleteElementEvent,
 	MoveElementEvent,
 	ResizeElementEvent,
+	RotateElementEvent,
 	ReorderElementEvent,
+	ToggleViewEvent,
+	GroupMoveElementsEvent,
+	GroupResizeElementsEvent,
+	GroupRotateElementsEvent,
+	GroupUpdateStylesEvent,
+	GroupElementsEvent,
+	UngroupElementsEvent,
 	UpdateStylesEvent,
 	UpdateTypographyEvent,
 	UpdateSpacingEvent,
+	UpdateAutoLayoutEvent,
+	CreateViewEvent,
+	UpdateViewEvent,
+	DeleteViewEvent,
+	ResizeViewEvent,
 	CreatePageEvent,
 	UpdatePageEvent,
 	DeletePageEvent,
@@ -37,10 +52,13 @@ import type {
 export function getInitialState(): DesignState {
 	return {
 		pages: {},
+		views: {},
 		elements: {},
+		groups: {},
 		components: {},
 		pageOrder: [],
 		currentPageId: null,
+		currentViewId: null,
 		selectedElementIds: []
 	};
 }
@@ -74,8 +92,26 @@ export function reduceEvent(state: DesignState, event: DesignEvent): DesignState
 			return handleMoveElement(state, event);
 		case 'RESIZE_ELEMENT':
 			return handleResizeElement(state, event);
+		case 'ROTATE_ELEMENT':
+			return handleRotateElement(state, event);
 		case 'REORDER_ELEMENT':
 			return handleReorderElement(state, event);
+		case 'TOGGLE_VIEW':
+			return handleToggleView(state, event);
+		case 'GROUP_MOVE_ELEMENTS':
+			return handleGroupMoveElements(state, event);
+		case 'GROUP_RESIZE_ELEMENTS':
+			return handleGroupResizeElements(state, event);
+		case 'GROUP_ROTATE_ELEMENTS':
+			return handleGroupRotateElements(state, event);
+		case 'GROUP_UPDATE_STYLES':
+			return handleGroupUpdateStyles(state, event);
+
+		// Group operations
+		case 'GROUP_ELEMENTS':
+			return handleGroupElements(state, event);
+		case 'UNGROUP_ELEMENTS':
+			return handleUngroupElements(state, event);
 
 		// Style operations
 		case 'UPDATE_STYLES':
@@ -84,6 +120,18 @@ export function reduceEvent(state: DesignState, event: DesignEvent): DesignState
 			return handleUpdateTypography(state, event);
 		case 'UPDATE_SPACING':
 			return handleUpdateSpacing(state, event);
+		case 'UPDATE_AUTO_LAYOUT':
+			return handleUpdateAutoLayout(state, event);
+
+		// View operations (breakpoint views)
+		case 'CREATE_VIEW':
+			return handleCreateView(state, event);
+		case 'UPDATE_VIEW':
+			return handleUpdateView(state, event);
+		case 'DELETE_VIEW':
+			return handleDeleteView(state, event);
+		case 'RESIZE_VIEW':
+			return handleResizeView(state, event);
 
 		// Page operations
 		case 'CREATE_PAGE':
@@ -115,22 +163,26 @@ export function reduceEvent(state: DesignState, event: DesignEvent): DesignState
 // ============================================================================
 
 function handleCreateElement(state: DesignState, event: CreateElementEvent): DesignState {
-	const { elementId, parentId, pageId, elementType, position, size, styles, content } =
+	const { elementId, parentId, viewId, elementType, position, size, styles, content } =
 		event.payload;
+
+	// Calculate next z-index: find highest z-index among all elements and add 1
+	const maxZIndex = Math.max(0, ...Object.values(state.elements).map(el => el.zIndex || 0));
 
 	const element: Element = {
 		id: elementId,
 		type: elementType,
 		parentId,
-		pageId,
+		viewId,
 		position,
 		size,
 		styles: styles || {},
 		typography: {},
 		spacing: {},
+		autoLayout: {},
 		content,
 		children: [],
-		zIndex: 0
+		zIndex: maxZIndex + 1
 	};
 
 	// Add element to state
@@ -144,19 +196,19 @@ function handleCreateElement(state: DesignState, event: CreateElementEvent): Des
 		};
 	}
 
-	// Add element to page's root elements if no parent
-	const newPages = { ...state.pages };
-	if (!parentId && newPages[pageId]) {
-		newPages[pageId] = {
-			...newPages[pageId],
-			elements: [...newPages[pageId].elements, elementId]
+	// Add element to view's root elements if no parent
+	const newViews = { ...state.views };
+	if (!parentId && newViews[viewId]) {
+		newViews[viewId] = {
+			...newViews[viewId],
+			elements: [...newViews[viewId].elements, elementId]
 		};
 	}
 
 	return {
 		...state,
 		elements: newElements,
-		pages: newPages
+		views: newViews
 	};
 }
 
@@ -185,7 +237,7 @@ function handleDeleteElement(state: DesignState, event: DeleteElementEvent): Des
 	if (!element) return state;
 
 	const newElements = { ...state.elements };
-	const newPages = { ...state.pages };
+	const newViews = { ...state.views };
 
 	// Remove from parent's children
 	if (element.parentId && newElements[element.parentId]) {
@@ -195,11 +247,11 @@ function handleDeleteElement(state: DesignState, event: DeleteElementEvent): Des
 		};
 	}
 
-	// Remove from page's root elements
-	if (!element.parentId && newPages[element.pageId]) {
-		newPages[element.pageId] = {
-			...newPages[element.pageId],
-			elements: newPages[element.pageId].elements.filter((id) => id !== elementId)
+	// Remove from view's root elements
+	if (!element.parentId && newViews[element.viewId]) {
+		newViews[element.viewId] = {
+			...newViews[element.viewId],
+			elements: newViews[element.viewId].elements.filter((id) => id !== elementId)
 		};
 	}
 
@@ -221,7 +273,7 @@ function handleDeleteElement(state: DesignState, event: DeleteElementEvent): Des
 	return {
 		...state,
 		elements: newElements,
-		pages: newPages,
+		views: newViews,
 		selectedElementIds: newSelectedElementIds
 	};
 }
@@ -245,7 +297,7 @@ function handleMoveElement(state: DesignState, event: MoveElementEvent): DesignS
 }
 
 function handleResizeElement(state: DesignState, event: ResizeElementEvent): DesignState {
-	const { elementId, size } = event.payload;
+	const { elementId, size, position } = event.payload;
 	const element = state.elements[elementId];
 
 	if (!element) return state;
@@ -256,7 +308,27 @@ function handleResizeElement(state: DesignState, event: ResizeElementEvent): Des
 			...state.elements,
 			[elementId]: {
 				...element,
-				size
+				size,
+				// Update position if provided (for N/W handles)
+				...(position && { position })
+			}
+		}
+	};
+}
+
+function handleRotateElement(state: DesignState, event: RotateElementEvent): DesignState {
+	const { elementId, rotation } = event.payload;
+	const element = state.elements[elementId];
+
+	if (!element) return state;
+
+	return {
+		...state,
+		elements: {
+			...state.elements,
+			[elementId]: {
+				...element,
+				rotation
 			}
 		}
 	};
@@ -269,7 +341,7 @@ function handleReorderElement(state: DesignState, event: ReorderElementEvent): D
 	if (!element) return state;
 
 	const newElements = { ...state.elements };
-	const newPages = { ...state.pages };
+	const newViews = { ...state.views };
 
 	// Remove from old parent
 	if (element.parentId && newElements[element.parentId]) {
@@ -277,18 +349,21 @@ function handleReorderElement(state: DesignState, event: ReorderElementEvent): D
 			...newElements[element.parentId],
 			children: newElements[element.parentId].children.filter((id) => id !== elementId)
 		};
-	} else if (!element.parentId && newPages[element.pageId]) {
-		newPages[element.pageId] = {
-			...newPages[element.pageId],
-			elements: newPages[element.pageId].elements.filter((id) => id !== elementId)
+	} else if (!element.parentId && newViews[element.viewId]) {
+		newViews[element.viewId] = {
+			...newViews[element.viewId],
+			elements: newViews[element.viewId].elements.filter((id) => id !== elementId)
 		};
 	}
 
 	// Update element parent
+	// When moving to a parent element, clear viewId (element is now nested)
+	// When moving to view root (parentId = null), keep existing viewId
 	newElements[elementId] = {
 		...element,
 		parentId: newParentId,
-		zIndex: newIndex
+		zIndex: newIndex,
+		...(newParentId !== null && { viewId: '' })
 	};
 
 	// Add to new parent
@@ -299,11 +374,11 @@ function handleReorderElement(state: DesignState, event: ReorderElementEvent): D
 			...newElements[newParentId],
 			children
 		};
-	} else if (!newParentId && newPages[element.pageId]) {
-		const elements = [...newPages[element.pageId].elements];
+	} else if (!newParentId && newViews[element.viewId]) {
+		const elements = [...newViews[element.viewId].elements];
 		elements.splice(newIndex, 0, elementId);
-		newPages[element.pageId] = {
-			...newPages[element.pageId],
+		newViews[element.viewId] = {
+			...newViews[element.viewId],
 			elements
 		};
 	}
@@ -311,7 +386,160 @@ function handleReorderElement(state: DesignState, event: ReorderElementEvent): D
 	return {
 		...state,
 		elements: newElements,
-		pages: newPages
+		views: newViews
+	};
+}
+
+function handleGroupMoveElements(state: DesignState, event: GroupMoveElementsEvent): DesignState {
+	const { elements } = event.payload;
+	const newElements = { ...state.elements };
+
+	// Update all elements atomically
+	for (const { elementId, position } of elements) {
+		const element = newElements[elementId];
+		if (element) {
+			newElements[elementId] = {
+				...element,
+				position
+			};
+		}
+	}
+
+	return {
+		...state,
+		elements: newElements
+	};
+}
+
+function handleGroupResizeElements(state: DesignState, event: GroupResizeElementsEvent): DesignState {
+	const { elements } = event.payload;
+	const newElements = { ...state.elements };
+
+	// Update all elements atomically
+	for (const { elementId, size, position } of elements) {
+		const element = newElements[elementId];
+		if (element) {
+			newElements[elementId] = {
+				...element,
+				size,
+				...(position && { position })
+			};
+		}
+	}
+
+	return {
+		...state,
+		elements: newElements
+	};
+}
+
+function handleGroupRotateElements(state: DesignState, event: GroupRotateElementsEvent): DesignState {
+	const { elements } = event.payload;
+	const newElements = { ...state.elements };
+
+	// Update all elements atomically
+	for (const { elementId, rotation, position } of elements) {
+		const element = newElements[elementId];
+		if (element) {
+			newElements[elementId] = {
+				...element,
+				rotation,
+				position
+			};
+		}
+	}
+
+	return {
+		...state,
+		elements: newElements
+	};
+}
+
+function handleGroupUpdateStyles(state: DesignState, event: GroupUpdateStylesEvent): DesignState {
+	const { elements } = event.payload;
+	const newElements = { ...state.elements };
+
+	// Update all elements atomically
+	for (const { elementId, styles } of elements) {
+		const element = newElements[elementId];
+		if (element) {
+			newElements[elementId] = {
+				...element,
+				styles: {
+					...element.styles,
+					...styles
+				}
+			};
+		}
+	}
+
+	return {
+		...state,
+		elements: newElements
+	};
+}
+
+// ============================================================================
+// Group Handlers
+// ============================================================================
+
+function handleGroupElements(state: DesignState, event: GroupElementsEvent): DesignState {
+	const { groupId, elementIds } = event.payload;
+
+	// Create the group
+	const group: Group = {
+		id: groupId,
+		elementIds
+	};
+
+	// Update elements to reference the group
+	const newElements = { ...state.elements };
+	for (const elementId of elementIds) {
+		const element = newElements[elementId];
+		if (element) {
+			newElements[elementId] = {
+				...element,
+				groupId
+			};
+		}
+	}
+
+	return {
+		...state,
+		groups: {
+			...state.groups,
+			[groupId]: group
+		},
+		elements: newElements
+	};
+}
+
+function handleUngroupElements(state: DesignState, event: UngroupElementsEvent): DesignState {
+	const { groupId } = event.payload;
+	const group = state.groups[groupId];
+
+	if (!group) return state;
+
+	// Remove groupId from all elements in the group
+	const newElements = { ...state.elements };
+	for (const elementId of group.elementIds) {
+		const element = newElements[elementId];
+		if (element) {
+			newElements[elementId] = {
+				...element,
+				groupId: null
+			};
+		}
+	}
+
+	// Delete the group
+	const newGroups = { ...state.groups };
+	delete newGroups[groupId];
+
+	return {
+		...state,
+		groups: newGroups,
+		elements: newElements
 	};
 }
 
@@ -382,20 +610,175 @@ function handleUpdateSpacing(state: DesignState, event: UpdateSpacingEvent): Des
 	};
 }
 
+function handleUpdateAutoLayout(state: DesignState, event: UpdateAutoLayoutEvent): DesignState {
+	const { elementId, autoLayout } = event.payload;
+	const element = state.elements[elementId];
+
+	if (!element) return state;
+
+	return {
+		...state,
+		elements: {
+			...state.elements,
+			[elementId]: {
+				...element,
+				autoLayout: {
+					...element.autoLayout,
+					...autoLayout
+				}
+			}
+		}
+	};
+}
+
+function handleToggleView(state: DesignState, event: ToggleViewEvent): DesignState {
+	const { elementId, isView, viewName, breakpointWidth } = event.payload;
+	const element = state.elements[elementId];
+
+	if (!element) return state;
+
+	return {
+		...state,
+		elements: {
+			...state.elements,
+			[elementId]: {
+				...element,
+				isView,
+				viewName: viewName || element.viewName,
+				breakpointWidth: breakpointWidth || element.breakpointWidth || 1440
+			}
+		}
+	};
+}
+
+// ============================================================================
+// View Handlers (Breakpoint Views)
+// ============================================================================
+
+function handleCreateView(state: DesignState, event: CreateViewEvent): DesignState {
+	const { viewId, pageId, name, breakpointWidth, position, height } = event.payload;
+
+	const view: View = {
+		id: viewId,
+		pageId,
+		name,
+		breakpointWidth,
+		position,
+		height: height || 900,
+		elements: []
+	};
+
+	// Add view to state
+	const newViews = { ...state.views, [viewId]: view };
+
+	// Add view to page
+	const newPages = { ...state.pages };
+	if (newPages[pageId]) {
+		newPages[pageId] = {
+			...newPages[pageId],
+			views: [...newPages[pageId].views, viewId]
+		};
+	}
+
+	return {
+		...state,
+		views: newViews,
+		pages: newPages,
+		currentViewId: state.currentViewId || viewId // Set as current if first view
+	};
+}
+
+function handleUpdateView(state: DesignState, event: UpdateViewEvent): DesignState {
+	const { viewId, changes } = event.payload;
+	const view = state.views[viewId];
+
+	if (!view) return state;
+
+	return {
+		...state,
+		views: {
+			...state.views,
+			[viewId]: {
+				...view,
+				...changes
+			}
+		}
+	};
+}
+
+function handleDeleteView(state: DesignState, event: DeleteViewEvent): DesignState {
+	const { viewId } = event.payload;
+	const view = state.views[viewId];
+
+	if (!view) return state;
+
+	const newViews = { ...state.views };
+	delete newViews[viewId];
+
+	// Delete all elements in this view
+	const newElements = { ...state.elements };
+	Object.keys(newElements).forEach((elementId) => {
+		if (newElements[elementId].viewId === viewId) {
+			delete newElements[elementId];
+		}
+	});
+
+	// Remove from page
+	const newPages = { ...state.pages };
+	if (newPages[view.pageId]) {
+		newPages[view.pageId] = {
+			...newPages[view.pageId],
+			views: newPages[view.pageId].views.filter((id) => id !== viewId)
+		};
+	}
+
+	// Update current view if deleted
+	let newCurrentViewId = state.currentViewId;
+	if (state.currentViewId === viewId) {
+		const remainingViews = Object.keys(newViews);
+		newCurrentViewId = remainingViews.length > 0 ? remainingViews[0] : null;
+	}
+
+	return {
+		...state,
+		views: newViews,
+		elements: newElements,
+		pages: newPages,
+		currentViewId: newCurrentViewId
+	};
+}
+
+function handleResizeView(state: DesignState, event: ResizeViewEvent): DesignState {
+	const { viewId, width, height } = event.payload;
+	const view = state.views[viewId];
+
+	if (!view) return state;
+
+	return {
+		...state,
+		views: {
+			...state.views,
+			[viewId]: {
+				...view,
+				breakpointWidth: width,
+				...(height && { height })
+			}
+		}
+	};
+}
+
 // ============================================================================
 // Page Handlers
 // ============================================================================
 
 function handleCreatePage(state: DesignState, event: CreatePageEvent): DesignState {
-	const { pageId, name, slug, width = 1440, height = 900 } = event.payload;
+	const { pageId, name, slug } = event.payload;
 
 	const page: Page = {
 		id: pageId,
 		name,
 		slug: slug || name.toLowerCase().replace(/\s+/g, '-'),
-		width,
-		height,
-		elements: []
+		views: []
 	};
 
 	return {
@@ -436,10 +819,17 @@ function handleDeletePage(state: DesignState, event: DeletePageEvent): DesignSta
 	const newPages = { ...state.pages };
 	delete newPages[pageId];
 
-	// Delete all elements on this page
+	// Delete all views belonging to this page
+	const newViews = { ...state.views };
+	const viewsToDelete = Object.keys(newViews).filter((viewId) => newViews[viewId].pageId === pageId);
+	viewsToDelete.forEach((viewId) => {
+		delete newViews[viewId];
+	});
+
+	// Delete all elements in those views
 	const newElements = { ...state.elements };
 	Object.keys(newElements).forEach((elementId) => {
-		if (newElements[elementId].pageId === pageId) {
+		if (viewsToDelete.includes(newElements[elementId].viewId)) {
 			delete newElements[elementId];
 		}
 	});
@@ -456,6 +846,7 @@ function handleDeletePage(state: DesignState, event: DeletePageEvent): DesignSta
 	return {
 		...state,
 		pages: newPages,
+		views: newViews,
 		elements: newElements,
 		pageOrder: newPageOrder,
 		currentPageId: newCurrentPageId
@@ -543,6 +934,13 @@ function handleInstanceComponent(
 	});
 
 	// Second pass: clone elements with updated IDs and references
+	// Note: Component instances need to be assigned to a view
+	const currentView = state.currentViewId ? state.views[state.currentViewId] : null;
+	if (!currentView) {
+		// Cannot instance component without a current view
+		return state;
+	}
+
 	component.elementIds.forEach((oldId) => {
 		const oldElement = state.elements[oldId];
 		if (!oldElement) return;
@@ -554,7 +952,7 @@ function handleInstanceComponent(
 			...oldElement,
 			id: newId,
 			parentId: newParentId,
-			pageId,
+			viewId: currentView.id,
 			position: {
 				x: position.x + oldElement.position.x,
 				y: position.y + oldElement.position.y
@@ -563,22 +961,20 @@ function handleInstanceComponent(
 		};
 	});
 
-	// Add root elements to page
+	// Add root elements to current view
 	const rootElementIds = component.elementIds
 		.filter((id) => !state.elements[id]?.parentId)
 		.map((id) => idMap.get(id)!);
 
-	const newPages = { ...state.pages };
-	if (newPages[pageId]) {
-		newPages[pageId] = {
-			...newPages[pageId],
-			elements: [...newPages[pageId].elements, ...rootElementIds]
-		};
-	}
+	const newViews = { ...state.views };
+	newViews[currentView.id] = {
+		...currentView,
+		elements: [...currentView.elements, ...rootElementIds]
+	};
 
 	return {
 		...state,
 		elements: newElements,
-		pages: newPages
+		views: newViews
 	};
 }

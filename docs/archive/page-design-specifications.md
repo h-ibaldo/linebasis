@@ -1,6 +1,6 @@
 # Page Design Specifications
 
-Detailed specifications for all pages in LineBasis.
+Detailed specifications for all pages in Linabasis.
 
 ## Design Philosophy
 

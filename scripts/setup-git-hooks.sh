@@ -1,9 +1,9 @@
 #!/bin/bash
 
-# LineBasis Git Hooks Setup
+# Linabasis Git Hooks Setup
 # Run: chmod +x scripts/setup-git-hooks.sh && ./scripts/setup-git-hooks.sh
 
-echo "🔧 Setting up LineBasis git hooks..."
+echo "🔧 Setting up Linabasis git hooks..."
 
 # Create hooks directory if it doesn't exist
 mkdir -p .git/hooks

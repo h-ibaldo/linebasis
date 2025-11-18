@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "LineBasis Component Properties Schema",
-  "description": "User-controllable properties for all components in the LineBasis page builder",
+  "title": "Linabasis Component Properties Schema",
+  "description": "User-controllable properties for all components in the Linabasis page builder",
   "version": "1.0.0",
   
   "definitions": {
@@ -1097,7 +1097,7 @@
     "heroHeading": {
       "id": "hero-heading",
       "type": "text",
-      "content": "Welcome to LineBasis",
+      "content": "Welcome to Linabasis",
       "style": {
         "preset": "heading-1"
       },

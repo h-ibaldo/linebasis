@@ -23,7 +23,7 @@ function question(prompt: string): Promise<string> {
 }
 
 async function main() {
-	console.log('\n🚀 LineBasis Setup - Phase 1');
+	console.log('\n🚀 Linabasis Setup - Phase 1');
 	console.log('============================\n');
 
 	let name: string;

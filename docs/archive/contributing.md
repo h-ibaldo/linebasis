@@ -1,12 +1,12 @@
-# Contributing to LineBasis
+# Contributing to Linabasis
 
-**⚠️ IMPORTANT: LineBasis is currently in early development and is NOT accepting external contributions at this time.**
+**⚠️ IMPORTANT: Linabasis is currently in early development and is NOT accepting external contributions at this time.**
 
 This document outlines our future contribution guidelines. We will open contributions once the core foundation is established.
 
 ## Project Philosophy
 
-LineBasis is a **highly vibe-coded, AI-friendly project** that will embrace both human and AI contributions while maintaining human authorship for all commits. We believe in transparent AI usage and human accountability.
+Linabasis is a **highly vibe-coded, AI-friendly project** that will embrace both human and AI contributions while maintaining human authorship for all commits. We believe in transparent AI usage and human accountability.
 
 ## When Will Contributions Open?
 
@@ -158,4 +158,4 @@ src/
 
 ---
 
-Thank you for your interest in LineBasis! We look forward to collaborating with you once contributions open.
+Thank you for your interest in Linabasis! We look forward to collaborating with you once contributions open.

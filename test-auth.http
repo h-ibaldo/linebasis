@@ -1,4 +1,4 @@
-### LineBasis Auth API Tests
+### Linabasis Auth API Tests
 ### Use with VS Code REST Client extension or similar
 
 @baseUrl = http://localhost:5173

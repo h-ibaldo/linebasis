@@ -1,4 +1,4 @@
-# LineBasis - Quick Test Reference
+# Linabasis - Quick Test Reference
 
 ## 🚀 Server Running on: http://localhost:5175
 

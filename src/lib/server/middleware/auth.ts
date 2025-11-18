@@ -26,26 +26,36 @@ export function requireAuth(
 	handler: (event: RequestEvent & { locals: { user: User } }) => Promise<Response>
 ) {
 	return async (event: RequestEvent): Promise<Response> => {
-		const token = extractToken(event);
+		try {
+			const token = extractToken(event);
 
-		if (!token) {
-			throw error(401, { message: 'Missing authentication token' });
+			if (!token) {
+				throw error(401, { message: 'Missing authentication token' });
+			}
+
+			const payload = verifyAccessToken(token);
+			if (!payload) {
+				throw error(401, { message: 'Invalid or expired token' });
+			}
+
+			const user = await getUserById(payload.userId);
+			if (!user) {
+				throw error(401, { message: 'User not found' });
+			}
+
+			// Attach user to locals
+			event.locals.user = user;
+
+			return handler(event as RequestEvent & { locals: { user: User } });
+		} catch (err) {
+			// If it's already a SvelteKit error, rethrow it
+			if (err && typeof err === 'object' && 'status' in err) {
+				throw err;
+			}
+			// Otherwise, log and return a 500 error
+			console.error('Auth middleware error:', err);
+			throw error(500, { message: 'Authentication failed' });
 		}
-
-		const payload = verifyAccessToken(token);
-		if (!payload) {
-			throw error(401, { message: 'Invalid or expired token' });
-		}
-
-		const user = await getUserById(payload.userId);
-		if (!user) {
-			throw error(401, { message: 'User not found' });
-		}
-
-		// Attach user to locals
-		event.locals.user = user;
-
-		return handler(event as RequestEvent & { locals: { user: User } });
 	};
 }
 
@@ -112,12 +122,17 @@ export function optionalAuth(
 		const token = extractToken(event);
 
 		if (token) {
-			const payload = verifyAccessToken(token);
-			if (payload) {
-				const user = await getUserById(payload.userId);
-				if (user) {
-					event.locals.user = user;
+			try {
+				const payload = verifyAccessToken(token);
+				if (payload) {
+					const user = await getUserById(payload.userId);
+					if (user) {
+						event.locals.user = user;
+					}
 				}
+			} catch (err) {
+				// Silently fail for optional auth - just don't set user
+				console.error('Optional auth error (ignored):', err);
 			}
 		}
 

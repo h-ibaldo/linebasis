@@ -1,12 +1,13 @@
 # Page Builder Specification
 
-This document defines the complete specification for the LineBasis page builder interface - the core design tool where users create and edit pages.
+This document defines the complete specification for the Linabasis page builder interface - the core design tool where users create and edit pages.
 
 ## Terminology
 
 - **Components**: The 3 atomic building blocks (Div, Text, Media) available in the toolbar
 - **Blocks**: User-created reusable design elements organized by source page
-- **Frames**: Artboards on the canvas representing different pages or breakpoints
+- **Canvas**: The design file for a page (each page has one canvas containing all breakpoints)
+- **Frames**: Artboards on the canvas representing breakpoints within a page
 - **Breakpoints**: Different frame sizes for responsive design (desktop, tablet, mobile)
 - **Properties**: Configurable attributes of components and blocks (see component-properties.md)
 
@@ -27,7 +28,6 @@ The page builder uses a **floating windows system** (Illustrator-style) with a f
                     Infinite Canvas
         ┌─────────────────────────┐
         │  Frame (Desktop)        │
-        │  Published: ✓           │
         │  Breakpoint: 1920px     │
         │  ┌───────────────────┐  │
         │  │ Div               │  │
@@ -126,13 +126,13 @@ The infinite canvas is where frames and design elements live. Users can pan, zoo
 
 ## Frames
 
-Frames are artboards on the canvas that represent pages or different breakpoints of the same page. Frames are special Div components with additional properties.
+Frames are artboards on the canvas that represent different breakpoints of a page. A canvas contains multiple frames, each representing a different responsive breakpoint. Frames are special Div components with additional properties.
 
 ### Frame Appearance
 
 ```
 ┌─────────────────────────────┐
-│ ✓ Homepage - Desktop        │ ← Frame header
+│ Homepage - Desktop          │ ← Frame header
 │ Breakpoint: 1920px          │
 ├─────────────────────────────┤
 │                             │
@@ -144,9 +144,6 @@ Frames are artboards on the canvas that represent pages or different breakpoints
 
 ### Frame Header
 
-- **Publish Toggle** (✓): Checkbox to publish/unpublish this frame
-  - Published frames → live on site URL
-  - Unpublished frames → drafts only
 - **Frame Name**: Editable name (click to rename)
 - **Breakpoint Size**: Shows current breakpoint width (e.g., "1920px")
 
@@ -160,8 +157,6 @@ Frames are artboards on the canvas that represent pages or different breakpoints
 - Frame Settings:
   - Input: Frame width (px)
   - Input: Frame height (auto or fixed px)
-  - Checkbox: Publish this frame
-  - Dropdown: Assign as template type (Blog Homepage, Single Post, etc.)
 
 ### Creating Frames
 
@@ -187,10 +182,7 @@ Frames are artboards on the canvas that represent pages or different breakpoints
 
 Users can define custom breakpoint sizes.
 
-**Publishing Logic**:
-- Only frames marked "Published" go live
-- If multiple breakpoints exist, responsive CSS generated automatically
-- Users can publish one breakpoint (e.g., desktop only) or all breakpoints
+**Note**: Publishing happens at the page level, not the frame level. When a page is published, all its frames (breakpoints) are published together as a responsive design.
 
 ---
 
@@ -563,7 +555,7 @@ When Div component selected:
 
 - Button group: Align children (start, center, end, space-between)
 - Button group: Direction (horizontal, vertical)
-- Button: Set as Frame (converts Div to Frame)
+- Button: Set as Frame (converts Div to Frame - creates a breakpoint)
 
 ### Media-Specific Actions
 
@@ -604,13 +596,6 @@ Appears when user clicks "Publish" button in toolbar.
   - Validation: lowercase, hyphens only, no special chars
   - Shows preview: `yourdomain.com/{slug}`
 
-**Breakpoints to Publish**:
-- Checkbox list of all frames:
-  - [ ] Desktop (1920px)
-  - [ ] Tablet (768px)
-  - [ ] Mobile (375px)
-- Note: "Select which breakpoints to publish. Unpublished breakpoints remain as drafts."
-
 **SEO Settings**:
 - Input: SEO title (default: page name)
   - Character count: 0/60
@@ -645,10 +630,12 @@ Appears when user clicks "Publish" button in toolbar.
 
 ### General
 
+- `Cmd+K` - Toggle keyboard shortcuts modal
 - `Cmd+S` - Save
 - `Cmd+Z` - Undo
 - `Cmd+Shift+Z` - Redo
 - `Cmd+C` - Copy
+- `Cmd+X` - Cut
 - `Cmd+V` - Paste
 - `Cmd+D` - Duplicate
 - `Delete` / `Backspace` - Delete selection
@@ -673,6 +660,25 @@ Appears when user clicks "Publish" button in toolbar.
 - `Cmd+0` - Zoom to 100%
 - `Cmd+1` - Fit all frames
 - `Cmd+2` - Fit selected frame
+
+### Text Editing
+
+- `Cmd/Ctrl+B` - Toggle bold
+- `Cmd/Ctrl+I` - Toggle italic
+- `Cmd/Ctrl+U` - Toggle underline
+- `Cmd/Ctrl+Shift+X` - Toggle strikethrough
+- `Cmd/Ctrl+Shift+7` - Toggle ordered list
+- `Cmd/Ctrl+Shift+8` - Toggle unordered list
+- Align left: `Opt+Cmd+L` (Mac) / `Alt+Ctrl+L` (Windows)
+- Align center: `Opt+Cmd+T` (Mac) / `Alt+Ctrl+T` (Windows)
+- Align right: `Opt+Cmd+R` (Mac) / `Alt+Ctrl+R` (Windows)
+- Align justified: `Opt+Cmd+Shift+J` (Mac) / `Alt+Ctrl+Shift+J` (Windows)
+- Increase font size: `Shift+Cmd+.` or `Shift+Cmd+>` (Mac) / `Shift+Ctrl+.` or `Shift+Ctrl+>` (Windows)
+- Decrease font size: `Shift+Cmd+,` or `Shift+Cmd+<` (Mac) / `Shift+Ctrl+,` or `Shift+Ctrl+<` (Windows)
+
+### Layout & Structure
+
+- Wrap selection in div: `Opt+Cmd+G` (Mac) / `Alt+Ctrl+G` (Windows)
 
 ### Layers
 
@@ -820,7 +826,7 @@ Breakpoints generate media queries:
 
 ## Summary
 
-The LineBasis page builder is a **professional design tool** combining:
+The Linabasis page builder is a **professional design tool** combining:
 - **Simplicity**: Only 3 atomic components (Div, Text, Media)
 - **Power**: Blocks, frames, responsive breakpoints, design tokens
 - **Flexibility**: Floating windows, customizable toolbar, keyboard shortcuts

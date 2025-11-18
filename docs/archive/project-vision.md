@@ -2,7 +2,7 @@
 
 ## Overview
 
-LineBasis is an open-source project with the ambitious goal of revolutionizing the web design ecosystem. Our mission is to fill the gap in the market by replacing WordPress, Figma (for web), and tools like Webflow with a more powerful, flexible, and user-friendly solution.
+Linabasis is an open-source project with the ambitious goal of revolutionizing the web design ecosystem. Our mission is to fill the gap in the market by replacing WordPress, Figma (for web), and tools like Webflow with a more powerful, flexible, and user-friendly solution.
 
 **Official Website:** [linebasis.org](https://linebasis.org) (linebasis.com redirects here)
 
@@ -81,7 +81,7 @@ LineBasis is an open-source project with the ambitious goal of revolutionizing t
 
 ## Long-term Vision
 
-LineBasis aims to become the standard for web design and development, creating a new paradigm where design and code are seamlessly integrated. We envision a future where:
+Linabasis aims to become the standard for web design and development, creating a new paradigm where design and code are seamlessly integrated. We envision a future where:
 
 - Designers can create production-ready code without learning complex programming
 - Developers can design beautiful interfaces without specialized design tools

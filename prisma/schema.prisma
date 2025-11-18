@@ -1,4 +1,4 @@
-// LineBasis Database Schema - Phase 1
+// Linabasis Database Schema - Phase 1
 // Core models for page builder, authentication, and teams
 
 generator client {
@@ -121,9 +121,6 @@ model Frame {
 
   // Design events specific to this frame
   designEvents String @default("[]") // JSON array of design events for this breakpoint
-
-  // Publishing
-  isPublished Boolean @default(false)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

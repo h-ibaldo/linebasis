@@ -1,4 +1,4 @@
-# LineBasis
+# Linabasis
 
 **A self-hosted visual website builder with professional design tools and modern technology.**
 
@@ -20,7 +20,7 @@ And here's what really bugs me: graphic designers figured out typography and lay
 
 ## The Solution
 
-LineBasis is the tool I wish existed:
+Linabasis is the tool I wish existed:
 
 ✅ **Visual website builder** with polished, modern UX
 ✅ **Self-hosted and 100% open source** - Install once, use forever
@@ -88,52 +88,85 @@ Build sites for friends, side projects, product landing pages—whatever you nee
 
 ## Current Status
 
-**🚧 Phase 1 Development - Milestone 1 Starting**
+**🚀 Phase 1 Development - Milestone 5 Nearly Complete (47% Overall)**
 
-LineBasis is being rebuilt from the ground up with a clear, well-documented architecture. The codebase has been completely reset (nuclear reset complete - October 2024) and we're starting Phase 1 implementation with a clean slate.
+Linabasis has made significant progress from design-focused planning to a working, professional-grade page builder.
 
-### ✅ Planning Complete (October 2024)
+### ✅ Completed (Nov 2024)
 
-Complete technical specifications written:
+**Milestones 1-4 COMPLETE** (4/15 - 27%):
+- ✅ **Milestone 1**: Foundation & Database - User auth, database schema, JWT
+- ✅ **Milestone 2**: Media Library - Upload, storage, media management
+- ✅ **Milestone 3**: Design System (Tokens) - Global design tokens, typography, spacing
+- ✅ **Milestone 4**: Event Sourcing Foundation - Perfect undo/redo with IndexedDB persistence
 
-- **[roadmap.md](docs/planning/roadmap.md)** - Phase 1 implementation roadmap with 15 milestones (721 lines)
-- **[app.md](docs/planning/app.md)** - Application structure, routing, UI specifications (720 lines)
-- **[page-builder-spec.md](docs/planning/page-builder-spec.md)** - Designer interface specification (1,196 lines)
-- **[architecture.md](docs/planning/architecture.md)** - Technical architecture, database schema, event sourcing (3,426 lines)
-- **[workflows.md](docs/planning/workflows.md)** - User workflows and journeys (1,321 lines)
-- **[component-properties.md](docs/planning/components-properties.md)** - Component property specifications (667 lines)
-- **[custom-blocks.md](docs/planning/custom-blocks.md)** - Custom block developer guide (Phase 2)
+**Milestone 5 NEARLY COMPLETE** (95% - 6% overall):
+- ✅ **Canvas Component**: Infinite pan/zoom (0.1x-4x), baseline grid, artboard rendering
+- ✅ **Drawing Tools**: Div, Text, Media tools with live preview during creation
+- ✅ **Selection System**: Single selection, multi-selection box, Shift+click toggle
+- ✅ **Transforms**: Drag, resize (8 handles), rotate (Figma-style with 15px zones), corner radius
+- ✅ **Advanced Features** (beyond original scope):
+  - Independent corner radius editing (Alt + drag)
+  - Figma-style rotation with keyboard shortcuts (Cmd+[/])
+  - Group transforms as atomic events
+  - Multi-selection with "Mixed" value indicators
+  - 30+ keyboard shortcuts (V, H, S, D, T, M tools + transforms)
+  - Live preview system with pending transforms
+  - All stored in IndexedDB with auto-save every 30s
+- 🚧 **Frame Management UI**: Data model complete, UI controls remaining (5%)
 
-**Total**: 8,051 lines of comprehensive documentation
+**Code Statistics**:
+- **5,903+ lines** of core store code (design-store, event-store, event-reducer)
+- **1,000+ lines** in SelectionOverlay for complete interaction handling
+- **10 React/Svelte components** for canvas UI
+- **49 exported functions** in design-store API
 
-### ✅ Nuclear Reset Complete (October 2024)
+### 🚧 In Progress (Milestone 6 - 40%)
+- ✅ Toolbar (component buttons, tools, undo/redo, zoom)
+- ✅ Properties window (background, border, opacity, radius with sync + independent modes)
+- ❌ Layers window (UI not started, APIs exist)
+- ❌ Blocks window (UI not started, APIs exist)
+- ❌ Text editing (content & typography properties)
+- ❌ Tokens window (not started)
 
-- Removed 175+ legacy files (-33,840 lines of incompatible code)
-- Clean slate: Only infrastructure files remain (app.d.ts, app.html)
-- Fresh start aligned with comprehensive planning docs
+### 📋 Roadmap: What's Next
+
+**Priority 1 - Complete Milestone 5** (2-3 days):
+- Frame name and width editing
+- Frame drag/resize on canvas
+- Frame deletion and duplication
+
+**Priority 2 - Text System** (1 week):
+- Inline text editing (double-click to edit)
+- Typography properties (font, size, weight, color, alignment)
+
+**Priority 3 - Layers Window** (1 week):
+- Hierarchical tree view with collapse/expand
+- Element visibility and lock toggles
+- Drag to reorder (z-index changes)
+- Rename via double-click
+
+**Priority 4 - Publishing System** (2 weeks):
+- Code generator (events → HTML/CSS)
+- Publishing service and API
+- Publish modal with SEO settings
+
+**Priority 5 - Pages Management** (3-4 days):
+- Create/edit/delete pages
+- Pages list with search/filter
+- Publish toggle per page
+
+**See [roadmap.md](docs/planning/roadmap.md) for complete breakdown of all 15 milestones with status.**
 
 ### 🚀 Phased Release Strategy
 
-**Phase 1: Core Page Builder (MVP)** - Build in Public ⬅️ **Currently Here**
-- 🚧 **Milestone 1**: Foundation & Database (in progress)
-- ⏳ **Milestone 2**: Media Library
-- ⏳ **Milestone 3**: Design System (Tokens)
-- ⏳ **Milestone 4**: Event Sourcing Foundation
-- ⏳ **Milestone 5**: Page Builder Canvas (Basic)
-- ⏳ **Milestone 6**: Page Builder UI (Floating Windows)
-- ⏳ **Milestone 7**: User Blocks System
-- ⏳ **Milestone 8**: Baseline Grid & Snapping
-- ⏳ **Milestone 9**: Publishing System
-- ⏳ **Milestone 10**: Pages Management
-- ⏳ **Milestone 11**: Team & User Management
-- ⏳ **Milestone 12**: Theme Export/Import
-- ⏳ **Milestone 13**: Admin Dashboard & Navigation
-- ⏳ **Milestone 14**: Polish & Testing
-- ⏳ **Milestone 15**: Deployment & Launch
+**Phase 1: Core Page Builder (MVP)** - Build in Public ⬅️ **Currently 47% Complete**
+- ✅ **Milestone 1-4**: Foundation, Media, Tokens, Event Sourcing
+- 🚧 **Milestone 5**: Page Builder Canvas (95%)
+- 🚧 **Milestone 6**: Page Builder UI (40%)
+- ⏳ **Milestone 7-15**: Blocks, Snapping, Publishing, Pages, Team, Theme, Polish, Deploy
 
-**Focus**: Ship core fast, validate architecture, gather feedback
-
-**See [roadmap.md](docs/planning/roadmap.md) for detailed breakdown of all milestones.**
+**Focus**: Ship core builder fast, validate architecture, gather feedback
 
 **Phase 2: Custom Blocks** - Developer Extensibility
 - 🔲 Custom block system (coded Svelte components)
@@ -174,16 +207,17 @@ Complete technical specifications written:
 
 ## Quick Start (For Developers)
 
-**⚠️ Phase 1 in active development - not yet installable**
+**⚠️ Phase 1 in active development - page builder works, publishing system not yet implemented**
 
-LineBasis is currently being built from scratch. The installation process below will be available once Milestone 1 (Foundation & Database) is complete.
+The page builder canvas is functional with professional-grade interactions. You can design pages, but cannot yet publish them (publishing is Priority 4).
 
-### Prerequisites (When Available)
+### Prerequisites
 
 - Node.js 18+
-- PostgreSQL (production) or SQLite (development)
+- npm or yarn
+- SQLite (dev) or PostgreSQL (production)
 
-### Installation (Coming Soon - Milestone 1)
+### Installation
 
 ```bash
 # Clone repository
@@ -195,7 +229,7 @@ npm install
 
 # Configure environment
 cp .env.example .env
-# Edit .env with your database URL and JWT secret
+# Edit .env with your database URL (default: SQLite at prisma/dev.db) and JWT secret
 
 # Setup database and create admin user
 npm run setup
@@ -204,10 +238,12 @@ npm run setup
 npm run dev
 ```
 
-### Current Development Commands
+Visit `http://localhost:5173` to access the page builder.
+
+### Development Commands
 
 ```bash
-# Development server (currently empty app)
+# Development server with hot reload
 npm run dev
 
 # Build for production
@@ -219,14 +255,59 @@ npm run preview
 # Run tests
 npm test
 
-# Type checking
-npm run check
+# Run tests once (CI mode)
+npm run test:run
+
+# Watch mode for type checking
+npm run check:watch
+
+# Open test UI
+npm run test:ui
 ```
 
-**Database commands coming in Milestone 1:**
-- `npm run db:migrate` - Create/apply database migrations
-- `npm run db:generate` - Generate Prisma client
-- `npm run setup` - Initial database setup + create admin user
+### Database Commands
+
+```bash
+# Compose schemas from core + plugins
+npm run db:compose
+
+# Create and apply migration
+npm run db:migrate
+
+# Generate Prisma client
+npm run db:generate
+
+# Open Prisma Studio (database GUI)
+npm run db:studio
+
+# Complete setup (first time)
+npm run setup
+```
+
+### Current Capabilities
+
+**What Works:**
+- ✅ Page builder canvas (pan, zoom, infinite scroll, baseline grid)
+- ✅ Three drawing tools (Div, Text, Media) with live preview
+- ✅ Transform tools (drag, resize, rotate with 15px zones, corner radius)
+- ✅ Multi-selection with group transforms as atomic events
+- ✅ Properties panel (background, border, opacity, independent corner radius)
+- ✅ Undo/redo with perfect history and event replay
+- ✅ 30+ keyboard shortcuts (Figma-style)
+- ✅ Auto-save to IndexedDB every 30s
+- ✅ User authentication (register, login, JWT)
+- ✅ Media library (upload, storage, management)
+- ✅ Design tokens (colors, typography, spacing)
+
+**What Doesn't Work Yet (Next Priorities):**
+- ❌ **Priority 1**: Frame management UI (remaining 5% of Milestone 5)
+- ❌ **Priority 2**: Text content editing (inline edit + typography properties)
+- ❌ **Priority 3**: Layers window (hierarchy tree view)
+- ❌ **Priority 4**: Publishing system (code generation + SSR)
+- ❌ **Priority 5**: Pages management (create, edit, delete, list)
+- ❌ Blocks window (reusable components)
+
+**See the [Roadmap: What's Next](#roadmap-whats-next) section above for detailed development priorities.**
 
 ---
 
@@ -300,7 +381,7 @@ See **[architecture.md](docs/planning/architecture.md)** for complete technical 
 - **[workflows.md](docs/planning/workflows.md)** - User workflows and journeys (1,321 lines)
 - **[component-properties.md](docs/planning/components-properties.md)** - Component property specs (667 lines)
 - **[custom-blocks.md](docs/planning/custom-blocks.md)** - Custom block developer guide (Phase 2)
-- **[project-vision.md](docs/planning/project-vision.md)** - Why LineBasis exists
+- **[project-vision.md](docs/planning/project-vision.md)** - Why Linabasis exists
 
 ### Developer Docs
 - **[CLAUDE.md](CLAUDE.md)** - Development guidelines and project overview
@@ -323,7 +404,7 @@ It's ambitious. It's early. But after shipping multiple successful products, I k
 
 **Not accepting external contributions at this time.**
 
-LineBasis is in active early development with frequent architectural changes. External contributions would create coordination overhead that slows progress.
+Linabasis is in active early development with frequent architectural changes. External contributions would create coordination overhead that slows progress.
 
 Once the core foundation is stable and well-tested, contributions will be welcome. Watch the repository for updates.
 
@@ -339,7 +420,7 @@ Once the core foundation is stable and well-tested, contributions will be welcom
 
 MIT License - See [LICENSE](LICENSE) for details.
 
-**You own everything you create with LineBasis.** The platform is yours to modify, extend, or fork.
+**You own everything you create with Linabasis.** The platform is yours to modify, extend, or fork.
 
 ---
 

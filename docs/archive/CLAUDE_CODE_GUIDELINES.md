@@ -1,8 +1,8 @@
-# Claude Code Guidelines for LineBasis
+# Claude Code Guidelines for Linabasis
 
 > **IMPORTANT**: Read this file at the start of EVERY Claude Code session before making any changes!
 
-This document ensures Claude Code follows LineBasis project rules from `.cursorrules` consistently.
+This document ensures Claude Code follows Linabasis project rules from `.cursorrules` consistently.
 
 ---
 

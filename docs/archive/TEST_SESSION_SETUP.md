@@ -330,5 +330,5 @@ Everything is ready for testing. The application is running, the database is set
 ---
 
 *Setup completed on October 12, 2025*
-*LineBasis v0.0.1 - Phase 2 Complete*
+*Linabasis v0.0.1 - Phase 2 Complete*
 

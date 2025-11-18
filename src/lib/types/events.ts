@@ -1,5 +1,5 @@
 /**
- * Event Sourcing Types for LineBasis Page Builder
+ * Event Sourcing Types for Linabasis Page Builder
  *
  * All design changes are stored as append-only events.
  * The current design state is computed by reducing events.
@@ -16,11 +16,26 @@ export type EventType =
 	| 'DELETE_ELEMENT'
 	| 'MOVE_ELEMENT'
 	| 'RESIZE_ELEMENT'
+	| 'ROTATE_ELEMENT'
 	| 'REORDER_ELEMENT'
+	| 'TOGGLE_VIEW'
+	| 'GROUP_MOVE_ELEMENTS'
+	| 'GROUP_RESIZE_ELEMENTS'
+	| 'GROUP_ROTATE_ELEMENTS'
+	// Group operations
+	| 'GROUP_ELEMENTS'
+	| 'UNGROUP_ELEMENTS'
 	// Style operations
 	| 'UPDATE_STYLES'
+	| 'GROUP_UPDATE_STYLES'
 	| 'UPDATE_TYPOGRAPHY'
 	| 'UPDATE_SPACING'
+	| 'UPDATE_AUTO_LAYOUT'
+	// View operations (breakpoint views)
+	| 'CREATE_VIEW'
+	| 'UPDATE_VIEW'
+	| 'DELETE_VIEW'
+	| 'RESIZE_VIEW'
 	// Page operations
 	| 'CREATE_PAGE'
 	| 'UPDATE_PAGE'
@@ -48,7 +63,7 @@ export interface CreateElementEvent extends BaseEvent {
 	payload: {
 		elementId: string;
 		parentId: string | null; // null for root elements
-		pageId: string;
+		viewId: string; // Elements belong to views (breakpoint views), not pages
 		elementType: ElementType;
 		position: Position;
 		size: Size;
@@ -91,6 +106,15 @@ export interface ResizeElementEvent extends BaseEvent {
 	payload: {
 		elementId: string;
 		size: Size;
+		position?: Position; // Optional: for N/W handles that also move the element
+	};
+}
+
+export interface RotateElementEvent extends BaseEvent {
+	type: 'ROTATE_ELEMENT';
+	payload: {
+		elementId: string;
+		rotation: number; // Rotation angle in degrees
 	};
 }
 
@@ -100,6 +124,77 @@ export interface ReorderElementEvent extends BaseEvent {
 		elementId: string;
 		newParentId: string | null;
 		newIndex: number; // Z-index or child position
+	};
+}
+
+export interface ToggleViewEvent extends BaseEvent {
+	type: 'TOGGLE_VIEW';
+	payload: {
+		elementId: string;
+		isView: boolean;
+		viewName?: string;
+		breakpointWidth?: number;
+	};
+}
+
+export interface GroupMoveElementsEvent extends BaseEvent {
+	type: 'GROUP_MOVE_ELEMENTS';
+	payload: {
+		elements: Array<{
+			elementId: string;
+			position: Position;
+		}>;
+	};
+}
+
+export interface GroupResizeElementsEvent extends BaseEvent {
+	type: 'GROUP_RESIZE_ELEMENTS';
+	payload: {
+		elements: Array<{
+			elementId: string;
+			size: Size;
+			position?: Position;
+		}>;
+	};
+}
+
+export interface GroupRotateElementsEvent extends BaseEvent {
+	type: 'GROUP_ROTATE_ELEMENTS';
+	payload: {
+		elements: Array<{
+			elementId: string;
+			rotation: number;
+			position: Position;
+		}>;
+	};
+}
+
+export interface GroupUpdateStylesEvent extends BaseEvent {
+	type: 'GROUP_UPDATE_STYLES';
+	payload: {
+		elements: Array<{
+			elementId: string;
+			styles: Partial<ElementStyles>;
+		}>;
+	};
+}
+
+// ============================================================================
+// Group Events
+// ============================================================================
+
+export interface GroupElementsEvent extends BaseEvent {
+	type: 'GROUP_ELEMENTS';
+	payload: {
+		groupId: string;
+		elementIds: string[];
+	};
+}
+
+export interface UngroupElementsEvent extends BaseEvent {
+	type: 'UNGROUP_ELEMENTS';
+	payload: {
+		groupId: string;
 	};
 }
 
@@ -128,6 +223,59 @@ export interface UpdateSpacingEvent extends BaseEvent {
 	payload: {
 		elementId: string;
 		spacing: Partial<SpacingStyle>;
+	};
+}
+
+export interface UpdateAutoLayoutEvent extends BaseEvent {
+	type: 'UPDATE_AUTO_LAYOUT';
+	payload: {
+		elementId: string;
+		autoLayout: Partial<AutoLayoutStyle>;
+	};
+}
+
+// ============================================================================
+// View Events (Breakpoint Views)
+// ============================================================================
+
+export interface CreateViewEvent extends BaseEvent {
+	type: 'CREATE_VIEW';
+	payload: {
+		viewId: string;
+		pageId: string; // Views belong to pages
+		name: string;
+		breakpointWidth: number; // e.g., 1920, 768, 375
+		position: Position; // Position on canvas
+		height?: number; // Auto or fixed
+	};
+}
+
+export interface UpdateViewEvent extends BaseEvent {
+	type: 'UPDATE_VIEW';
+	payload: {
+		viewId: string;
+		changes: {
+			name?: string;
+			breakpointWidth?: number;
+			position?: Position;
+			height?: number;
+		};
+	};
+}
+
+export interface DeleteViewEvent extends BaseEvent {
+	type: 'DELETE_VIEW';
+	payload: {
+		viewId: string;
+	};
+}
+
+export interface ResizeViewEvent extends BaseEvent {
+	type: 'RESIZE_VIEW';
+	payload: {
+		viewId: string;
+		width: number;
+		height?: number;
 	};
 }
 
@@ -223,10 +371,23 @@ export type DesignEvent =
 	| DeleteElementEvent
 	| MoveElementEvent
 	| ResizeElementEvent
+	| RotateElementEvent
 	| ReorderElementEvent
+	| ToggleViewEvent
+	| GroupMoveElementsEvent
+	| GroupResizeElementsEvent
+	| GroupRotateElementsEvent
+	| GroupUpdateStylesEvent
+	| GroupElementsEvent
+	| UngroupElementsEvent
 	| UpdateStylesEvent
 	| UpdateTypographyEvent
 	| UpdateSpacingEvent
+	| UpdateAutoLayoutEvent
+	| CreateViewEvent
+	| UpdateViewEvent
+	| DeleteViewEvent
+	| ResizeViewEvent
 	| CreatePageEvent
 	| UpdatePageEvent
 	| DeletePageEvent
@@ -291,12 +452,19 @@ export interface ElementStyles {
 	borderStyle: string;
 	borderColor: string;
 	borderRadius: string;
+	// Individual corner radii (for independent corner editing with Alt key)
+	borderTopLeftRadius?: string;
+	borderTopRightRadius?: string;
+	borderBottomRightRadius?: string;
+	borderBottomLeftRadius?: string;
 	// Effects
 	opacity: number;
 	boxShadow: string;
 	transform: string;
 	// Overflow
 	overflow: 'visible' | 'hidden' | 'scroll' | 'auto';
+    // Object fit (for img/video elements)
+	objectFit: 'cover' | 'contain' | 'fill' | 'none' | 'scale-down';
 }
 
 export interface TypographyStyle {
@@ -321,31 +489,59 @@ export interface SpacingStyle {
 	paddingLeft: string;
 }
 
+export interface AutoLayoutStyle {
+	enabled: boolean; // Toggle between freeform (false) and auto layout (true)
+	direction: 'row' | 'column' | 'row-wrap'; // Flex direction
+	justifyContent: 'flex-start' | 'flex-end' | 'center' | 'space-between' | 'space-around' | 'space-evenly'; // Main axis alignment
+	alignItems: 'flex-start' | 'flex-end' | 'center' | 'stretch' | 'baseline'; // Cross axis alignment
+	gap: string; // Gap between children (e.g., "8px", "16px")
+	ignoreAutoLayout?: boolean; // Per-child property: if true, child uses position: absolute
+}
+
 export interface Element {
 	id: string;
 	type: ElementType;
 	parentId: string | null;
-	pageId: string;
+	viewId: string; // Elements belong to views (breakpoint views)
+	groupId?: string | null; // Group ID if element belongs to a group
 	position: Position;
 	size: Size;
+	rotation?: number; // Rotation angle in degrees (default 0)
 	styles: Partial<ElementStyles>;
 	typography: Partial<TypographyStyle>;
 	spacing: Partial<SpacingStyle>;
+	autoLayout?: Partial<AutoLayoutStyle>; // Auto layout (flexbox) configuration
 	content?: string;
 	alt?: string;
 	href?: string;
 	src?: string;
 	children: string[]; // Child element IDs
 	zIndex: number;
+	isView?: boolean; // Whether this div is a view (page/breakpoint)
+	viewName?: string; // Name of the view if isView is true
+	breakpointWidth?: number; // Width of the view if isView is true
+}
+
+export interface View {
+	id: string;
+	pageId: string; // View belongs to a page
+	name: string; // e.g., "Desktop", "Mobile", "Tablet"
+	breakpointWidth: number; // e.g., 1920, 768, 375
+	position: Position; // Position on canvas
+	height: number; // Height in pixels (auto-grows with content)
+	elements: string[]; // Root element IDs
 }
 
 export interface Page {
 	id: string;
-	name: string;
-	slug: string;
-	width: number;
-	height: number;
-	elements: string[]; // Root element IDs
+	name: string; // e.g., "Homepage", "About"
+	slug: string; // URL slug
+	views: string[]; // View IDs (different breakpoints)
+}
+
+export interface Group {
+	id: string;
+	elementIds: string[]; // Element IDs that belong to this group
 }
 
 export interface Component {
@@ -356,10 +552,13 @@ export interface Component {
 
 export interface DesignState {
 	pages: Record<string, Page>;
+	views: Record<string, View>;
 	elements: Record<string, Element>;
+	groups: Record<string, Group>;
 	components: Record<string, Component>;
 	pageOrder: string[];
 	currentPageId: string | null;
+	currentViewId: string | null; // Currently selected view (breakpoint)
 	selectedElementIds: string[];
 }
 

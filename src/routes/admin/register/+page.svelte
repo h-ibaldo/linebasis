@@ -66,9 +66,9 @@
 <main class="register-page">
 	<!-- STYLE: Register container - centered card/box on page -->
 	<div class="register-container">
-		<!-- STYLE: Logo/branding area - your LineBasis branding -->
+		<!-- STYLE: Logo/branding area - your Linabasis branding -->
 		<div class="register-header">
-			<h1 class="register-title">LineBasis</h1>
+			<h1 class="register-title">Linabasis</h1>
 			<p class="register-subtitle">Create your account</p>
 		</div>
 

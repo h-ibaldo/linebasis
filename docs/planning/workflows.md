@@ -1,6 +1,6 @@
-# LineBasis User Workflows
+# Linabasis User Workflows
 
-This document details the key user workflows and journeys through the LineBasis application. Each workflow describes step-by-step how users accomplish common tasks.
+This document details the key user workflows and journeys through the Linabasis application. Each workflow describes step-by-step how users accomplish common tasks.
 
 ## Table of Contents
 
@@ -21,7 +21,7 @@ This document details the key user workflows and journeys through the LineBasis 
 
 ## First-Time Setup
 
-**Goal**: Install LineBasis and create the first admin account.
+**Goal**: Install Linabasis and create the first admin account.
 
 ### Prerequisites
 - Server with Node.js installed
@@ -29,7 +29,7 @@ This document details the key user workflows and journeys through the LineBasis 
 
 ### Steps
 
-1. **Install LineBasis**
+1. **Install Linabasis**
    ```bash
    git clone https://github.com/linebasis/linebasis
    cd linebasis
@@ -84,7 +84,7 @@ This document details the key user workflows and journeys through the LineBasis 
    - **Spacing Tab**: Configure baseline grid (default: 8px)
    - Click "Save changes"
 
-**Result**: LineBasis is installed and configured, ready for page design.
+**Result**: Linabasis is installed and configured, ready for page design.
 
 ---
 
@@ -127,13 +127,18 @@ This document details the key user workflows and journeys through the LineBasis 
 
    **Add Text**:
    - Click "Text" button in toolbar
-   - Click inside Div to place Text
-   - Text appears: "Click to edit"
-   - Double-click text to edit: "Welcome to My Site"
+   - Click or drag on canvas to place Text
+   - Clicking will create a text element with auto width
+   - Draggin will create a text element with fixed width and height
+   - The caret appears, blinking
+   - User can start typing
+   - While editing, verify formatting shortcuts: `Cmd/Ctrl+B` (bold), `Cmd/Ctrl+I` (italic), `Cmd/Ctrl+U` (underline), `Cmd/Ctrl+Shift+X` (strikethrough), `Cmd/Ctrl+Shift+7/8` (ordered/bulleted lists), `Opt+Cmd+L/T/R` or `Alt+Ctrl+L/T/R` (alignment) and `Opt+Cmd+Shift+J` / `Alt+Ctrl+Shift+J` (justify), plus `Shift+Cmd+./>` or `Shift+Ctrl+./>` with `Shift+Cmd+,/<` or `Shift+Ctrl+,/<` (font size tweaks)
+   - To wrap grouped content, select multiple elements and press `Opt+Cmd+G` (Mac) / `Alt+Ctrl+G` (Windows); the elements nest in a new div container
+   - If user clicks outside a selected EMPTY text element, delete the element
    - In Properties window:
-     - Style Preset: Heading 1
-     - Alignment: Center
-     - Color: Primary
+     - Style Preset: paragraph
+     - Alignment: Start
+     - Color default: #000000
 
    **Add Media**:
    - Click "Media" button in toolbar
@@ -259,14 +264,13 @@ This document details the key user workflows and journeys through the LineBasis 
    - Select "Set as Default Breakpoint"
    - This frame shows first when page loads
 
-7. **Configure Publishing**
+7. **Publish Page**
    - Click "Publish" button
    - In publish modal:
-     - **Breakpoints to Publish**:
-       - ✓ Desktop (1920px)
-       - ✓ Tablet (768px)
-       - ✓ Mobile (375px)
-   - Click "Publish"
+     - Enter page slug
+     - Configure SEO settings
+     - Click "Publish"
+   - All breakpoints (frames) are published together as responsive design
 
 8. **System Generates Responsive CSS**
    ```css
@@ -290,8 +294,6 @@ This document details the key user workflows and journeys through the LineBasis 
    - Layout adjusts at breakpoints
 
 **Result**: Page responds to different screen sizes with optimized layouts.
-
-**Tip**: You can publish only certain breakpoints (e.g., desktop only) and add others later.
 
 ---
 
@@ -466,7 +468,7 @@ You have a "CTA Section" block used on 5 pages. You want to change the button co
 
 ## Creating and Publishing a Blog Post
 
-**Goal**: Write and publish a blog post using LineBasis's blog system.
+**Goal**: Write and publish a blog post using Linabasis's blog system.
 
 **User**: Editor or above
 
@@ -490,7 +492,7 @@ You have a "CTA Section" block used on 5 pages. You want to change the button co
 
    **Post Title**:
    - Large input field at top
-   - Enter: "How to Build a Website with LineBasis"
+   - Enter: "How to Build a Website with Linabasis"
 
    **Post Content**:
    - Rich text editor with formatting tools
@@ -505,17 +507,17 @@ You have a "CTA Section" block used on 5 pages. You want to change the button co
    ```
    # Introduction
    
-   LineBasis is a powerful CMS that makes website building easy.
+   Linabasis is a powerful CMS that makes website building easy.
    
    ## Getting Started
    
-   First, install LineBasis on your server...
+   First, install Linabasis on your server...
    
    ![Screenshot](/media/screenshot.png)
    
    ## Conclusion
    
-   With LineBasis, you can...
+   With Linabasis, you can...
    ```
 
 4. **Configure Post Settings** (Right Sidebar)
@@ -699,7 +701,7 @@ Blog templates are regular pages marked with special template types. They use th
 ### Scenario
 You've designed a complete website and want to:
 - Share it with a client
-- Use it on another LineBasis installation
+- Use it on another Linabasis installation
 - Create a backup
 - Publish it in the theme marketplace (future)
 
@@ -791,7 +793,7 @@ modern-business-theme.baseline-theme (ZIP)
    **Instructions Display**:
    ```
    To import this theme remotely:
-   1. Go to their LineBasis site
+   1. Go to their Linabasis site
    2. Navigate to Themes → Import
    3. Select "Remote Import (API)" tab
    4. Enter:
@@ -809,13 +811,13 @@ modern-business-theme.baseline-theme (ZIP)
 
 **Use Cases**:
 - **.zip file**: Send to client, publish in marketplace, backup
-- **API sharing**: Quick transfer between your own LineBasis installations
+- **API sharing**: Quick transfer between your own Linabasis installations
 
 ---
 
 ## Importing a Theme
 
-**Goal**: Import a theme (pages, blocks, tokens) into your LineBasis site.
+**Goal**: Import a theme (pages, blocks, tokens) into your Linabasis site.
 
 **User**: Manager or above
 
@@ -1303,7 +1305,7 @@ background: { color: "var(--color-primary)" }
 
 ## Summary
 
-These workflows cover the essential user journeys in LineBasis:
+These workflows cover the essential user journeys in Linabasis:
 
 1. **Setup**: First-time installation and configuration
 2. **Design**: Creating and publishing pages with responsive breakpoints

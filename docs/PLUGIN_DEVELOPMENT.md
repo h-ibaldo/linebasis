@@ -1,4 +1,4 @@
-# LineBasis Plugin Development Guide
+# Linabasis Plugin Development Guide
 
 **Version:** 1.0.0
 **Last Updated:** October 2025
@@ -24,7 +24,7 @@
 
 ## Introduction
 
-LineBasis uses a powerful plugin architecture that allows you to extend functionality without modifying the core codebase. Plugins can:
+Linabasis uses a powerful plugin architecture that allows you to extend functionality without modifying the core codebase. Plugins can:
 
 - Add new database models
 - Register API endpoints
@@ -140,7 +140,7 @@ export const manifest: PluginManifest = {
 
   // Dependencies
   requires: {
-    core: '^1.0.0',           // LineBasis core version
+    core: '^1.0.0',           // Linabasis core version
     plugins: {
       '@linebasis/other': '^2.0.0'  // Optional: other plugins
     }
