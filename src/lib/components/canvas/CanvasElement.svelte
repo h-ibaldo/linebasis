@@ -432,7 +432,25 @@ type DocumentWithCaret = Document & {
 			} else if (element.parentId) {
 				// Nested element drag: convert absolute position to parent-relative
 				// This is critical because position:absolute on nested elements is relative to parent
-				return absoluteToRelativePosition($interactionState.pendingPosition);
+				
+				// FIX: For rotated parents, we must transform the CENTER of the element, not the top-left.
+				// Transforming top-left directly fails because rotation happens around the center.
+				const currentSize = $interactionState.pendingSize || element.size;
+				
+				// 1. Calculate center in world space
+				const centerWorld = {
+					x: $interactionState.pendingPosition.x + currentSize.width / 2,
+					y: $interactionState.pendingPosition.y + currentSize.height / 2
+				};
+				
+				// 2. Transform center to local space (parent-relative)
+				const centerLocal = absoluteToRelativePosition(centerWorld);
+				
+				// 3. Convert back to top-left in local space
+				return {
+					x: centerLocal.x - currentSize.width / 2,
+					y: centerLocal.y - currentSize.height / 2
+				};
 			} else {
 				// Root element drag: use absolute position directly
 				return $interactionState.pendingPosition;

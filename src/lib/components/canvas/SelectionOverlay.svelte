@@ -3192,21 +3192,70 @@
 		<!-- Single element selection (hidden during auto layout reordering - ghost shows instead) -->
 		{@const selectedElement = selectedElements[0]}
 		{@const state = get(designState)}
-		{@const parent = selectedElement.parentId ? state.elements[selectedElement.parentId] : null}
+		{@const parent = selectedElement.parentId ? $designState.elements[selectedElement.parentId] : null}
 		{@const parentHasAutoLayout = parent?.autoLayout?.enabled || false}
 		{@const childIgnoresAutoLayout = selectedElement.autoLayout?.ignoreAutoLayout || false}
 		{@const isInAutoLayout = parentHasAutoLayout && !childIgnoresAutoLayout}
-		{@const parentTransform = parent ? {
-			position: getAbsolutePosition(parent),
-			rotation: getCumulativeRotation(selectedElement),
-			size: getDisplaySize(parent)
-		} : null}
+		{@const parentTransform = parent ? (() => {
+			const absPos = getAbsolutePosition(parent);
+			// getCumulativeRotation returns sum of ANCESTORS' rotations (not including parent itself)
+			const ancestorRot = getCumulativeRotation(parent);
+			// Total rotation for the wrapper should include parent's own rotation
+			const totalRot = ancestorRot + (parent.rotation || 0);
+			
+			// For nested parents, getAbsolutePosition returns the ACTUAL WORLD ORIGIN (top-left corner).
+			// But the wrapper is rotated around its center.
+			// We need to calculate the "unrotated position" that, when rotated around center, results in the Actual Origin.
+			// The Origin position is determined by ANCESTORS' rotation only (parent rotates around its own center).
+			// Formula: UnrotatedPos = ActualOrigin - Size/2 + Rotate_Ancestors(Size/2)
+			
+			let pos = absPos;
+			if (parent.parentId) {
+				const angleRad = ancestorRot * (Math.PI / 180);
+				const cos = Math.cos(angleRad);
+				const sin = Math.sin(angleRad);
+				const halfW = parent.size.width / 2;
+				const halfH = parent.size.height / 2;
+				
+				// Rotate(Size/2) using ancestor rotation
+				const rotatedHalfW = halfW * cos - halfH * sin;
+				const rotatedHalfH = halfW * sin + halfH * cos;
+				
+				pos = {
+					x: absPos.x - halfW + rotatedHalfW,
+					y: absPos.y - halfH + rotatedHalfH
+				};
+			}
+
+			return {
+				position: pos,
+				rotation: totalRot,
+				size: parent.size
+			};
+		})() : null}
 		{@const relativePendingPosition = (() => {
 			// If element is being dragged and has pending position
 			if (activeElementId === selectedElement.id && pendingPosition) {
 				// If element has a parent, convert absolute position to relative
 				if (parent) {
-					return absoluteToRelativePosition(selectedElement, pendingPosition);
+					// FIX: For rotated parents, we must transform the CENTER of the element, not the top-left.
+					// Transforming top-left directly fails because rotation happens around the center.
+					const currentSize = pendingSize || selectedElement.size;
+					
+					// 1. Calculate center in world space
+					const centerWorld = {
+						x: pendingPosition.x + currentSize.width / 2,
+						y: pendingPosition.y + currentSize.height / 2
+					};
+					
+					// 2. Transform center to local space (parent-relative)
+					const centerLocal = absoluteToRelativePosition(selectedElement, centerWorld);
+					
+					// 3. Convert back to top-left in local space
+					return {
+						x: centerLocal.x - currentSize.width / 2,
+						y: centerLocal.y - currentSize.height / 2
+					};
 				}
 				// If element has no parent (root-level), pendingPosition is already absolute
 				return pendingPosition;
