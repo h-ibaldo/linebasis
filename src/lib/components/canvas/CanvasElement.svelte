@@ -98,14 +98,24 @@ type DocumentWithCaret = Document & {
 
 		// If clicking on an element that's part of a multi-selection, keep the selection
 		// and start dragging all selected elements. Otherwise, select element(s).
+		let elementsToDrag: Element[] = [];
 		if (!isPartOfMultiSelection) {
 			// If element belongs to a group, select all elements in that group
 			if (groupId && state.groups[groupId]) {
 				const groupElementIds = state.groups[groupId].elementIds;
 				selectElements(groupElementIds);
+				// Get group elements directly from state (store update is synchronous)
+				elementsToDrag = groupElementIds
+					.map(id => state.elements[id])
+					.filter(Boolean);
 			} else {
 				selectElement(element.id);
+				// For single element, just use the clicked element
+				elementsToDrag = [element];
 			}
+		} else {
+			// Already part of multi-selection, use current selection
+			elementsToDrag = get(selectedElements);
 		}
 
 		// If scale tool, start scaling from any click (not just handles)
@@ -114,10 +124,8 @@ type DocumentWithCaret = Document & {
 			// For scale tool, pass 'se' handle to trigger resize mode with aspect ratio lock
 			const handle = tool === 'scale' ? 'se' : undefined;
 
-			// Pass current selection state to avoid timing issues when clicking outside selection
-			const currentSelectedElements = get(selectedElements);
-			const newSelectedElements = !isPartOfMultiSelection ? [element] : currentSelectedElements;
-			onStartDrag(e, element, handle, newSelectedElements);
+			// Pass the correct selection (group elements if element belongs to a group)
+			onStartDrag(e, element, handle, elementsToDrag);
 		}
 	}
 
