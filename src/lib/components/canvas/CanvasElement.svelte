@@ -367,8 +367,8 @@ type DocumentWithCaret = Document & {
 		}
 
 		// Pending position from SelectionOverlay during drag is in absolute coordinates
-		// When dragging (not auto-layout reordering), use absolute position directly
-		// because element might be transitioning between parents
+		// When dragging (not auto-layout reordering), we need to convert to parent-relative
+		// because nested elements with position:absolute are positioned relative to their parent
 		if ($interactionState.activeElementId === element.id && $interactionState.pendingPosition) {
 			// Check if this is auto layout child dragging for reordering
 			const parent = element.parentId ? $designState.elements[element.parentId] : null;
@@ -377,8 +377,12 @@ type DocumentWithCaret = Document & {
 			if (isAutoLayoutReorder) {
 				// Auto layout reordering: convert to relative
 				return absoluteToRelativePosition($interactionState.pendingPosition);
+			} else if (element.parentId) {
+				// Nested element drag: convert absolute position to parent-relative
+				// This is critical because position:absolute on nested elements is relative to parent
+				return absoluteToRelativePosition($interactionState.pendingPosition);
 			} else {
-				// Regular drag: use absolute position directly (element will be positioned absolutely)
+				// Root element drag: use absolute position directly
 				return $interactionState.pendingPosition;
 			}
 		}

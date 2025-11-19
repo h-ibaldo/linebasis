@@ -1669,6 +1669,26 @@
 						x: cursorCanvasX - elementCenterCanvasX,
 						y: cursorCanvasY - elementCenterCanvasY
 					};
+					
+					// CRITICAL FIX: For nested elements, use actual DOM position instead of calculated position
+					// getDisplayPosition() may not account for all parent transforms correctly
+					// Calculate top-left from the actual DOM center to ensure accuracy
+					const elementTopLeftCanvasX = elementCenterCanvasX - size.width / 2;
+					const elementTopLeftCanvasY = elementCenterCanvasY - size.height / 2;
+					
+					// Update elementStartCanvas and pendingPosition with actual DOM position
+					elementStartCanvas = {
+						x: elementTopLeftCanvasX,
+						y: elementTopLeftCanvasY,
+						width: size.width,
+						height: size.height
+					};
+					
+					pendingPosition = {
+						x: elementTopLeftCanvasX,
+						y: elementTopLeftCanvasY
+					};
+					
 				}
 
 				// Initialize auto layout reordering state
@@ -1998,46 +2018,42 @@
 					activeElementId
 				);
 			} else {
-				// Normal drag: update position based on delta from start
+				// Normal drag: calculate position
 				const state = get(designState);
 				const activeElement = state.elements[activeElementId!];
 				
-				// Calculate position based on delta from start (this automatically handles rotation based on current parent)
-				// The key is that elementStartCanvas is in absolute coordinates, and we calculate from there
-				let tempPendingPosition = pendingPosition || { x: elementStartCanvas.x, y: elementStartCanvas.y };
+				let tempPendingPosition: { x: number; y: number };
+				
+				// For nested elements, use cursor-based calculation to ensure coordinate system consistency
+				// This avoids issues with parent transforms affecting delta-based calculations
 				if (activeElement && activeElement.parentId) {
-					const ancestors = getAllAncestors(activeElement);
-					let cumulativeRotation = 0;
-					for (const ancestor of ancestors) {
-						cumulativeRotation += getDisplayRotation(ancestor);
-					}
-					cumulativeRotation = normalizeRotation(cumulativeRotation);
+					// Get current cursor position in canvas space
+					const canvasElement = document.querySelector('.canvas') as HTMLElement | null;
+					const canvasRect = canvasElement?.getBoundingClientRect();
+					if (!canvasRect) return;
 					
-					if (cumulativeRotation !== 0) {
-						const rotationRad = -cumulativeRotation * (Math.PI / 180);
-						const cos = Math.cos(rotationRad);
-						const sin = Math.sin(rotationRad);
-						const transformedDelta = {
-							x: deltaCanvas.x * cos - deltaCanvas.y * sin,
-							y: deltaCanvas.x * sin + deltaCanvas.y * cos
-						};
-						tempPendingPosition = {
-							x: elementStartCanvas.x + transformedDelta.x,
-							y: elementStartCanvas.y + transformedDelta.y
-						};
-					} else {
-						tempPendingPosition = {
-							x: elementStartCanvas.x + deltaCanvas.x,
-							y: elementStartCanvas.y + deltaCanvas.y
-						};
-					}
+					const cursorCanvasX = (e.clientX - canvasRect.left - viewport.x) / viewport.scale;
+					const cursorCanvasY = (e.clientY - canvasRect.top - viewport.y) / viewport.scale;
+					
+					// Calculate element center from cursor position minus the drag offset
+					// dragOffsetCanvas was calculated at drag start as: cursor - elementCenter
+					// So: elementCenter = cursor - dragOffsetCanvas
+					const elementCenterCanvasX = cursorCanvasX - dragOffsetCanvas.x;
+					const elementCenterCanvasY = cursorCanvasY - dragOffsetCanvas.y;
+					
+					// Convert center to top-left position
+					const elementSize = getDisplaySize(activeElement);
+					tempPendingPosition = {
+						x: elementCenterCanvasX - elementSize.width / 2,
+						y: elementCenterCanvasY - elementSize.height / 2
+					};
 				} else {
+					// For root elements, use delta-based calculation (works fine for non-nested)
 					tempPendingPosition = {
 						x: elementStartCanvas.x + deltaCanvas.x,
 						y: elementStartCanvas.y + deltaCanvas.y
 					};
 				}
-				
 				// Detect potential drop parent for single element drags (not groups, not auto layout)
 				if (!isGroupInteraction && activeElementId && tempPendingPosition) {
 					// Get the dragged element's size to check for overlap with potential parents
