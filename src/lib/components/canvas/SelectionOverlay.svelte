@@ -3052,7 +3052,18 @@
 								
 							} else {
 								// Parent didn't change - just move within same parent
-								const relativePos = absoluteToRelativePosition(activeElement, pendingPosition);
+								// FIX: Use center-based transformation to prevent jump on drop for rotated nested elements
+								const currentSize = activeElement.size;
+								const centerWorld = {
+									x: pendingPosition.x + currentSize.width / 2,
+									y: pendingPosition.y + currentSize.height / 2
+								};
+								const centerLocal = absoluteToRelativePosition(activeElement, centerWorld);
+								const relativePos = {
+									x: centerLocal.x - currentSize.width / 2,
+									y: centerLocal.y - currentSize.height / 2
+								};
+								
 								await moveElement(activeElementId, relativePos);
 							}
 						}
