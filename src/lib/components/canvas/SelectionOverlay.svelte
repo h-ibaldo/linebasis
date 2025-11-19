@@ -3508,12 +3508,38 @@
 		{@const canvasElement = document.querySelector('.canvas')}
 		{#if canvasElement}
 			{@const canvasRect = canvasElement.getBoundingClientRect()}
-			{@const parentAbsPos = getAbsolutePosition(dropParent)}
-			{@const parentRotation = dropParent.rotation || 0}
+			
+			<!-- FIX: Apply same coordinate transformation logic as SelectionUI for nested rotated parents -->
+			{@const ancestorRot = getCumulativeRotation(dropParent)}
+			{@const totalRot = ancestorRot + (dropParent.rotation || 0)}
+			{@const absPos = getAbsolutePosition(dropParent)}
+			
+			{@const parentCanvasPos = (() => {
+				let pos = absPos;
+				if (dropParent.parentId) {
+					const angleRad = ancestorRot * (Math.PI / 180);
+					const cos = Math.cos(angleRad);
+					const sin = Math.sin(angleRad);
+					const halfW = dropParent.size.width / 2;
+					const halfH = dropParent.size.height / 2;
+					
+					// Rotate(Size/2) using ancestor rotation
+					const rotatedHalfW = halfW * cos - halfH * sin;
+					const rotatedHalfH = halfW * sin + halfH * cos;
+					
+					pos = {
+						x: absPos.x - halfW + rotatedHalfW,
+						y: absPos.y - halfH + rotatedHalfH
+					};
+				}
+				return pos;
+			})()}
+
+			{@const parentRotation = totalRot}
 			{@const parentSize = dropParent.size}
 
-			{@const parentScreenLeft = canvasRect.left + viewport.x + parentAbsPos.x * viewport.scale}
-			{@const parentScreenTop = canvasRect.top + viewport.y + parentAbsPos.y * viewport.scale}
+			{@const parentScreenLeft = canvasRect.left + viewport.x + parentCanvasPos.x * viewport.scale}
+			{@const parentScreenTop = canvasRect.top + viewport.y + parentCanvasPos.y * viewport.scale}
 			{@const parentScreenWidth = parentSize.width * viewport.scale}
 			{@const parentScreenHeight = parentSize.height * viewport.scale}
 			{@const parentCenterX = parentScreenWidth / 2}
