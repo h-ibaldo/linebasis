@@ -419,6 +419,22 @@
 		? getActualSize(selectedElements[0])
 		: null;
 
+	// Helper: Get cumulative rotation of all ancestors (for Selection UI)
+	function getCumulativeRotation(element: Element): number {
+		const state = get(designState);
+		let totalRotation = 0;
+
+		let current = element;
+		while (current.parentId) {
+			const parent = state.elements[current.parentId];
+			if (!parent) break;
+			totalRotation += parent.rotation || 0;
+			current = parent;
+		}
+
+		return totalRotation;
+	}
+
 	// Broadcast state to store for CanvasElement to consume
 	$: {
 		// Calculate pending corner radii for independent mode OR when element has individual corners
@@ -870,23 +886,65 @@
 		}
 
 		// Otherwise, use stored coordinates and traverse parent chain
-		let absX = element.position.x;
-		let absY = element.position.y;
+		// IMPORTANT: We need to apply parent transforms (position AND rotation) correctly
 
+		// Build ancestor chain from element to root
+		const ancestors: Array<{ position: { x: number; y: number }; size: { width: number; height: number }; rotation: number }> = [];
 		let currentElement = element;
+
 		while (currentElement.parentId) {
 			const parent = state.elements[currentElement.parentId];
 			if (!parent) break;
 
-			absX += parent.position.x;
-			absY += parent.position.y;
+			ancestors.push({
+				position: parent.position,
+				size: parent.size,
+				rotation: parent.rotation || 0
+			});
+
 			currentElement = parent;
 		}
 
-		return { x: absX, y: absY };
+		// Start with element's local position
+		let x = element.position.x;
+		let y = element.position.y;
+
+		// Apply transforms from immediate parent to root (reverse order)
+		for (let i = 0; i < ancestors.length; i++) {
+			const ancestor = ancestors[i];
+
+			// If parent is rotated, we need to rotate the child's position around parent's center
+			if (ancestor.rotation !== 0) {
+				const centerX = ancestor.size.width / 2;
+				const centerY = ancestor.size.height / 2;
+
+				// Translate to parent's center
+				const relX = x - centerX;
+				const relY = y - centerY;
+
+				// Apply rotation
+				const angleRad = ancestor.rotation * (Math.PI / 180);
+				const cos = Math.cos(angleRad);
+				const sin = Math.sin(angleRad);
+
+				const rotatedX = relX * cos - relY * sin;
+				const rotatedY = relX * sin + relY * cos;
+
+				// Translate back from center
+				x = rotatedX + centerX;
+				y = rotatedY + centerY;
+			}
+
+			// Add parent's position
+			x += ancestor.position.x;
+			y += ancestor.position.y;
+		}
+
+		return { x, y };
 	}
 
 	// Helper: Convert absolute position to parent-relative position
+	// This properly handles rotated parent hierarchies
 	function absoluteToRelativePosition(element: Element, absolutePos: { x: number; y: number }): { x: number; y: number } {
 		const state = get(designState);
 
@@ -901,13 +959,65 @@
 			return absolutePos;
 		}
 
-		const parentAbsPos = getAbsolutePosition(parent);
+		// Build the ancestor chain from root to immediate parent
+		const ancestors: Array<{
+			id: string;
+			position: { x: number; y: number };
+			size: { width: number; height: number };
+			rotation: number;
+		}> = [];
+		let currentParent = parent;
 
-		// Return position relative to parent
-		return {
-			x: absolutePos.x - parentAbsPos.x,
-			y: absolutePos.y - parentAbsPos.y
-		};
+		while (currentParent) {
+			ancestors.unshift({
+				id: currentParent.id,
+				position: currentParent.position,
+				size: currentParent.size,
+				rotation: currentParent.rotation || 0
+			});
+
+			if (!currentParent.parentId) break;
+			const nextParent = state.elements[currentParent.parentId];
+			if (!nextParent) break;
+			currentParent = nextParent;
+		}
+
+		// Start with absolute position
+		let x = absolutePos.x;
+		let y = absolutePos.y;
+
+		// Apply inverse transform for each ancestor (from root to immediate parent)
+		for (const ancestor of ancestors) {
+			// Subtract the ancestor's position (in its parent's coordinate space)
+			x -= ancestor.position.x;
+			y -= ancestor.position.y;
+
+			// If ancestor is rotated, we need to apply inverse rotation around its center
+			// CSS rotation uses the element's center as transform-origin
+			if (ancestor.rotation !== 0) {
+				// Get ancestor's center point (in its local coordinate space, which is now our current space)
+				const centerX = ancestor.size.width / 2;
+				const centerY = ancestor.size.height / 2;
+
+				// Translate to origin (relative to ancestor's center)
+				const relX = x - centerX;
+				const relY = y - centerY;
+
+				// Apply inverse rotation
+				const angleRad = -ancestor.rotation * (Math.PI / 180); // Negative for inverse
+				const cos = Math.cos(angleRad);
+				const sin = Math.sin(angleRad);
+
+				const rotatedX = relX * cos - relY * sin;
+				const rotatedY = relX * sin + relY * cos;
+
+				// Translate back from origin
+				x = rotatedX + centerX;
+				y = rotatedY + centerY;
+			}
+		}
+
+		return { x, y };
 	}
 
 	// Helper: Get display position (pending or actual, in absolute coordinates)
@@ -1647,7 +1757,6 @@
 				pendingPosition = { ...pos };
 
 				// Calculate and store offset from cursor to element's center at drag start
-				// For rotated elements, we use center because getBoundingClientRect gives bounding box, not element origin
 				const canvasElement = document.querySelector('.canvas') as HTMLElement | null;
 				const canvasRect = canvasElement?.getBoundingClientRect();
 				const elementDom = document.querySelector(`[data-element-id="${element.id}"]`) as HTMLElement | null;
@@ -1655,8 +1764,7 @@
 					const cursorCanvasX = (e.clientX - canvasRect.left - viewport.x) / viewport.scale;
 					const cursorCanvasY = (e.clientY - canvasRect.top - viewport.y) / viewport.scale;
 
-					// For rotated elements, getBoundingClientRect gives the bounding box, not the element's actual position
-					// So we use the element's center point (which is the rotation origin and stays consistent)
+					// Get element's actual rendered center from DOM
 					const elementRect = elementDom.getBoundingClientRect();
 					const elementCenterScreenX = elementRect.left + elementRect.width / 2;
 					const elementCenterScreenY = elementRect.top + elementRect.height / 2;
@@ -1664,31 +1772,34 @@
 					const elementCenterCanvasY = (elementCenterScreenY - canvasRect.top - viewport.y) / viewport.scale;
 
 					// Store offset from cursor to element's center
-					// We'll convert this back to top-left offset at drop time
 					dragOffsetCanvas = {
 						x: cursorCanvasX - elementCenterCanvasX,
 						y: cursorCanvasY - elementCenterCanvasY
 					};
-					
-					// CRITICAL FIX: For nested elements, use actual DOM position instead of calculated position
-					// getDisplayPosition() may not account for all parent transforms correctly
-					// Calculate top-left from the actual DOM center to ensure accuracy
-					const elementTopLeftCanvasX = elementCenterCanvasX - size.width / 2;
-					const elementTopLeftCanvasY = elementCenterCanvasY - size.height / 2;
-					
-					// Update elementStartCanvas and pendingPosition with actual DOM position
+
+					// CRITICAL: For the initial pendingPosition, we need to calculate what would produce
+					// the element's current visual position when passed through absoluteToRelativePosition.
+					// This is NOT the same as getAbsolutePosition(element) because that calculates
+					// the unrotated top-left in canvas space, but we need the position that when
+					// converted through our transforms produces the current rendered position.
+
+					// The element is currently rendered at the DOM position we just measured.
+					// During drag, we calculate: elementCenter = cursor - dragOffset
+					// Then: pendingPosition = elementCenter - size/2
+					// So for consistency, use the same calculation here:
+					const initialPendingPosition = {
+						x: elementCenterCanvasX - size.width / 2,
+						y: elementCenterCanvasY - size.height / 2
+					};
+
 					elementStartCanvas = {
-						x: elementTopLeftCanvasX,
-						y: elementTopLeftCanvasY,
+						x: initialPendingPosition.x,
+						y: initialPendingPosition.y,
 						width: size.width,
 						height: size.height
 					};
-					
-					pendingPosition = {
-						x: elementTopLeftCanvasX,
-						y: elementTopLeftCanvasY
-					};
-					
+
+					pendingPosition = initialPendingPosition;
 				}
 
 				// Initialize auto layout reordering state
@@ -2031,16 +2142,16 @@
 					const canvasElement = document.querySelector('.canvas') as HTMLElement | null;
 					const canvasRect = canvasElement?.getBoundingClientRect();
 					if (!canvasRect) return;
-					
+
 					const cursorCanvasX = (e.clientX - canvasRect.left - viewport.x) / viewport.scale;
 					const cursorCanvasY = (e.clientY - canvasRect.top - viewport.y) / viewport.scale;
-					
+
 					// Calculate element center from cursor position minus the drag offset
 					// dragOffsetCanvas was calculated at drag start as: cursor - elementCenter
 					// So: elementCenter = cursor - dragOffsetCanvas
 					const elementCenterCanvasX = cursorCanvasX - dragOffsetCanvas.x;
 					const elementCenterCanvasY = cursorCanvasY - dragOffsetCanvas.y;
-					
+
 					// Convert center to top-left position
 					const elementSize = getDisplaySize(activeElement);
 					tempPendingPosition = {
@@ -3087,7 +3198,7 @@
 		{@const isInAutoLayout = parentHasAutoLayout && !childIgnoresAutoLayout}
 		{@const parentTransform = parent ? {
 			position: getAbsolutePosition(parent),
-			rotation: getDisplayRotation(parent),
+			rotation: getCumulativeRotation(selectedElement),
 			size: getDisplaySize(parent)
 		} : null}
 		{@const relativePendingPosition = (() => {
