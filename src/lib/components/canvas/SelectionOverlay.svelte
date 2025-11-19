@@ -2218,7 +2218,11 @@
 
 			// Get current rotation from active element or pending rotation
 			const activeElement = selectedElements.find(el => el.id === activeElementId);
-			const rotation = activeElement?.rotation || 0;
+			// FIX: Use total cumulative rotation (ancestors + local) for resizing logic
+			// This ensures we calculate the correct visual corners and anchor point in canvas space
+			const localRotation = activeElement?.rotation || 0;
+			const ancestorRotation = activeElement ? getCumulativeRotation(activeElement) : 0;
+			const rotation = localRotation + ancestorRotation;
 
 			// Calculate new size based on handle
 			let newWidth = elementStartCanvas.width;
