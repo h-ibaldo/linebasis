@@ -1652,6 +1652,28 @@
 			interactionMode = 'resizing';
 			resizeHandle = handle;
 
+			// FIX: Recalculate elementStartCanvas to be the unrotated box centered at the element's actual center.
+			// getDisplayPosition() returns the physical top-left corner, which for nested rotated elements
+			// is NOT the top-left of the unrotated box. We need the unrotated box for resize calculations.
+			const canvasElement = document.querySelector('.canvas') as HTMLElement | null;
+			const canvasRect = canvasElement?.getBoundingClientRect();
+			const elementDom = document.querySelector(`[data-element-id="${element.id}"]`) as HTMLElement | null;
+			
+			if (canvasRect && elementDom) {
+				const elementRect = elementDom.getBoundingClientRect();
+				const elementCenterScreenX = elementRect.left + elementRect.width / 2;
+				const elementCenterScreenY = elementRect.top + elementRect.height / 2;
+				const elementCenterCanvasX = (elementCenterScreenX - canvasRect.left - viewport.x) / viewport.scale;
+				const elementCenterCanvasY = (elementCenterScreenY - canvasRect.top - viewport.y) / viewport.scale;
+
+				elementStartCanvas = {
+					x: elementCenterCanvasX - size.width / 2,
+					y: elementCenterCanvasY - size.height / 2,
+					width: size.width,
+					height: size.height
+				};
+			}
+
 			// Convert auto-sized (inline-block) text elements to fixed size before resizing
 			if (element.styles?.display === 'inline-block') {
 				const actualSize = getActualSize(element);
@@ -1659,12 +1681,14 @@
 				updateElementStyles(element.id, { display: undefined });
 				resizeElement(element.id, actualSize, element.position);
 				// Update local state to reflect the new fixed size
-				elementStartCanvas = {
-					x: pos.x,
-					y: pos.y,
-					width: actualSize.width,
-					height: actualSize.height
-				};
+				// Note: elementStartCanvas is already set correctly above based on actual DOM size/center
+				elementStartCanvas.width = actualSize.width;
+				elementStartCanvas.height = actualSize.height;
+				// Re-center based on new size (center stays same, top-left shifts)
+				const centerX = elementStartCanvas.x + size.width / 2;
+				const centerY = elementStartCanvas.y + size.height / 2;
+				elementStartCanvas.x = centerX - actualSize.width / 2;
+				elementStartCanvas.y = centerY - actualSize.height / 2;
 			}
 
 			// Don't set pending values yet - wait until mouse actually moves
@@ -1677,10 +1701,10 @@
 			const rotation = element.rotation || 0;
 			if (rotation !== 0) {
 				const corners = getRotatedCorners({
-					x: pos.x,
-					y: pos.y,
-					width: size.width,
-					height: size.height,
+					x: elementStartCanvas.x,
+					y: elementStartCanvas.y,
+					width: elementStartCanvas.width,
+					height: elementStartCanvas.height,
 					rotation
 				});
 
@@ -3080,9 +3104,28 @@
 				if (sizeChanged || positionChanged) {
 					if (pendingSize && activeElement) {
 						// Convert absolute position to parent-relative position if needed
-						const relativePos = (positionChanged && pendingPosition)
-							? absoluteToRelativePosition(activeElement, pendingPosition)
-							: undefined;
+						let relativePos: { x: number; y: number } | undefined;
+
+						if (positionChanged && pendingPosition) {
+							// FIX: Use center-based transformation to prevent jump on resize for rotated nested elements
+							// This mirrors the fix applied to dragging logic
+							const currentSize = pendingSize; // Use the NEW size
+							
+							// 1. Calculate center in world space
+							const centerWorld = {
+								x: pendingPosition.x + currentSize.width / 2,
+								y: pendingPosition.y + currentSize.height / 2
+							};
+							
+							// 2. Transform center to local space (parent-relative)
+							const centerLocal = absoluteToRelativePosition(activeElement, centerWorld);
+							
+							// 3. Convert back to top-left in local space
+							relativePos = {
+								x: centerLocal.x - currentSize.width / 2,
+								y: centerLocal.y - currentSize.height / 2
+							};
+						}
 
 						await resizeElement(
 							activeElementId,
