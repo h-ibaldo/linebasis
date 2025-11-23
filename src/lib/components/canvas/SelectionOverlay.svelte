@@ -1698,14 +1698,17 @@
 
 			// Calculate where the handle SHOULD be (the ideal corner/edge position)
 			// This will be used for the first resize calculation to avoid jump
-			const rotation = element.rotation || 0;
-			if (rotation !== 0) {
+			const localRotation = element.rotation || 0;
+			const ancestorRotation = getCumulativeRotation(element);
+			const totalRotation = localRotation + ancestorRotation;
+
+			if (totalRotation !== 0) {
 				const corners = getRotatedCorners({
 					x: elementStartCanvas.x,
 					y: elementStartCanvas.y,
 					width: elementStartCanvas.width,
 					height: elementStartCanvas.height,
-					rotation
+					rotation: totalRotation
 				});
 
 				const isCornerHandle = handle.length === 2;
