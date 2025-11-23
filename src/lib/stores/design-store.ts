@@ -686,15 +686,103 @@ export async function updateElementAutoLayout(
 	elementId: string,
 	autoLayout: Partial<AutoLayoutStyle>
 ): Promise<void> {
-	await dispatch({
-		id: uuidv4(),
-		type: 'UPDATE_AUTO_LAYOUT',
-		timestamp: Date.now(),
-		payload: {
-			elementId,
-			autoLayout
+	const state = get(designState);
+	const element = state.elements[elementId];
+
+	// If we're disabling auto-layout, preserve children's visual positions
+	if (element && autoLayout.enabled === false && element.autoLayout?.enabled === true) {
+		// STEP 1: Read current visual positions from DOM while auto-layout is still active
+		const children = element.children || [];
+		const childPositions = new Map<string, { x: number; y: number }>();
+
+		// Get viewport for coordinate conversion
+		const currentViewport = get(viewport);
+
+		for (const childId of children) {
+			const child = state.elements[childId];
+			if (!child) continue;
+
+			// Skip children that already ignore auto-layout (they already have absolute positions)
+			if (child.autoLayout?.ignoreAutoLayout) continue;
+
+			// Get the child's DOM element to find its actual rendered position
+			const domElement = document.querySelector(`[data-element-id="${childId}"]`) as HTMLElement;
+			if (!domElement) {
+				console.warn(`Could not find DOM element for child ${childId}, using stored position`);
+				// Fallback to stored position if DOM element not found
+				childPositions.set(childId, { x: child.position.x, y: child.position.y });
+				continue;
+			}
+
+			// Get the bounding rect of the child and parent
+			const childRect = domElement.getBoundingClientRect();
+			const parentElement = document.querySelector(`[data-element-id="${elementId}"]`) as HTMLElement;
+			if (!parentElement) {
+				console.warn(`Could not find parent DOM element ${elementId}, using stored position`);
+				childPositions.set(childId, { x: child.position.x, y: child.position.y });
+				continue;
+			}
+
+			const parentRect = parentElement.getBoundingClientRect();
+
+			// Calculate child's position relative to parent's top-left corner in screen pixels
+			const screenRelativeX = childRect.left - parentRect.left;
+			const screenRelativeY = childRect.top - parentRect.top;
+
+			// Convert from screen pixels to canvas units (account for viewport scale)
+			const canvasRelativeX = screenRelativeX / currentViewport.scale;
+			const canvasRelativeY = screenRelativeY / currentViewport.scale;
+
+			console.log(`Child ${childId}: screen (${screenRelativeX.toFixed(1)}, ${screenRelativeY.toFixed(1)}) -> canvas (${canvasRelativeX.toFixed(1)}, ${canvasRelativeY.toFixed(1)})`);
+
+			// Store the position for this child
+			childPositions.set(childId, { x: canvasRelativeX, y: canvasRelativeY });
 		}
-	});
+
+		// STEP 2: Begin transaction to batch all changes
+		beginTransaction();
+
+		try {
+			// First, update all children positions while auto-layout is still enabled
+			// This ensures positions are set before the layout mode changes
+			for (const [childId, position] of childPositions) {
+				await moveElement(childId, position);
+			}
+
+			// STEP 3: Now disable auto-layout
+			// Children now have their positions set, so they'll stay in place
+			await dispatch({
+				id: uuidv4(),
+				type: 'UPDATE_AUTO_LAYOUT',
+				timestamp: Date.now(),
+				payload: {
+					elementId,
+					autoLayout
+				}
+			});
+
+			await commitTransaction();
+		} catch (error) {
+			// Clean up transaction state on error
+			if (isInTransaction) {
+				isInTransaction = false;
+				transactionEvents = [];
+				currentTransactionId = null;
+			}
+			throw error;
+		}
+	} else {
+		// For other auto-layout updates (enabling, changing direction, etc.), just dispatch normally
+		await dispatch({
+			id: uuidv4(),
+			type: 'UPDATE_AUTO_LAYOUT',
+			timestamp: Date.now(),
+			payload: {
+				elementId,
+				autoLayout
+			}
+		});
+	}
 }
 
 export async function toggleView(
@@ -1063,68 +1151,201 @@ export async function unwrapSelectedDiv(): Promise<void> {
 
 	const state = get(designState);
 	const childrenToSelect: string[] = [];
-
-	// Get wrapper's absolute top-left position (traverse parent chain)
-	let wrapperAbsX = wrapper.position.x;
-	let wrapperAbsY = wrapper.position.y;
-	let currentParent = wrapper.parentId ? state.elements[wrapper.parentId] : null;
-	while (currentParent) {
-		wrapperAbsX += currentParent.position.x;
-		wrapperAbsY += currentParent.position.y;
-		currentParent = currentParent.parentId ? state.elements[currentParent.parentId] : null;
-	}
-
 	const parentId = wrapper.parentId;
-	const wrapperRotation = wrapper.rotation || 0;
-	const wrapperRotationRad = wrapperRotation * (Math.PI / 180);
 
-	// Calculate wrapper's center in canvas space (for rotating child positions)
-	const wrapperCenterAbsX = wrapperAbsX + wrapper.size.width / 2;
-	const wrapperCenterAbsY = wrapperAbsY + wrapper.size.height / 2;
+	// Check if wrapper has auto-layout enabled
+	const wrapperHasAutoLayout = wrapper.autoLayout?.enabled || false;
 
-	// Move each child out of the wrapper
-	for (const childId of wrapper.children) {
-		const child = state.elements[childId];
-		if (!child) continue;
+	// If wrapper has auto-layout, read positions from DOM (like we do when disabling auto-layout)
+	if (wrapperHasAutoLayout) {
+		// Get viewport for coordinate conversion
+		const currentViewport = get(viewport);
 
-		childrenToSelect.push(childId);
+		// First, collect all child positions BEFORE making any changes
+		const childPositions = new Map<string, { x: number; y: number }>();
 
-		// Calculate visual position accounting for wrapper rotation
-		// Child's center relative to wrapper's center (in wrapper's local space)
-		const childCenterLocalX = child.position.x + child.size.width / 2 - wrapper.size.width / 2;
-		const childCenterLocalY = child.position.y + child.size.height / 2 - wrapper.size.height / 2;
+		// Get wrapper's parent element (if it exists)
+		const wrapperParent = parentId ? state.elements[parentId] : null;
+		const wrapperParentElement = wrapperParent
+			? document.querySelector(`[data-element-id="${parentId}"]`) as HTMLElement
+			: null;
 
-		// Rotate child center by wrapper rotation to get visual center relative to wrapper's center
-		let childCenterVisualX: number, childCenterVisualY: number;
-		if (wrapperRotation !== 0) {
-			childCenterVisualX = childCenterLocalX * Math.cos(wrapperRotationRad) - childCenterLocalY * Math.sin(wrapperRotationRad);
-			childCenterVisualY = childCenterLocalX * Math.sin(wrapperRotationRad) + childCenterLocalY * Math.cos(wrapperRotationRad);
-		} else {
-			childCenterVisualX = childCenterLocalX;
-			childCenterVisualY = childCenterLocalY;
+		for (const childId of wrapper.children) {
+			const child = state.elements[childId];
+			if (!child) continue;
+
+			childrenToSelect.push(childId);
+
+			// Get the child's DOM element
+			const childElement = document.querySelector(`[data-element-id="${childId}"]`) as HTMLElement;
+			if (!childElement) {
+				console.warn(`Could not find DOM element for child ${childId}`);
+				continue;
+			}
+
+			// Get the wrapper's DOM element
+			const wrapperElement = document.querySelector(`[data-element-id="${wrapper.id}"]`) as HTMLElement;
+			if (!wrapperElement) {
+				console.warn(`Could not find wrapper DOM element ${wrapper.id}`);
+				continue;
+			}
+
+			// Get bounding rectangles
+			const childRect = childElement.getBoundingClientRect();
+			const wrapperRect = wrapperElement.getBoundingClientRect();
+
+			// For rotated elements, getBoundingClientRect gives us the bounding box
+			// We need to find the element's actual top-left corner (before rotation)
+			const childRotation = child.rotation || 0;
+			const isRotated = childRotation !== 0;
+
+			let childTopLeftX: number;
+			let childTopLeftY: number;
+
+			if (isRotated) {
+				// For rotated elements, the center is what we want to preserve
+				// getBoundingClientRect gives us the bounding box, so we calculate the center
+				const childCenterScreenX = childRect.left + childRect.width / 2;
+				const childCenterScreenY = childRect.top + childRect.height / 2;
+
+				// Convert element's actual size (not bounding box) to screen pixels
+				const childWidthScreen = child.size.width * currentViewport.scale;
+				const childHeightScreen = child.size.height * currentViewport.scale;
+
+				// Calculate top-left from center (this is the logical position, not visual bounding box)
+				childTopLeftX = childCenterScreenX - childWidthScreen / 2;
+				childTopLeftY = childCenterScreenY - childHeightScreen / 2;
+
+				console.log(`Child ${childId} is rotated ${childRotation}°: center (${childCenterScreenX.toFixed(1)}, ${childCenterScreenY.toFixed(1)}) size (${childWidthScreen.toFixed(1)}, ${childHeightScreen.toFixed(1)})`);
+			} else {
+				// Non-rotated element - use getBoundingClientRect directly
+				childTopLeftX = childRect.left;
+				childTopLeftY = childRect.top;
+			}
+
+			// Calculate target position based on whether wrapper has a parent
+			let targetX: number;
+			let targetY: number;
+
+			if (wrapperParent && wrapperParentElement) {
+				// Wrapper has a parent - calculate position relative to parent
+				const parentRect = wrapperParentElement.getBoundingClientRect();
+
+				// Child's position relative to parent in screen pixels
+				const screenRelativeToParent = {
+					x: childTopLeftX - parentRect.left,
+					y: childTopLeftY - parentRect.top
+				};
+
+				// Convert to canvas units - this is the position relative to parent
+				targetX = screenRelativeToParent.x / currentViewport.scale;
+				targetY = screenRelativeToParent.y / currentViewport.scale;
+
+				console.log(`Unwrapping child ${childId}: relative to parent (${targetX.toFixed(1)}, ${targetY.toFixed(1)})`);
+			} else {
+				// No parent - calculate absolute canvas position
+				const wrapperTopLeft = {
+					x: wrapperRect.left,
+					y: wrapperRect.top
+				};
+
+				const screenRelativeToWrapper = {
+					x: childTopLeftX - wrapperTopLeft.x,
+					y: childTopLeftY - wrapperTopLeft.y
+				};
+
+				const canvasRelativeToWrapper = {
+					x: screenRelativeToWrapper.x / currentViewport.scale,
+					y: screenRelativeToWrapper.y / currentViewport.scale
+				};
+
+				// Add wrapper's position to get absolute canvas position
+				targetX = wrapper.position.x + canvasRelativeToWrapper.x;
+				targetY = wrapper.position.y + canvasRelativeToWrapper.y;
+
+				console.log(`Unwrapping child ${childId}: wrapper offset (${canvasRelativeToWrapper.x.toFixed(1)}, ${canvasRelativeToWrapper.y.toFixed(1)}) + wrapper pos (${wrapper.position.x.toFixed(1)}, ${wrapper.position.y.toFixed(1)}) = target (${targetX.toFixed(1)}, ${targetY.toFixed(1)})`);
+			}
+
+			childPositions.set(childId, { x: targetX, y: targetY });
 		}
 
-		// Add wrapper's center absolute position to get child's visual center in canvas space
-		const childCenterAbsX = wrapperCenterAbsX + childCenterVisualX;
-		const childCenterAbsY = wrapperCenterAbsY + childCenterVisualY;
+		// Now apply all the changes
+		for (const childId of wrapper.children) {
+			const position = childPositions.get(childId);
+			if (!position) continue;
 
-		// Calculate visual top-left position
-		const absoluteX = childCenterAbsX - child.size.width / 2;
-		const absoluteY = childCenterAbsY - child.size.height / 2;
+			// Move child to wrapper's parent
+			await reorderElement(childId, parentId, 0);
 
-		// Calculate visual rotation (child rotation + wrapper rotation)
-		// This preserves the visual rotation the child displayed while inside the rotated wrapper
-		const childRotation = child.rotation ?? 0; // Use nullish coalescing to handle undefined, but preserve explicit 0
-		const visualRotation = childRotation + wrapperRotation;
+			// Update position to preserve visual location
+			await moveElement(childId, position);
 
-		// Move child to wrapper's parent
-		await reorderElement(childId, parentId, 0);
+			// Children in auto-layout don't inherit rotation from wrapper, so keep their own rotation
+			// (No need to add wrapper rotation)
+		}
+	} else {
+		// Original logic for non-auto-layout wrappers (freeform positioning)
+		// Get wrapper's absolute top-left position (traverse parent chain)
+		let wrapperAbsX = wrapper.position.x;
+		let wrapperAbsY = wrapper.position.y;
+		let currentParent = wrapper.parentId ? state.elements[wrapper.parentId] : null;
+		while (currentParent) {
+			wrapperAbsX += currentParent.position.x;
+			wrapperAbsY += currentParent.position.y;
+			currentParent = currentParent.parentId ? state.elements[currentParent.parentId] : null;
+		}
 
-		// Update position to visual absolute position
-		await moveElement(childId, { x: absoluteX, y: absoluteY });
+		const wrapperRotation = wrapper.rotation || 0;
+		const wrapperRotationRad = wrapperRotation * (Math.PI / 180);
 
-		// Update rotation to visual rotation (always update, even if 0, to clear stored rotation if needed)
-		await rotateElement(childId, visualRotation);
+		// Calculate wrapper's center in canvas space (for rotating child positions)
+		const wrapperCenterAbsX = wrapperAbsX + wrapper.size.width / 2;
+		const wrapperCenterAbsY = wrapperAbsY + wrapper.size.height / 2;
+
+		// Move each child out of the wrapper
+		for (const childId of wrapper.children) {
+			const child = state.elements[childId];
+			if (!child) continue;
+
+			childrenToSelect.push(childId);
+
+			// Calculate visual position accounting for wrapper rotation
+			// Child's center relative to wrapper's center (in wrapper's local space)
+			const childCenterLocalX = child.position.x + child.size.width / 2 - wrapper.size.width / 2;
+			const childCenterLocalY = child.position.y + child.size.height / 2 - wrapper.size.height / 2;
+
+			// Rotate child center by wrapper rotation to get visual center relative to wrapper's center
+			let childCenterVisualX: number, childCenterVisualY: number;
+			if (wrapperRotation !== 0) {
+				childCenterVisualX = childCenterLocalX * Math.cos(wrapperRotationRad) - childCenterLocalY * Math.sin(wrapperRotationRad);
+				childCenterVisualY = childCenterLocalX * Math.sin(wrapperRotationRad) + childCenterLocalY * Math.cos(wrapperRotationRad);
+			} else {
+				childCenterVisualX = childCenterLocalX;
+				childCenterVisualY = childCenterLocalY;
+			}
+
+			// Add wrapper's center absolute position to get child's visual center in canvas space
+			const childCenterAbsX = wrapperCenterAbsX + childCenterVisualX;
+			const childCenterAbsY = wrapperCenterAbsY + childCenterVisualY;
+
+			// Calculate visual top-left position
+			const absoluteX = childCenterAbsX - child.size.width / 2;
+			const absoluteY = childCenterAbsY - child.size.height / 2;
+
+			// Calculate visual rotation (child rotation + wrapper rotation)
+			// This preserves the visual rotation the child displayed while inside the rotated wrapper
+			const childRotation = child.rotation ?? 0;
+			const visualRotation = childRotation + wrapperRotation;
+
+			// Move child to wrapper's parent
+			await reorderElement(childId, parentId, 0);
+
+			// Update position to visual absolute position
+			await moveElement(childId, { x: absoluteX, y: absoluteY });
+
+			// Update rotation to visual rotation
+			await rotateElement(childId, visualRotation);
+		}
 	}
 
 	// Delete the wrapper

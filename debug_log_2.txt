@@ -1,0 +1,77 @@
+root.svelte:46 <Layout> was created with unknown prop 'params'
+warn @ client.js?v=9f7c700d:3150
+(anonymous) @ layout.svelte?v=9f7c700d:85
+instance @ layout.svelte?v=9f7c700d:84
+init @ chunk-MT4ZBHI2.js?v=9f7c700d:2139
+Layout @ layout.svelte?v=9f7c700d:98
+createProxiedComponent @ svelte-hooks.js?v=9f7c700d:341
+ProxyComponent @ proxy.js?v=9f7c700d:242
+Proxy<Layout> @ proxy.js?v=9f7c700d:349
+construct_svelte_component_dev @ chunk-MT4ZBHI2.js?v=9f7c700d:2577
+create_if_block_2 @ root.svelte:46
+create_fragment @ root.svelte:45
+init @ chunk-MT4ZBHI2.js?v=9f7c700d:2150
+Root @ root.svelte:21
+createProxiedComponent @ svelte-hooks.js?v=9f7c700d:341
+ProxyComponent @ proxy.js?v=9f7c700d:242
+Proxy<Root> @ proxy.js?v=9f7c700d:349
+initialize @ client.js?v=9f7c700d:558
+navigate @ client.js?v=9f7c700d:1694
+await in navigate
+start @ client.js?v=9f7c700d:358
+await in start
+(anonymous) @ (index):23
+Promise.then
+(anonymous) @ (index):22
++page.svelte:40 <Page> was created with unknown prop 'params'
+warn @ client.js?v=9f7c700d:3150
+(anonymous) @ +page.svelte:40
+instance @ +page.svelte:40
+init @ chunk-MT4ZBHI2.js?v=9f7c700d:2139
+Page @ +page.svelte:40
+createProxiedComponent @ svelte-hooks.js?v=9f7c700d:341
+ProxyComponent @ proxy.js?v=9f7c700d:242
+Proxy<+page> @ proxy.js?v=9f7c700d:349
+construct_svelte_component_dev @ chunk-MT4ZBHI2.js?v=9f7c700d:2577
+create_default_slot @ root.svelte:47
+create_slot @ chunk-MT4ZBHI2.js?v=9f7c700d:99
+create_fragment @ layout.svelte?v=9f7c700d:22
+init @ chunk-MT4ZBHI2.js?v=9f7c700d:2150
+Layout @ layout.svelte?v=9f7c700d:98
+createProxiedComponent @ svelte-hooks.js?v=9f7c700d:341
+ProxyComponent @ proxy.js?v=9f7c700d:242
+Proxy<Layout> @ proxy.js?v=9f7c700d:349
+construct_svelte_component_dev @ chunk-MT4ZBHI2.js?v=9f7c700d:2577
+create_if_block_2 @ root.svelte:46
+create_fragment @ root.svelte:45
+init @ chunk-MT4ZBHI2.js?v=9f7c700d:2150
+Root @ root.svelte:21
+createProxiedComponent @ svelte-hooks.js?v=9f7c700d:341
+ProxyComponent @ proxy.js?v=9f7c700d:242
+Proxy<Root> @ proxy.js?v=9f7c700d:349
+initialize @ client.js?v=9f7c700d:558
+navigate @ client.js?v=9f7c700d:1694
+await in navigate
+start @ client.js?v=9f7c700d:358
+await in start
+(anonymous) @ (index):23
+Promise.then
+(anonymous) @ (index):22
+design-store.ts:1085 [Unwrap Debug] Child 0a7eda33-0ba5-4d22-9051-c347d27cea1e (div): {"visualAbsPos":{"x":-634.3438493398231,"y":628.1873413171932},"visualSize":{"width":166.633,"height":166.633},"wrapperRotation":0,"childRotation":45}
+design-store.ts:1107 [Unwrap Debug] Child 0a7eda33-0ba5-4d22-9051-c347d27cea1e After Move: {"newParentId":null,"relativePos":{"x":-634.3438493398231,"y":628.1873413171932},"visualRotation":45}
+design-store.ts:1085 [Unwrap Debug] Child 74375a63-8a87-4706-b0a7-62ced360e8d3 (div): {"visualAbsPos":{"x":-634.3438493398231,"y":628.1873413171932},"visualSize":{"width":166.633,"height":166.633},"wrapperRotation":0,"childRotation":45}
+design-store.ts:1107 [Unwrap Debug] Child 74375a63-8a87-4706-b0a7-62ced360e8d3 After Move: {"newParentId":null,"relativePos":{"x":-634.3438493398231,"y":628.1873413171932},"visualRotation":45}
+design-store.ts:1085 [Unwrap Debug] Child 548a6189-6c0c-483c-bb80-7e782d19e802 (div): {"visualAbsPos":{"x":-634.3438493398231,"y":628.1873413171932},"visualSize":{"width":166.633,"height":166.633},"wrapperRotation":0,"childRotation":45}
+design-store.ts:1107 [Unwrap Debug] Child 548a6189-6c0c-483c-bb80-7e782d19e802 After Move: {"newParentId":null,"relativePos":{"x":-634.3438493398231,"y":628.1873413171932},"visualRotation":45}
+design-store.ts:1085 [Unwrap Debug] Child cf511a13-830b-41c9-aae9-f591014969d5 (div): {"visualAbsPos":{"x":-634.3438493398231,"y":628.1873413171932},"visualSize":{"width":166.633,"height":166.633},"wrapperRotation":0,"childRotation":45}
+design-store.ts:1107 [Unwrap Debug] Child cf511a13-830b-41c9-aae9-f591014969d5 After Move: {"newParentId":null,"relativePos":{"x":-634.3438493398231,"y":628.1873413171932},"visualRotation":45}
+design-store.ts:1085 [Unwrap Debug] Child f2ee67c4-812a-43a2-8915-b5bf5e8f1067 (div): {"visualAbsPos":{"x":-671.6953615554017,"y":596.5231873934194},"visualSize":{"width":120.672,"height":114.977},"wrapperRotation":0,"childRotation":90}
+design-store.ts:1107 [Unwrap Debug] Child f2ee67c4-812a-43a2-8915-b5bf5e8f1067 After Move: {"newParentId":null,"relativePos":{"x":-671.6953615554017,"y":596.5231873934194},"visualRotation":90}
+design-store.ts:1085 [Unwrap Debug] Child c593960c-0e50-4668-8168-9bf7aaa22635 (div): {"visualAbsPos":{"x":-671.6953615554017,"y":596.5231873934194},"visualSize":{"width":120.672,"height":114.977},"wrapperRotation":0,"childRotation":90}
+design-store.ts:1107 [Unwrap Debug] Child c593960c-0e50-4668-8168-9bf7aaa22635 After Move: {"newParentId":null,"relativePos":{"x":-671.6953615554017,"y":596.5231873934194},"visualRotation":90}
+design-store.ts:1085 [Unwrap Debug] Child 211d6ec7-d76c-4d7e-b41b-9a434218ede0 (div): {"visualAbsPos":{"x":-677.3517761139616,"y":602.1794166256707},"visualSize":{"width":131.977,"height":114.977},"wrapperRotation":0,"childRotation":90}
+design-store.ts:1107 [Unwrap Debug] Child 211d6ec7-d76c-4d7e-b41b-9a434218ede0 After Move: {"newParentId":null,"relativePos":{"x":-677.3517761139616,"y":602.1794166256707},"visualRotation":90}
+design-store.ts:1085 [Unwrap Debug] Child 4a6bcf92-aa55-4393-8426-d5335fe42978 (div): {"visualAbsPos":{"x":-677.3437434496617,"y":602.1717276061933},"visualSize":{"width":168.75,"height":151.758},"wrapperRotation":0,"childRotation":90}
+design-store.ts:1107 [Unwrap Debug] Child 4a6bcf92-aa55-4393-8426-d5335fe42978 After Move: {"newParentId":null,"relativePos":{"x":-677.3437434496617,"y":602.1717276061933},"visualRotation":90}
+design-store.ts:1085 [Unwrap Debug] Child 6e88bec7-dab3-44a0-838b-47719f70b1d8 (div): {"visualAbsPos":{"x":-671.6953615554017,"y":596.5231873934194},"visualSize":{"width":120.672,"height":114.977},"wrapperRotation":0,"childRotation":90}
+design-store.ts:1107 [Unwrap Debug] Child 6e88bec7-dab3-44a0-838b-47719f70b1d8 After Move: {"newParentId":null,"relativePos":{"x":-671.6953615554017,"y":596.5231873934194},"visualRotation":90}
