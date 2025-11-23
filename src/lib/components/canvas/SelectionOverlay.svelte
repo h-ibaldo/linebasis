@@ -1854,16 +1854,18 @@
 						const rect = domElement.getBoundingClientRect();
 
 						// Store element rotation and size for recalculation during drag
-						// Use displaySizeForSelection which accounts for auto-sized elements
+						// Use getActualSize directly to ensure we use the CURRENT element being dragged
+						// (displaySizeForSelection might be stale if selection just changed)
 						reorderElementRotation = element.rotation || 0;
-						const elementDisplaySize = displaySizeForSelection || element.size;
+						const elementDisplaySize = getActualSize(element);
 						reorderElementSize = { ...elementDisplaySize };
 
 						// Calculate actual top-left position accounting for rotation
 						const actualPos = calculateActualTopLeftForRotated(
 							rect,
 							elementDisplaySize,
-							reorderElementRotation,
+							// Use total cumulative rotation here, just like the ghost element renderer
+							getCumulativeRotation(element) + (element.rotation || 0),
 							viewport.scale
 						);
 
