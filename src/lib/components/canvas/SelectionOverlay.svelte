@@ -375,9 +375,11 @@
 		const childIgnoresAutoLayout = element.autoLayout?.ignoreAutoLayout || false;
 		const isInAutoLayout = parentHasAutoLayout && !childIgnoresAutoLayout;
 
-		// IMPORTANT: Don't use getBoundingClientRect for rotated elements
+		// IMPORTANT: Don't use getBoundingClientRect for rotated elements (or elements in rotated parents)
 		// because it returns the bounding box (which is larger), not the actual size
-		const isRotated = element.rotation && element.rotation !== 0;
+		const totalRotation = getCumulativeRotation(element) + (element.rotation || 0);
+		// Floating point precision check
+		const isRotated = Math.abs(totalRotation % 360) > 0.1;
 
 		// For rotated elements in auto layout, get the intrinsic size from CSS
 		// (flexbox may have resized the element to fit the bounding box)
@@ -3452,18 +3454,20 @@
 		{@const ghostPos = pendingPosition}
 
 		<!-- Ghost element with visual preview -->
-		{@const rotation = draggedElement.rotation || 0}
+		{@const totalRotation = getCumulativeRotation(draggedElement) + (draggedElement.rotation || 0)}
 
 		{@const ghostScreenLeft = viewport.x + ghostPos.x * viewport.scale}
 		{@const ghostScreenTop = viewport.y + ghostPos.y * viewport.scale}
+		{@const ghostWidth = ghostSize.width * viewport.scale}
+		{@const ghostHeight = ghostSize.height * viewport.scale}
 
 		<div
 			style="
 				position: fixed;
 				left: {ghostScreenLeft}px;
 				top: {ghostScreenTop}px;
-				width: {ghostSize.width * viewport.scale}px;
-				height: {ghostSize.height * viewport.scale}px;
+				width: {ghostWidth}px;
+				height: {ghostHeight}px;
 				background-color: {draggedElement.styles?.backgroundColor || '#f5f5f5'};
 				border: {draggedElement.styles?.borderWidth || '0px'} {draggedElement.styles?.borderStyle || 'solid'} {draggedElement.styles?.borderColor || 'transparent'};
 				border-radius: {draggedElement.styles?.borderRadius || '0px'};
@@ -3471,7 +3475,7 @@
 				pointer-events: none;
 				z-index: 10000;
 				box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-				transform: rotate({rotation}deg);
+				transform: rotate({totalRotation}deg);
 				transform-origin: center center;
 			"
 		>
