@@ -47,3 +47,9 @@ Desktop.ini
 
 # Media uploads
 static/uploads/
+
+# Database files (should not be committed)
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
