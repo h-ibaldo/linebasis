@@ -3322,32 +3322,55 @@
 				return pendingPosition;
 			}
 			// For auto layout children, get actual rendered position from DOM
-			if (isInAutoLayout && parent) {
+			if (isInAutoLayout && parent && parentTransform) {
 				const domElement = document.querySelector(`[data-element-id="${selectedElement.id}"]`);
 				const parentDomElement = document.querySelector(`[data-element-id="${parent.id}"]`);
+				
 				if (domElement && parentDomElement) {
+					// 1. Get centers in screen space (zoomed) from DOM
+					// note: getBoundingClientRect().width/height is the bounding box size, but center is accurate
 					const elementRect = domElement.getBoundingClientRect();
 					const parentRect = parentDomElement.getBoundingClientRect();
-					const canvasElement = document.querySelector('.canvas');
-					if (canvasElement) {
-						const canvasRect = canvasElement.getBoundingClientRect();
-						// Get element's top-left in screen space
-						const elementScreenX = elementRect.left;
-						const elementScreenY = elementRect.top;
-						// Get parent's top-left in screen space
-						const parentScreenX = parentRect.left;
-						const parentScreenY = parentRect.top;
-						// Convert to canvas space
-						const elementCanvasX = (elementScreenX - canvasRect.left - viewport.x) / viewport.scale;
-						const elementCanvasY = (elementScreenY - canvasRect.top - viewport.y) / viewport.scale;
-						const parentCanvasX = (parentScreenX - canvasRect.left - viewport.x) / viewport.scale;
-						const parentCanvasY = (parentScreenY - canvasRect.top - viewport.y) / viewport.scale;
-						// Calculate relative position (top-left to top-left)
-						return {
-							x: elementCanvasX - parentCanvasX,
-							y: elementCanvasY - parentCanvasY
-						};
-					}
+					
+					const elementCenterX = elementRect.left + elementRect.width / 2;
+					const elementCenterY = elementRect.top + elementRect.height / 2;
+					const parentCenterX = parentRect.left + parentRect.width / 2;
+					const parentCenterY = parentRect.top + parentRect.height / 2;
+					
+					// 2. Calculate vector from parent center to element center (screen space)
+					const dx = elementCenterX - parentCenterX;
+					const dy = elementCenterY - parentCenterY;
+					
+					// 3. Convert to model space (unzoomed)
+					// SelectionUI scales positions by viewport.scale, so we need unscaled units here
+					const dxModel = dx / viewport.scale;
+					const dyModel = dy / viewport.scale;
+					
+					// 4. Rotate vector by -parentRotation to map back to local unrotated space
+					// This handles the mismatch between visual flexbox position (rotated) and local coordinate system
+					const parentRotationRad = (parentTransform.rotation || 0) * (Math.PI / 180);
+					const cos = Math.cos(-parentRotationRad);
+					const sin = Math.sin(-parentRotationRad);
+					
+					const localDx = dxModel * cos - dyModel * sin;
+					const localDy = dxModel * sin + dyModel * cos;
+					
+					// 5. Calculate local position relative to parent top-left
+					// Parent center in local space is (width/2, height/2)
+					const parentHalfW = parent.size.width / 2;
+					const parentHalfH = parent.size.height / 2;
+					
+					// Element center in local space
+					const localCenterX = parentHalfW + localDx;
+					const localCenterY = parentHalfH + localDy;
+					
+					// 6. Convert center to top-left for SelectionUI
+					const currentSize = pendingSize || selectedElement.size;
+					
+					return {
+						x: localCenterX - currentSize.width / 2,
+						y: localCenterY - currentSize.height / 2
+					};
 				}
 			}
 			// Default: use element's stored position (already relative to parent)
