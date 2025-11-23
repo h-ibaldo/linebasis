@@ -12,12 +12,13 @@ import type { DesignEvent, DesignState, Element, Page, Component, AutoLayoutStyl
 import {
 	initDB,
 	appendEvent,
+	appendEvents,
 	getAllEvents,
 	clearEvents,
 	exportEvents,
 	importEvents
 } from './event-store';
-import { reduceEvents, getInitialState } from './event-reducer';
+import { reduceEvents, applyEventsIncremental, getInitialState } from './event-reducer';
 import { currentTool } from './tool-store';
 import { interactionState, startEditingText } from './interaction-store';
 import { viewport, screenToCanvas } from './viewport-store';
@@ -170,9 +171,12 @@ async function commitTransaction(): Promise<void> {
 		return;
 	}
 
+	console.log(`[PERF]     commitTransaction: START (${transactionEvents.length} events)`);
+
 	const state = get(storeState);
 
 	// If we're not at the end of the event log, remove future events (they're undone)
+	const cleanStart = performance.now();
 	let newEvents = state.events;
 	if (state.currentEventIndex < state.events.length - 1) {
 		newEvents = state.events.slice(0, state.currentEventIndex + 1);
@@ -181,21 +185,31 @@ async function commitTransaction(): Promise<void> {
 			eventTransactionMap.delete(i);
 		}
 	}
+	console.log(`[PERF]       Clean old events: ${(performance.now() - cleanStart).toFixed(2)}ms`);
 
+	const mergeStart = performance.now();
 	const startIndex = newEvents.length;
 	// Add all transaction events and track their transaction ID
 	newEvents = [...newEvents, ...transactionEvents];
 	for (let i = 0; i < transactionEvents.length; i++) {
 		eventTransactionMap.set(startIndex + i, currentTransactionId!);
 	}
+	console.log(`[PERF]       Merge events: ${(performance.now() - mergeStart).toFixed(2)}ms`);
 
-	// Recompute design state
-	const newDesignState = reduceEvents(newEvents);
+	// Recompute design state INCREMENTALLY (only apply new transaction events)
+	const reduceStart = performance.now();
+	let newDesignState = applyEventsIncremental(state.designState, transactionEvents);
+	console.log(`[PERF]       Apply events incrementally (${transactionEvents.length} new events): ${(performance.now() - reduceStart).toFixed(2)}ms`);
 
 	// Preserve selection state (selection is not part of event sourcing)
-	newDesignState.selectedElementIds = state.designState.selectedElementIds;
+	// Create new object because Immer returns frozen object
+	newDesignState = {
+		...newDesignState,
+		selectedElementIds: state.designState.selectedElementIds
+	};
 
 	// Update store - increment index only once for all events
+	const updateStart = performance.now();
 	storeState.update((s) => ({
 		...s,
 		events: newEvents,
@@ -203,12 +217,14 @@ async function commitTransaction(): Promise<void> {
 		currentEventIndex: newEvents.length - 1,
 		isSaving: true
 	}));
+	console.log(`[PERF]       Update store: ${(performance.now() - updateStart).toFixed(2)}ms`);
 
-	// Persist all events to IndexedDB
+	// Persist all events to IndexedDB in a single batch write (massive performance boost)
 	try {
-		for (const event of transactionEvents) {
-			await appendEvent(event);
-		}
+		const dbStart = performance.now();
+		await appendEvents(transactionEvents);
+		console.log(`[PERF]       IndexedDB batch write: ${(performance.now() - dbStart).toFixed(2)}ms`);
+
 		storeState.update((s) => ({
 			...s,
 			isSaving: false,
@@ -235,15 +251,10 @@ async function dispatch(event: DesignEvent): Promise<void> {
 	// If in transaction, collect events instead of dispatching immediately
 	if (isInTransaction) {
 		transactionEvents.push(event);
-		// Still update design state for live preview during transaction
-		const state = get(storeState);
-		const tempEvents = [...state.events.slice(0, state.currentEventIndex + 1), ...transactionEvents];
-		const newDesignState = reduceEvents(tempEvents);
-		newDesignState.selectedElementIds = state.designState.selectedElementIds;
-		storeState.update((s) => ({
-			...s,
-			designState: newDesignState
-		}));
+		// OPTIMIZATION: Don't rebuild state on every event during transaction!
+		// This was causing O(n²) complexity (reduce 1, then 2, then 3... events)
+		// State will be rebuilt once in commitTransaction() instead
+		// UI will update when transaction commits (still feels instant)
 		return;
 	}
 
@@ -1667,6 +1678,9 @@ export async function cutElements(): Promise<void> {
  * Paste elements from clipboard
  */
 export async function pasteElements(): Promise<void> {
+	const perfStart = performance.now();
+	console.log('[PERF] 📋 Paste: START', `(${clipboard.length} elements)`);
+
 	if (clipboard.length === 0) return;
 
 	const state = get(designState);
@@ -1701,10 +1715,14 @@ export async function pasteElements(): Promise<void> {
 	}
 
 	// Clear selection
+	const clearStart = performance.now();
 	clearSelection();
+	console.log(`[PERF]   Clear selection: ${(performance.now() - clearStart).toFixed(2)}ms`);
 
 	// Wrap entire paste operation in a transaction for single undo/redo
+	const txStart = performance.now();
 	beginTransaction();
+	console.log(`[PERF]   Begin transaction: ${(performance.now() - txStart).toFixed(2)}ms`);
 
 	try {
 		// Create a map from old IDs to new IDs
@@ -1754,7 +1772,8 @@ export async function pasteElements(): Promise<void> {
 	}
 
 	// Recursive function to paste an element and its descendants
-	async function pasteElementTree(element: Element, isRoot: boolean): Promise<string> {
+	// NOTE: Synchronous to avoid await overhead - transaction batches all events
+	function pasteElementTree(element: Element, isRoot: boolean): string {
 		// Determine new parent ID
 		let newParentId: string | null;
 		if (element.parentId && oldToNewIdMap.has(element.parentId)) {
@@ -1801,63 +1820,122 @@ export async function pasteElements(): Promise<void> {
 			position = { x: element.position.x, y: element.position.y };
 		}
 
-		// Create the new element
-		const createData: Parameters<typeof createElement>[0] = {
-			parentId: newParentId,
-			pageId,
-			elementType: element.type,
-			position,
-			size: element.size,
-			styles: element.styles,
-			content: element.content
-		};
-		const newElementId = await createElement(createData);
+		// Generate new element ID
+		const newElementId = uuidv4();
+		const currentState = get(designState);
+		const viewId = currentState.currentViewId || '';
+
+		// Dispatch CREATE_ELEMENT event (batched in transaction)
+		dispatch({
+			id: uuidv4(),
+			type: 'CREATE_ELEMENT',
+			timestamp: Date.now(),
+			payload: {
+				elementId: newElementId,
+				parentId: newParentId,
+				viewId,
+				elementType: element.type,
+				position,
+				size: element.size,
+				styles: element.styles,
+				content: element.content
+			}
+		});
 
 		// Map old ID to new ID
 		oldToNewIdMap.set(element.id, newElementId);
 
-		// Copy additional properties
+		// Copy additional properties (all dispatched synchronously within transaction)
 		if (Object.keys(element.typography || {}).length > 0) {
-			await updateElementTypography(newElementId, element.typography);
+			dispatch({
+				id: uuidv4(),
+				type: 'UPDATE_TYPOGRAPHY',
+				timestamp: Date.now(),
+				payload: {
+					elementId: newElementId,
+					typography: element.typography
+				}
+			});
 		}
 		if (Object.keys(element.spacing || {}).length > 0) {
-			await updateElementSpacing(newElementId, element.spacing);
+			dispatch({
+				id: uuidv4(),
+				type: 'UPDATE_SPACING',
+				timestamp: Date.now(),
+				payload: {
+					elementId: newElementId,
+					spacing: element.spacing
+				}
+			});
 		}
 		if (element.autoLayout && Object.keys(element.autoLayout).length > 0) {
-			await updateElementAutoLayout(newElementId, element.autoLayout);
+			dispatch({
+				id: uuidv4(),
+				type: 'UPDATE_AUTO_LAYOUT',
+				timestamp: Date.now(),
+				payload: {
+					elementId: newElementId,
+					autoLayout: element.autoLayout
+				}
+			});
 		}
 		if (element.rotation && element.rotation !== 0) {
-			await rotateElement(newElementId, element.rotation);
+			dispatch({
+				id: uuidv4(),
+				type: 'ROTATE_ELEMENT',
+				timestamp: Date.now(),
+				payload: {
+					elementId: newElementId,
+					rotation: element.rotation
+				}
+			});
 		}
 		if (element.alt || element.href || element.src) {
-			await updateElement(newElementId, {
-				alt: element.alt,
-				href: element.href,
-				src: element.src
+			dispatch({
+				id: uuidv4(),
+				type: 'UPDATE_ELEMENT',
+				timestamp: Date.now(),
+				payload: {
+					elementId: newElementId,
+					changes: {
+						alt: element.alt,
+						href: element.href,
+						src: element.src
+					}
+				}
 			});
 		}
 
-		// Recursively paste children
+		// Recursively paste children (synchronous)
 		const children = clipboard.filter(el => el.parentId === element.id);
 		for (const child of children) {
-			await pasteElementTree(child, false);
+			pasteElementTree(child, false);
 		}
 
 		return newElementId;
 	}
 
 		// Paste all root elements (and their descendants recursively)
+		// All synchronous - events batched in transaction for single IndexedDB write
+		const treeStart = performance.now();
 		const newRootElementIds: string[] = [];
 		for (const rootElement of rootElements) {
-			const newId = await pasteElementTree(rootElement, true);
+			const newId = pasteElementTree(rootElement, true);
 			newRootElementIds.push(newId);
 		}
+		console.log(`[PERF]   Paste element tree (${clipboard.length} elements, ${transactionEvents.length} events): ${(performance.now() - treeStart).toFixed(2)}ms`);
 
-		// Commit the transaction (batches all events into single undo/redo step)
+		// Commit the transaction (batches all events into single undo/redo step + single IndexedDB write)
+		const commitStart = performance.now();
 		await commitTransaction();
+		console.log(`[PERF]   Commit transaction: ${(performance.now() - commitStart).toFixed(2)}ms`);
 
 		// Select the newly pasted root elements
+		const selectStart = performance.now();
 		selectElements(newRootElementIds);
+		console.log(`[PERF]   Select elements: ${(performance.now() - selectStart).toFixed(2)}ms`);
+
+		console.log(`[PERF] 📋 Paste: TOTAL ${(performance.now() - perfStart).toFixed(2)}ms`);
 
 		// Note: We don't reset isClipboardFromCut here
 		// This allows multiple pastes from a cut operation to all paste at screen center
@@ -1918,7 +1996,8 @@ export async function pasteElementsInside(): Promise<void> {
 		const rootElements = clipboard.filter(el => !el.parentId || !clipboardIds.has(el.parentId));
 
 		// Recursive function to paste an element and its descendants
-		async function pasteElementTree(element: Element, isRoot: boolean): Promise<string> {
+		// NOTE: Synchronous to avoid await overhead - transaction batches all events
+		function pasteElementTreeInside(element: Element, isRoot: boolean): string {
 			// Determine new parent ID
 			let newParentId: string | null;
 			if (element.parentId && oldToNewIdMap.has(element.parentId)) {
@@ -1954,55 +2033,105 @@ export async function pasteElementsInside(): Promise<void> {
 				position = { x: element.position.x, y: element.position.y };
 			}
 
-			// Create the new element
-			const createData: Parameters<typeof createElement>[0] = {
-				parentId: newParentId,
-				pageId,
-				elementType: element.type,
-				position,
-				size: element.size,
-				styles: element.styles,
-				content: element.content
-			};
-			const newElementId = await createElement(createData);
+			// Generate new element ID
+			const newElementId = uuidv4();
+			const currentState = get(designState);
+			const viewId = currentState.currentViewId || '';
+
+			// Dispatch CREATE_ELEMENT event (batched in transaction)
+			dispatch({
+				id: uuidv4(),
+				type: 'CREATE_ELEMENT',
+				timestamp: Date.now(),
+				payload: {
+					elementId: newElementId,
+					parentId: newParentId,
+					viewId,
+					elementType: element.type,
+					position,
+					size: element.size,
+					styles: element.styles,
+					content: element.content
+				}
+			});
 
 			// Map old ID to new ID
 			oldToNewIdMap.set(element.id, newElementId);
 
-			// Copy additional properties
+			// Copy additional properties (all dispatched synchronously within transaction)
 			if (Object.keys(element.typography || {}).length > 0) {
-				await updateElementTypography(newElementId, element.typography);
+				dispatch({
+					id: uuidv4(),
+					type: 'UPDATE_TYPOGRAPHY',
+					timestamp: Date.now(),
+					payload: {
+						elementId: newElementId,
+						typography: element.typography
+					}
+				});
 			}
 			if (Object.keys(element.spacing || {}).length > 0) {
-				await updateElementSpacing(newElementId, element.spacing);
+				dispatch({
+					id: uuidv4(),
+					type: 'UPDATE_SPACING',
+					timestamp: Date.now(),
+					payload: {
+						elementId: newElementId,
+						spacing: element.spacing
+					}
+				});
 			}
 			if (element.autoLayout && Object.keys(element.autoLayout).length > 0) {
-				await updateElementAutoLayout(newElementId, element.autoLayout);
+				dispatch({
+					id: uuidv4(),
+					type: 'UPDATE_AUTO_LAYOUT',
+					timestamp: Date.now(),
+					payload: {
+						elementId: newElementId,
+						autoLayout: element.autoLayout
+					}
+				});
 			}
 			if (element.rotation && element.rotation !== 0) {
-				await rotateElement(newElementId, element.rotation);
+				dispatch({
+					id: uuidv4(),
+					type: 'ROTATE_ELEMENT',
+					timestamp: Date.now(),
+					payload: {
+						elementId: newElementId,
+						rotation: element.rotation
+					}
+				});
 			}
 			if (element.alt || element.href || element.src) {
-				await updateElement(newElementId, {
-					alt: element.alt,
-					href: element.href,
-					src: element.src
+				dispatch({
+					id: uuidv4(),
+					type: 'UPDATE_ELEMENT',
+					timestamp: Date.now(),
+					payload: {
+						elementId: newElementId,
+						changes: {
+							alt: element.alt,
+							href: element.href,
+							src: element.src
+						}
+					}
 				});
 			}
 
-			// Paste all descendants
+			// Paste all descendants (synchronous)
 			const descendants = clipboard.filter(el => el.parentId === element.id);
 			for (const descendant of descendants) {
-				await pasteElementTree(descendant, false);
+				pasteElementTreeInside(descendant, false);
 			}
 
 			return newElementId;
 		}
 
-		// Paste all root elements
+		// Paste all root elements (synchronous - events batched in transaction)
 		const newRootElementIds: string[] = [];
 		for (const rootElement of rootElements) {
-			const newId = await pasteElementTree(rootElement, true);
+			const newId = pasteElementTreeInside(rootElement, true);
 			newRootElementIds.push(newId);
 		}
 
@@ -2024,8 +2153,19 @@ export async function pasteElementsInside(): Promise<void> {
  * Duplicate selected elements
  */
 export async function duplicateElements(): Promise<void> {
+	const perfStart = performance.now();
+	console.log('[PERF] 🔄 Duplicate: START');
+
+	const copyStart = performance.now();
 	copyElements();
+	console.log(`[PERF] ✅ Duplicate: Copy completed in ${(performance.now() - copyStart).toFixed(2)}ms`);
+
+	const pasteStart = performance.now();
 	await pasteElements();
+	console.log(`[PERF] ✅ Duplicate: Paste completed in ${(performance.now() - pasteStart).toFixed(2)}ms`);
+
+	const totalTime = performance.now() - perfStart;
+	console.log(`[PERF] 🎯 Duplicate: TOTAL ${totalTime.toFixed(2)}ms`);
 }
 
 /**
