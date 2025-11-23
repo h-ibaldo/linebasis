@@ -594,9 +594,9 @@ type DocumentWithCaret = Document & {
 				styles.push(`justify-content: ${element.autoLayout.justifyContent}`);
 			}
 
-			// Align content (cross axis alignment for wrapped lines)
+			// Align items (cross axis alignment)
 			if (element.autoLayout.alignItems) {
-				styles.push(`align-content: ${element.autoLayout.alignItems}`);
+				styles.push(`align-items: ${element.autoLayout.alignItems}`);
 			}
 
 			// Gap between children
