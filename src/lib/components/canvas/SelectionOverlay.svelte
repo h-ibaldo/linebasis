@@ -81,6 +81,7 @@
 	let reorderElementRotation: number = 0; // Rotation of element being reordered
 	let reorderElementSize: { width: number; height: number } = { width: 0, height: 0 }; // Size of element being reordered
 	let currentMouseScreen: { x: number; y: number } = { x: 0, y: 0 }; // Current mouse position for debug
+	let hasMovedBeyondThreshold: boolean = false; // Track if we've moved past the drag threshold
 
 	// Screen-space debug helpers for rotation visualization (account for canvas DOM offset)
 	let debugCenterScreen: { x: number; y: number } | null = null;
@@ -154,16 +155,12 @@
 		const canvasRect = canvasElement?.getBoundingClientRect();
 		if (!canvasRect) return null;
 
-		// Get dragged element's visual bounding box from DOM
-		const draggedDomElement = document.querySelector(`[data-element-id="${draggedElementId}"]`);
-		if (!draggedDomElement) return null;
-		const draggedRect = draggedDomElement.getBoundingClientRect();
-		
-		// Convert to canvas space
-		const draggedVisualLeft = (draggedRect.left - canvasRect.left - viewport.x) / viewport.scale;
-		const draggedVisualRight = (draggedRect.right - canvasRect.left - viewport.x) / viewport.scale;
-		const draggedVisualTop = (draggedRect.top - canvasRect.top - viewport.y) / viewport.scale;
-		const draggedVisualBottom = (draggedRect.bottom - canvasRect.top - viewport.y) / viewport.scale;
+		// Use the passed-in position and size (which represents where we're dragging to)
+		// NOT the DOM position (which may be controlled by auto-layout and doesn't reflect drag position)
+		const draggedVisualLeft = elementX;
+		const draggedVisualRight = elementX + elementWidth;
+		const draggedVisualTop = elementY;
+		const draggedVisualBottom = elementY + elementHeight;
 
 		// IMPORTANT: Check if element is still within its original parent's visual boundaries
 		// Use rotated rectangle check instead of bounding box for accurate detection
@@ -211,22 +208,23 @@
 					}
 				}
 
-				// If ANY corner is still within original parent, keep the original parent
-				if (anyCornerInside) {
+				// Special rule for regular divs (not views, not auto-layout):
+				// Children cannot be dragged out - they're locked inside
+				// The only way to remove them is via copy/cut and paste outside
+				const isRegularDiv = originalParent.type === 'div' &&
+					!originalParent.isView &&
+					!originalParent.autoLayout?.enabled;
+
+				if (isRegularDiv) {
+					// Force element to stay in parent even if all corners are outside
 					return originalParentId;
 				}
 
-			// Special rule for regular divs (not views, not auto-layout):
-			// Children cannot be dragged out - they're locked inside
-			// The only way to remove them is via copy/cut and paste outside
-			const isRegularDiv = originalParent.type === 'div' &&
-				!originalParent.isView &&
-				!originalParent.autoLayout?.enabled;
-
-			if (isRegularDiv) {
-				// Force element to stay in parent even if all corners are outside
-				return originalParentId;
-			}
+				// If ANY corner is still within original parent, keep the original parent
+				// (only for non-regular divs - views and auto-layout divs can be dragged out of)
+				if (anyCornerInside) {
+					return originalParentId;
+				}
 			}
 		}
 
@@ -1302,6 +1300,8 @@
 
 	// Expose handleMouseDown for CanvasElement
 	export async function startDrag(e: MouseEvent, element: Element, handle?: string, passedSelectedElements?: Element[]) {
+		console.log('[START DRAG CALLED]', { elementId: element.id, currentInteractionMode: interactionMode });
+
 		const tool = get(currentTool);
 
 		// Don't handle if hand tool or space panning is active - let canvas handle it
@@ -1334,6 +1334,7 @@
 		isGroupInteraction = elementsToUse.length > 1;
 
 		dragStartScreen = { x: e.clientX, y: e.clientY };
+		hasMovedBeyondThreshold = false; // Reset movement threshold flag
 
 		const pos = getDisplayPosition(element);
 		const size = getDisplaySize(element);
@@ -1843,9 +1844,19 @@
 				// Check if element is in auto layout and can be reordered
 				const state = get(designState);
 				const parent = element.parentId ? state.elements[element.parentId] : null;
+
+				console.log('[DRAG START] Element info:', {
+					elementId: element.id,
+					parentId: element.parentId,
+					hasParent: !!parent,
+					parentHasAutoLayout: parent?.autoLayout?.enabled,
+					ignoreAutoLayout: element.autoLayout?.ignoreAutoLayout
+				});
+
 				if (parent?.autoLayout?.enabled && !element.autoLayout?.ignoreAutoLayout) {
 					reorderParentId = parent.id;
 					reorderOriginalIndex = parent.children?.indexOf(element.id) ?? null;
+					console.log('[DRAG START] Setting reorderParentId:', reorderParentId, 'originalIndex:', reorderOriginalIndex);
 
 					// Store the offset from cursor to element's top-left in SCREEN space
 					// We'll use screen coordinates for ghost positioning to avoid coordinate conversion issues
@@ -1907,6 +1918,7 @@
 				} else {
 					reorderParentId = null;
 					reorderOriginalIndex = null;
+					console.log('[DRAG START] NOT in auto layout - reorderParentId set to null');
 				}
 			}
 
@@ -1934,15 +1946,24 @@
 
 	// Auto layout reordering helper - applies the reorder via design-store
 	async function applyReorder(elementId: string, parentId: string, targetIndex: number): Promise<void> {
+		console.log('[APPLY REORDER CALLED]', { elementId, parentId, targetIndex });
 		const state = get(designState);
 		const parent = state.elements[parentId];
-		if (!parent) return;
+		if (!parent) {
+			console.log('[APPLY REORDER] Parent not found, returning');
+			return;
+		}
 
 		const siblings = parent.children || [];
 		const currentIndex = siblings.indexOf(elementId);
-		if (currentIndex === -1 || currentIndex === targetIndex) return;
+		console.log('[APPLY REORDER] Current index:', currentIndex, 'Target index:', targetIndex);
+		if (currentIndex === -1 || currentIndex === targetIndex) {
+			console.log('[APPLY REORDER] Skipping - element not in parent or already at target index');
+			return;
+		}
 
 		// Dispatch the reorder event via design-store
+		console.log('[APPLY REORDER] Calling reorderElement');
 		await reorderElement(elementId, parentId, targetIndex);
 	}
 
@@ -2091,10 +2112,33 @@
 	}
 
 	// Live reordering: reorder elements as user drags
+	// Use potentialDropParentId if available (dragging to different parent), otherwise use reorderParentId
+	// Only apply if we've moved beyond the threshold to avoid reordering on clicks
 	$: if (interactionMode === 'dragging' && reorderTargetIndex !== null &&
-		reorderTargetIndex !== lastAppliedIndex && reorderParentId && activeElementId) {
-		lastAppliedIndex = reorderTargetIndex;
-		applyReorder(activeElementId, reorderParentId, reorderTargetIndex);
+		reorderTargetIndex !== lastAppliedIndex && activeElementId && hasMovedBeyondThreshold) {
+		const targetParent = potentialDropParentId || reorderParentId;
+		if (targetParent) {
+			// Check if changing parents (dragging from one auto-layout to another)
+			const effectiveFromParent = reorderParentId; // Where element started
+			const effectiveToParent = potentialDropParentId || reorderParentId; // Where it's going
+			const isChangingParents = effectiveFromParent !== effectiveToParent;
+
+			// Only apply live reordering if changing parents
+			// For same-parent reordering, we'll apply it on mouseup to avoid unwanted reordering from clicks
+			if (isChangingParents) {
+				console.log('[REORDER] Applying reorder (changing parents):', {
+					elementId: activeElementId,
+					targetParent,
+					targetIndex: reorderTargetIndex,
+					fromParent: reorderParentId,
+					toParent: potentialDropParentId
+				});
+				lastAppliedIndex = reorderTargetIndex;
+				applyReorder(activeElementId, targetParent, reorderTargetIndex);
+			} else {
+				console.log('[REORDER] Skipping live reorder (same parent) - will apply on mouseup');
+			}
+		}
 	}
 
 	// Mouse event handlers
@@ -2117,6 +2161,16 @@
 			y: deltaScreen.y / viewport.scale
 		};
 
+		// Check if we've moved beyond the threshold
+		if (!hasMovedBeyondThreshold) {
+			const movedX = Math.abs(deltaCanvas.x);
+			const movedY = Math.abs(deltaCanvas.y);
+			if (movedX > CANVAS_INTERACTION.MOVEMENT_THRESHOLD || movedY > CANVAS_INTERACTION.MOVEMENT_THRESHOLD) {
+				hasMovedBeyondThreshold = true;
+				console.log('[THRESHOLD] Moved beyond threshold:', { movedX, movedY, threshold: CANVAS_INTERACTION.MOVEMENT_THRESHOLD });
+			}
+		}
+
 		if (interactionMode === 'dragging') {
 			// Calculate reorder target index if in auto layout
 			if (reorderParentId && activeElementId) {
@@ -2136,29 +2190,57 @@
 					y: (ghostScreenY - viewport.y) / viewport.scale
 				};
 
-				// Get all children positions for debugging
-				const state = get(designState);
-				const parent = state.elements[reorderParentId];
-				const childrenPositions = parent?.children?.map(childId => {
-					const child = state.elements[childId];
-					const domEl = document.querySelector(`[data-element-id="${childId}"]`);
-					if (!domEl || !child) return null;
-					const rect = domEl.getBoundingClientRect();
-					return {
-						id: childId,
-						isBeingDragged: childId === activeElementId,
-						screenPos: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom },
-						size: { width: rect.width, height: rect.height }
-					};
-				}).filter(Boolean) || [];
+				// Only check for parent changes and calculate reorder index if we've moved beyond threshold
+				// This prevents unwanted reordering on small mouse movements (clicks)
+				if (hasMovedBeyondThreshold) {
+					// Check if dragging into a different auto layout parent
+					const state = get(designState);
+					const draggedElement = state.elements[activeElementId];
+					if (draggedElement) {
+						const detectedParentId = findDropParentAtPosition(
+							pendingPosition.x,
+							pendingPosition.y,
+							draggedElement.size.width,
+							draggedElement.size.height,
+							activeElementId
+						);
 
+						// Track the potential drop parent (could be different from original)
+						potentialDropParentId = detectedParentId;
 
-				reorderTargetIndex = calculateReorderTargetIndex(
-					mouseCanvasX,
-					mouseCanvasY,
-					reorderParentId,
-					activeElementId
-				);
+						// Determine which parent to use for reordering calculation
+						const targetParentId = detectedParentId || reorderParentId;
+						const targetParent = state.elements[targetParentId];
+
+						// Only calculate reorder index if target parent has auto layout enabled
+						if (targetParent?.autoLayout?.enabled) {
+						// Get all children positions for debugging
+						const childrenPositions = targetParent.children?.map(childId => {
+							const child = state.elements[childId];
+							const domEl = document.querySelector(`[data-element-id="${childId}"]`);
+							if (!domEl || !child) return null;
+							const rect = domEl.getBoundingClientRect();
+							return {
+								id: childId,
+								isBeingDragged: childId === activeElementId,
+								screenPos: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom },
+								size: { width: rect.width, height: rect.height }
+							};
+						}).filter(Boolean) || [];
+
+							// Calculate reorder index within the target parent
+							reorderTargetIndex = calculateReorderTargetIndex(
+								mouseCanvasX,
+								mouseCanvasY,
+								targetParentId,
+								activeElementId
+							);
+						} else {
+							// Target parent doesn't have auto layout - clear reorder state
+							reorderTargetIndex = null;
+						}
+					}
+				}
 			} else {
 				// Normal drag: calculate position
 				const state = get(designState);
@@ -2196,11 +2278,15 @@
 						y: elementStartCanvas.y + deltaCanvas.y
 					};
 				}
-				// Detect potential drop parent for single element drags (not groups, not auto layout)
-				if (!isGroupInteraction && activeElementId && tempPendingPosition) {
+				// Detect potential drop parent for single element drags (not groups, not in auto layout mode)
+				// Only check after moving beyond threshold to avoid unwanted reordering on clicks
+				if (!isGroupInteraction && activeElementId && tempPendingPosition && hasMovedBeyondThreshold) {
 					// Get the dragged element's size to check for overlap with potential parents
 					const draggedElement = state.elements[activeElementId];
 					if (draggedElement) {
+						const mouseCanvasX = (e.clientX - viewport.x) / viewport.scale;
+						const mouseCanvasY = (e.clientY - viewport.y) / viewport.scale;
+
 						const detectedParentId = findDropParentAtPosition(
 							tempPendingPosition.x,
 							tempPendingPosition.y,
@@ -2208,11 +2294,30 @@
 							draggedElement.size.height,
 							activeElementId
 						);
-						
-						// Just track potential parent - don't change during drag (change on drop to prevent issues)
-						// The reactive block will handle temporary DOM reordering if needed
+
+						// Track potential parent
 						potentialDropParentId = detectedParentId;
-						
+
+						// If dragging into an auto-layout parent, calculate reorder index
+						if (detectedParentId) {
+							const targetParent = state.elements[detectedParentId];
+							if (targetParent?.autoLayout?.enabled) {
+								console.log('[DRAG IN] Detected auto-layout parent:', detectedParentId);
+								// Calculate where in the auto-layout to insert this element
+								reorderTargetIndex = calculateReorderTargetIndex(
+									mouseCanvasX,
+									mouseCanvasY,
+									detectedParentId,
+									activeElementId
+								);
+								console.log('[DRAG IN] Calculated reorder index:', reorderTargetIndex);
+							} else {
+								reorderTargetIndex = null;
+							}
+						} else {
+							reorderTargetIndex = null;
+						}
+
 						pendingPosition = tempPendingPosition;
 					} else {
 						pendingPosition = tempPendingPosition;
@@ -3005,60 +3110,83 @@
 			if (interactionMode === 'dragging') {
 				if (movedX > CANVAS_INTERACTION.MOVEMENT_THRESHOLD || movedY > CANVAS_INTERACTION.MOVEMENT_THRESHOLD) {
 					if (pendingPosition && activeElement) {
-						// Skip moveElement if in auto layout (reordering already happened live)
-						if (!reorderParentId) {
-							// Check if parent changed during drag (drag out of/into div)
-							if (potentialDropParentId !== originalParentId) {
+						// Check if parent changed during drag (drag out of/into div)
+						// This applies to both auto layout and non-auto layout drags
+						// IMPORTANT: Only process parent changes if we actually moved beyond threshold
+						// and detected a parent (hasMovedBeyondThreshold ensures potentialDropParentId was calculated)
+						if (hasMovedBeyondThreshold && potentialDropParentId !== originalParentId) {
+							// Parent changed - need to update parent and position
+							const state_for_drop = get(designState);
+							const newParent = potentialDropParentId ? state_for_drop.elements[potentialDropParentId] : null;
 
+							// Check if new parent has auto layout
+							const newParentHasAutoLayout = newParent?.autoLayout?.enabled || false;
+
+							if (newParentHasAutoLayout) {
+								// Dropping into auto layout parent - position doesn't matter, auto layout will handle it
+								// The reorder index may have been applied during drag (via reactive statement)
+								// But we need to ensure the element is in the correct parent with the correct index
+								const currentState = get(designState);
+								const currentParent = currentState.elements[activeElementId]?.parentId;
+
+								// Check if parent actually changed or if we need to finalize
+								if (currentParent !== potentialDropParentId || !hasMovedBeyondThreshold) {
+									// Parent not yet changed OR we didn't move beyond threshold (clicked without dragging)
+									// Need to finalize the parent change
+									console.log('[DROP INTO AUTO LAYOUT] Finalizing parent change:', {
+										from: currentParent,
+										to: potentialDropParentId,
+										index: reorderTargetIndex
+									});
+									await reorderElement(activeElementId, potentialDropParentId, reorderTargetIndex ?? 0);
+								}
+								// No need to call moveElement - auto layout will position it
+							} else {
+								// Dropping into non-auto layout parent - need to calculate relative position
 								// Use cursor position as drop reference, maintaining the offset from drag start
-								// Always prefer cursor position to ensure accurate drop location
 								const dropPosition = cursorCanvasPos || pendingPosition;
 
 								if (!cursorCanvasPos) {
 									console.warn('cursorCanvasPos not available at drop time, using pendingPosition');
 								}
 
-								// Calculate element's center position from cursor: cursor position minus the drag offset
-								// dragOffsetCanvas is stored as cursor-to-center offset (see drag start calculation)
+								// Calculate element's center position from cursor
 								const elementCenterCanvas = {
 									x: dropPosition.x - dragOffsetCanvas.x,
 									y: dropPosition.y - dragOffsetCanvas.y
 								};
 
-								// Convert center to top-left: subtract half width and height
+								// Convert center to top-left
 								const elementTopLeftCanvas = {
 									x: elementCenterCanvas.x - activeElement.size.width / 2,
 									y: elementCenterCanvas.y - activeElement.size.height / 2
 								};
-								
-								// Calculate position relative to new parent
-								const state_for_drop = get(designState);
-								const newParent = potentialDropParentId ? state_for_drop.elements[potentialDropParentId] : null;
+
 								let relativePos: { x: number; y: number };
-								
+
 								if (newParent) {
 									// Convert element's top-left position to relative position for new parent
 									const newParentAbsPos = getAbsolutePosition(newParent);
 									const newParentRotation = getDisplayRotation(newParent);
-									
+
 									// Get parent's center in canvas space
 									const parentCenterX = newParentAbsPos.x + newParent.size.width / 2;
 									const parentCenterY = newParentAbsPos.y + newParent.size.height / 2;
-									
+
 									// Get element's center in canvas space
 									const elementCenterX = elementTopLeftCanvas.x + activeElement.size.width / 2;
 									const elementCenterY = elementTopLeftCanvas.y + activeElement.size.height / 2;
-									
+
 									// Offset from parent center to element center (in world/canvas space)
 									const dx = elementCenterX - parentCenterX;
 									const dy = elementCenterY - parentCenterY;
-									
+
 									if (newParentRotation !== 0) {
 										// Transform to parent's local space (inverse rotation)
 										const angleRad = -newParentRotation * (Math.PI / 180);
 										const localDx = dx * Math.cos(angleRad) - dy * Math.sin(angleRad);
 										const localDy = dx * Math.sin(angleRad) + dy * Math.cos(angleRad);
-										
+
 										// Convert from center-relative to top-left relative (in parent's local space)
 										relativePos = {
 											x: localDx + newParent.size.width / 2 - activeElement.size.width / 2,
@@ -3073,20 +3201,37 @@
 									}
 								} else {
 									// Dropping at root - element top-left is already in absolute coordinates
-									// The elementTopLeftCanvas was calculated from cursor position minus offset,
-									// so it correctly maintains the cursor-to-element relationship
 									relativePos = elementTopLeftCanvas;
 								}
-								
+
 								// Change parent and move position
-								// Note: reorderElement will handle the permanent DOM reordering
-								await reorderElement(activeElementId, potentialDropParentId, 0);
+								// Note: If parent changed during auto layout drag, reorderElement was already called
+								// during the drag via the reactive statement, so we only need to call moveElement here
+								if (!reorderParentId || potentialDropParentId !== (get(designState).elements[activeElementId]?.parentId)) {
+									// Parent not yet changed, or changed to different parent than current
+									await reorderElement(activeElementId, potentialDropParentId, reorderTargetIndex ?? 0);
+								}
 								await moveElement(activeElementId, relativePos);
-								
-								// Clear original DOM position tracking since element was dropped inside
-								
+							}
+						} else {
+							// Parent didn't change - just move within same parent
+							if (reorderParentId) {
+								// In auto layout - apply final reorder index
+								// We skipped live reordering to avoid unwanted reordering from clicks
+								// Now apply the final index on mouseup
+								if (reorderTargetIndex !== null && reorderTargetIndex !== reorderOriginalIndex) {
+									console.log('[MOUSEUP] Applying final reorder:', {
+										elementId: activeElementId,
+										parent: reorderParentId,
+										fromIndex: reorderOriginalIndex,
+										toIndex: reorderTargetIndex
+									});
+									await reorderElement(activeElementId, reorderParentId, reorderTargetIndex);
+								} else {
+									console.log('[MOUSEUP] No reorder needed - at original index or no target');
+								}
 							} else {
-								// Parent didn't change - just move within same parent
+								// Not in auto layout - move the element
 								// FIX: Use center-based transformation to prevent jump on drop for rotated nested elements
 								const currentSize = activeElement.size;
 								const centerWorld = {
@@ -3098,7 +3243,7 @@
 									x: centerLocal.x - currentSize.width / 2,
 									y: centerLocal.y - currentSize.height / 2
 								};
-								
+
 								await moveElement(activeElementId, relativePos);
 							}
 						}
