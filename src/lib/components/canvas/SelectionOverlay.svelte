@@ -2123,20 +2123,16 @@
 			const effectiveToParent = potentialDropParentId || reorderParentId; // Where it's going
 			const isChangingParents = effectiveFromParent !== effectiveToParent;
 
-			// Only apply live reordering if changing parents
-			// For same-parent reordering, we'll apply it on mouseup to avoid unwanted reordering from clicks
-			if (isChangingParents) {
-				console.log('[REORDER] Applying reorder (changing parents):', {
-					elementId: activeElementId,
-					targetParent,
-					targetIndex: reorderTargetIndex,
-					fromParent: reorderParentId,
-					toParent: potentialDropParentId
-				});
+			// Check if the target index is different from where we started
+			// This prevents reordering when just clicking (which might calculate same index)
+			const isActuallyReordering = reorderTargetIndex !== reorderOriginalIndex;
+
+			// Apply live reordering if:
+			// 1. Changing parents (always show feedback), OR
+			// 2. Same parent but actually moving to a different index
+			if (isChangingParents || isActuallyReordering) {
 				lastAppliedIndex = reorderTargetIndex;
 				applyReorder(activeElementId, targetParent, reorderTargetIndex);
-			} else {
-				console.log('[REORDER] Skipping live reorder (same parent) - will apply on mouseup');
 			}
 		}
 	}
