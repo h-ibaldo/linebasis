@@ -18,6 +18,7 @@ export type EventType =
 	| 'RESIZE_ELEMENT'
 	| 'ROTATE_ELEMENT'
 	| 'REORDER_ELEMENT'
+	| 'SHIFT_ELEMENT_LAYER'
 	| 'TOGGLE_VIEW'
 	| 'TOGGLE_VISIBILITY'
 	| 'TOGGLE_LOCK'
@@ -127,6 +128,14 @@ export interface ReorderElementEvent extends BaseEvent {
 		elementId: string;
 		newParentId: string | null;
 		newIndex: number; // Z-index or child position
+	};
+}
+
+export interface ShiftElementLayerEvent extends BaseEvent {
+	type: 'SHIFT_ELEMENT_LAYER';
+	payload: {
+		elementId: string;
+		direction: 'forward' | 'backward' | 'front' | 'back';
 	};
 }
 
@@ -400,6 +409,7 @@ export type DesignEvent =
 	| ResizeElementEvent
 	| RotateElementEvent
 	| ReorderElementEvent
+	| ShiftElementLayerEvent
 	| ToggleViewEvent
 	| ToggleVisibilityEvent
 	| ToggleLockEvent
@@ -551,6 +561,8 @@ export interface Element {
 	children: string[]; // Child element IDs
 	// NOTE: NO zIndex - DOM order determined by position in view.elements or parent.children arrays
 	// Array index 0 = bottom layer, last index = top layer (standard HTML rendering)
+	// FALLBACK: zIndex used when views system is not active (for backwards compatibility)
+	zIndex?: number; // Z-index for stacking order (only used when not in a view)
 	isView?: boolean; // Whether this div is a view (page/breakpoint)
 	viewName?: string; // Name of the view if isView is true
 	breakpointWidth?: number; // Width of the view if isView is true

@@ -1300,8 +1300,6 @@
 
 	// Expose handleMouseDown for CanvasElement
 	export async function startDrag(e: MouseEvent, element: Element, handle?: string, passedSelectedElements?: Element[]) {
-		console.log('[START DRAG CALLED]', { elementId: element.id, currentInteractionMode: interactionMode });
-
 		const tool = get(currentTool);
 
 		// Don't handle if hand tool or space panning is active - let canvas handle it
@@ -1485,41 +1483,6 @@
 				actualDOMCenter.y = (rect.top + rect.height / 2 - canvasRect.top - viewport.y) / viewport.scale;
 			}
 
-			// CONSOLE LOG: Rotation start
-			console.group('🎬 ROTATION START');
-			console.log('📦 Element STORED position:', element.position);
-			console.log('📦 Element STORED size:', element.size);
-			console.log('📦 Element DISPLAY position (from getDisplayPosition):', pos);
-			console.log('📦 Element DISPLAY size (from getDisplaySize):', size);
-			console.log('📍 Center (calculated from display pos + size/2):', { x: centerX, y: centerY });
-			console.log('📍 Center (if calculated from stored pos + stored size/2):', {
-				x: element.position.x + element.size.width / 2,
-				y: element.position.y + element.size.height / 2
-			});
-			console.log('📍 Center (ACTUAL from DOM getBoundingClientRect):', actualDOMCenter);
-			console.log('❌ Center ERROR (calculated - actual):', {
-				x: (centerX - actualDOMCenter.x).toFixed(2),
-				y: (centerY - actualDOMCenter.y).toFixed(2)
-			});
-			console.log('🔄 Element rotation:', element.rotation || 0, '°');
-			console.log('📐 Corner offset (local):', cornerOffset);
-			console.log('📐 Corner base angle:', cornerBaseAngle.toFixed(2), '°');
-			console.log('🔴 Cursor start position:', { x: mouseCanvasX.toFixed(2), y: mouseCanvasY.toFixed(2) });
-			console.log('🔴 Cursor start angle:', rotationStartAngle.toFixed(2), '°');
-			console.log('🎯 Element start rotation:', elementStartRotation.toFixed(2), '°');
-			console.log('🎯 Calculated initial offset:', rotationInitialOffset.toFixed(2), '°');
-			console.log('📏 Reference corner:', rotationReferenceCorner.toUpperCase());
-
-			// Check if element is in auto layout
-			const state_check = get(designState);
-			const parent_check = element.parentId ? state_check.elements[element.parentId] : null;
-			const parentRotation_check = parent_check ? (parent_check.rotation || 0) : 0;
-			console.log('👪 Parent:', parent_check ? parent_check.id : 'none');
-			console.log('👪 Parent rotation:', parentRotation_check, '°');
-			console.log('🔲 Parent has auto layout:', parent_check?.autoLayout?.enabled || false);
-			console.log('🚫 Element ignores auto layout:', element.autoLayout?.ignoreAutoLayout || false);
-			console.log('⚠️  TOTAL rotation (element + parent):', (elementStartRotation + parentRotation_check).toFixed(2), '°');
-			console.groupEnd();
 		} else if (handle?.startsWith('radius-')) {
 			// Corner radius mode
 			interactionMode = 'radius';
@@ -1845,18 +1808,9 @@
 				const state = get(designState);
 				const parent = element.parentId ? state.elements[element.parentId] : null;
 
-				console.log('[DRAG START] Element info:', {
-					elementId: element.id,
-					parentId: element.parentId,
-					hasParent: !!parent,
-					parentHasAutoLayout: parent?.autoLayout?.enabled,
-					ignoreAutoLayout: element.autoLayout?.ignoreAutoLayout
-				});
-
 				if (parent?.autoLayout?.enabled && !element.autoLayout?.ignoreAutoLayout) {
 					reorderParentId = parent.id;
 					reorderOriginalIndex = parent.children?.indexOf(element.id) ?? null;
-					console.log('[DRAG START] Setting reorderParentId:', reorderParentId, 'originalIndex:', reorderOriginalIndex);
 
 					// Store the offset from cursor to element's top-left in SCREEN space
 					// We'll use screen coordinates for ghost positioning to avoid coordinate conversion issues
@@ -1918,7 +1872,6 @@
 				} else {
 					reorderParentId = null;
 					reorderOriginalIndex = null;
-					console.log('[DRAG START] NOT in auto layout - reorderParentId set to null');
 				}
 			}
 
@@ -1946,24 +1899,19 @@
 
 	// Auto layout reordering helper - applies the reorder via design-store
 	async function applyReorder(elementId: string, parentId: string, targetIndex: number): Promise<void> {
-		console.log('[APPLY REORDER CALLED]', { elementId, parentId, targetIndex });
 		const state = get(designState);
 		const parent = state.elements[parentId];
 		if (!parent) {
-			console.log('[APPLY REORDER] Parent not found, returning');
 			return;
 		}
 
 		const siblings = parent.children || [];
 		const currentIndex = siblings.indexOf(elementId);
-		console.log('[APPLY REORDER] Current index:', currentIndex, 'Target index:', targetIndex);
 		if (currentIndex === -1 || currentIndex === targetIndex) {
-			console.log('[APPLY REORDER] Skipping - element not in parent or already at target index');
 			return;
 		}
 
 		// Dispatch the reorder event via design-store
-		console.log('[APPLY REORDER] Calling reorderElement');
 		await reorderElement(elementId, parentId, targetIndex);
 	}
 
@@ -2163,7 +2111,6 @@
 			const movedY = Math.abs(deltaCanvas.y);
 			if (movedX > CANVAS_INTERACTION.MOVEMENT_THRESHOLD || movedY > CANVAS_INTERACTION.MOVEMENT_THRESHOLD) {
 				hasMovedBeyondThreshold = true;
-				console.log('[THRESHOLD] Moved beyond threshold:', { movedX, movedY, threshold: CANVAS_INTERACTION.MOVEMENT_THRESHOLD });
 			}
 		}
 
@@ -2298,7 +2245,6 @@
 						if (detectedParentId) {
 							const targetParent = state.elements[detectedParentId];
 							if (targetParent?.autoLayout?.enabled) {
-								console.log('[DRAG IN] Detected auto-layout parent:', detectedParentId);
 								// Calculate where in the auto-layout to insert this element
 								reorderTargetIndex = calculateReorderTargetIndex(
 									mouseCanvasX,
@@ -2306,7 +2252,6 @@
 									detectedParentId,
 									activeElementId
 								);
-								console.log('[DRAG IN] Calculated reorder index:', reorderTargetIndex);
 							} else {
 								reorderTargetIndex = null;
 							}
@@ -2755,26 +2700,6 @@
 			const rotatedCornerY = centerY + cornerOffset.x * Math.sin(currentRotationRad) + cornerOffset.y * Math.cos(currentRotationRad);
 			const actualCornerAngle = Math.atan2(rotatedCornerY - centerY, rotatedCornerX - centerX) * (180 / Math.PI);
 
-			// CONSOLE LOG DEBUGGING
-			console.group('🔄 ROTATION DEBUG');
-			console.log('📦 Element Canvas:', elementStartCanvas);
-			console.log('📍 Center (calculated):', { x: centerX, y: centerY });
-			console.log('📐 Corner offset (local space):', cornerOffset);
-			console.log('📐 Corner base angle (local):', cornerBaseAngle.toFixed(2), '°');
-			console.log('👪 Parent rotation:', parentRotationForDebug.toFixed(2), '°');
-			console.log('🔄 Element rotation (pending):', (pendingRotation || 0).toFixed(2), '°');
-			console.log('🔄 Total visual rotation (element + parent):', totalVisualRotation.toFixed(2), '°');
-			console.log('🟢 Corner position (world space):', { x: rotatedCornerX.toFixed(2), y: rotatedCornerY.toFixed(2) });
-			console.log('🟢 Corner actual angle:', actualCornerAngle.toFixed(2), '°');
-			console.log('🔴 Cursor position (canvas):', { x: mouseCanvasX.toFixed(2), y: mouseCanvasY.toFixed(2) });
-			console.log('🔴 Cursor angle:', cursorAngle.toFixed(2), '°');
-			console.log('⚠️  Angular delta (cursor - corner):', (cursorAngle - actualCornerAngle).toFixed(2), '°');
-			console.log('🎯 Initial offset:', rotationInitialOffset.toFixed(2), '°');
-			console.log('🎯 Element start rotation:', elementStartRotation.toFixed(2), '°');
-			console.log('🎯 Target rotation:', targetRotation.toFixed(2), '°');
-			console.log('📏 Reference corner:', rotationReferenceCorner.toUpperCase());
-			console.groupEnd();
-
 			// Store debug values for visualization
 			debugCenter = { x: centerX, y: centerY };
 			debugCorner = { x: rotatedCornerX, y: rotatedCornerY };
@@ -3129,11 +3054,6 @@
 								if (currentParent !== potentialDropParentId || !hasMovedBeyondThreshold) {
 									// Parent not yet changed OR we didn't move beyond threshold (clicked without dragging)
 									// Need to finalize the parent change
-									console.log('[DROP INTO AUTO LAYOUT] Finalizing parent change:', {
-										from: currentParent,
-										to: potentialDropParentId,
-										index: reorderTargetIndex
-									});
 									await reorderElement(activeElementId, potentialDropParentId, reorderTargetIndex ?? 0);
 								}
 								// No need to call moveElement - auto layout will position it
@@ -3216,15 +3136,7 @@
 								// We skipped live reordering to avoid unwanted reordering from clicks
 								// Now apply the final index on mouseup
 								if (reorderTargetIndex !== null && reorderTargetIndex !== reorderOriginalIndex) {
-									console.log('[MOUSEUP] Applying final reorder:', {
-										elementId: activeElementId,
-										parent: reorderParentId,
-										fromIndex: reorderOriginalIndex,
-										toIndex: reorderTargetIndex
-									});
 									await reorderElement(activeElementId, reorderParentId, reorderTargetIndex);
-								} else {
-									console.log('[MOUSEUP] No reorder needed - at original index or no target');
 								}
 							} else {
 								// Not in auto layout - move the element

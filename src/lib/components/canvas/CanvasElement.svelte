@@ -537,6 +537,11 @@ type DocumentWithCaret = Document & {
 			styles.push(`top: ${displayPosition.y}px`);
 		}
 
+		// Z-index for stacking order (only for root elements when not in a view)
+		if (element.zIndex !== undefined && !element.parentId) {
+			styles.push(`z-index: ${element.zIndex}`);
+		}
+
 		// Width and height: use 'auto' for inline-block text elements, otherwise use fixed dimensions
 		if (element.styles.display === 'inline-block') {
 			styles.push(`width: auto`);

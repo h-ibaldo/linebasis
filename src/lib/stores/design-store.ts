@@ -171,12 +171,9 @@ async function commitTransaction(): Promise<void> {
 		return;
 	}
 
-	console.log(`[PERF]     commitTransaction: START (${transactionEvents.length} events)`);
-
 	const state = get(storeState);
 
 	// If we're not at the end of the event log, remove future events (they're undone)
-	const cleanStart = performance.now();
 	let newEvents = state.events;
 	if (state.currentEventIndex < state.events.length - 1) {
 		newEvents = state.events.slice(0, state.currentEventIndex + 1);
@@ -185,21 +182,16 @@ async function commitTransaction(): Promise<void> {
 			eventTransactionMap.delete(i);
 		}
 	}
-	console.log(`[PERF]       Clean old events: ${(performance.now() - cleanStart).toFixed(2)}ms`);
 
-	const mergeStart = performance.now();
 	const startIndex = newEvents.length;
 	// Add all transaction events and track their transaction ID
 	newEvents = [...newEvents, ...transactionEvents];
 	for (let i = 0; i < transactionEvents.length; i++) {
 		eventTransactionMap.set(startIndex + i, currentTransactionId!);
 	}
-	console.log(`[PERF]       Merge events: ${(performance.now() - mergeStart).toFixed(2)}ms`);
 
 	// Recompute design state INCREMENTALLY (only apply new transaction events)
-	const reduceStart = performance.now();
 	let newDesignState = applyEventsIncremental(state.designState, transactionEvents);
-	console.log(`[PERF]       Apply events incrementally (${transactionEvents.length} new events): ${(performance.now() - reduceStart).toFixed(2)}ms`);
 
 	// Preserve selection state (selection is not part of event sourcing)
 	// Create new object because Immer returns frozen object
@@ -209,7 +201,6 @@ async function commitTransaction(): Promise<void> {
 	};
 
 	// Update store - increment index only once for all events
-	const updateStart = performance.now();
 	storeState.update((s) => ({
 		...s,
 		events: newEvents,
@@ -217,13 +208,10 @@ async function commitTransaction(): Promise<void> {
 		currentEventIndex: newEvents.length - 1,
 		isSaving: true
 	}));
-	console.log(`[PERF]       Update store: ${(performance.now() - updateStart).toFixed(2)}ms`);
 
 	// Persist all events to IndexedDB in a single batch write (massive performance boost)
 	try {
-		const dbStart = performance.now();
 		await appendEvents(transactionEvents);
-		console.log(`[PERF]       IndexedDB batch write: ${(performance.now() - dbStart).toFixed(2)}ms`);
 
 		storeState.update((s) => ({
 			...s,
@@ -378,7 +366,9 @@ export function redo(): void {
 
 export async function createPage(name: string, slug?: string): Promise<string> {
 	const pageId = uuidv4();
+	const viewId = uuidv4();
 
+	// Create page
 	await dispatch({
 		id: uuidv4(),
 		type: 'CREATE_PAGE',
@@ -389,6 +379,30 @@ export async function createPage(name: string, slug?: string): Promise<string> {
 			slug
 		}
 	});
+
+	// Create default desktop view for the page
+	await dispatch({
+		id: uuidv4(),
+		type: 'CREATE_VIEW',
+		timestamp: Date.now(),
+		payload: {
+			viewId,
+			pageId,
+			name: 'Desktop',
+			breakpointWidth: 1920,
+			position: { x: 0, y: 0 },
+			height: 1080
+		}
+	});
+
+	// Set the new view as current
+	storeState.update((state) => ({
+		...state,
+		designState: {
+			...state.designState,
+			currentViewId: viewId
+		}
+	}));
 
 	return pageId;
 }
@@ -743,8 +757,6 @@ export async function updateElementAutoLayout(
 			// Convert from screen pixels to canvas units (account for viewport scale)
 			const canvasRelativeX = screenRelativeX / currentViewport.scale;
 			const canvasRelativeY = screenRelativeY / currentViewport.scale;
-
-			console.log(`Child ${childId}: screen (${screenRelativeX.toFixed(1)}, ${screenRelativeY.toFixed(1)}) -> canvas (${canvasRelativeX.toFixed(1)}, ${canvasRelativeY.toFixed(1)})`);
 
 			// Store the position for this child
 			childPositions.set(childId, { x: canvasRelativeX, y: canvasRelativeY });
@@ -1678,9 +1690,6 @@ export async function cutElements(): Promise<void> {
  * Paste elements from clipboard
  */
 export async function pasteElements(): Promise<void> {
-	const perfStart = performance.now();
-	console.log('[PERF] 📋 Paste: START', `(${clipboard.length} elements)`);
-
 	if (clipboard.length === 0) return;
 
 	const state = get(designState);
@@ -1715,14 +1724,10 @@ export async function pasteElements(): Promise<void> {
 	}
 
 	// Clear selection
-	const clearStart = performance.now();
 	clearSelection();
-	console.log(`[PERF]   Clear selection: ${(performance.now() - clearStart).toFixed(2)}ms`);
 
 	// Wrap entire paste operation in a transaction for single undo/redo
-	const txStart = performance.now();
 	beginTransaction();
-	console.log(`[PERF]   Begin transaction: ${(performance.now() - txStart).toFixed(2)}ms`);
 
 	try {
 		// Create a map from old IDs to new IDs
@@ -1917,25 +1922,17 @@ export async function pasteElements(): Promise<void> {
 
 		// Paste all root elements (and their descendants recursively)
 		// All synchronous - events batched in transaction for single IndexedDB write
-		const treeStart = performance.now();
 		const newRootElementIds: string[] = [];
 		for (const rootElement of rootElements) {
 			const newId = pasteElementTree(rootElement, true);
 			newRootElementIds.push(newId);
 		}
-		console.log(`[PERF]   Paste element tree (${clipboard.length} elements, ${transactionEvents.length} events): ${(performance.now() - treeStart).toFixed(2)}ms`);
 
 		// Commit the transaction (batches all events into single undo/redo step + single IndexedDB write)
-		const commitStart = performance.now();
 		await commitTransaction();
-		console.log(`[PERF]   Commit transaction: ${(performance.now() - commitStart).toFixed(2)}ms`);
 
 		// Select the newly pasted root elements
-		const selectStart = performance.now();
 		selectElements(newRootElementIds);
-		console.log(`[PERF]   Select elements: ${(performance.now() - selectStart).toFixed(2)}ms`);
-
-		console.log(`[PERF] 📋 Paste: TOTAL ${(performance.now() - perfStart).toFixed(2)}ms`);
 
 		// Note: We don't reset isClipboardFromCut here
 		// This allows multiple pastes from a cut operation to all paste at screen center
@@ -2153,19 +2150,8 @@ export async function pasteElementsInside(): Promise<void> {
  * Duplicate selected elements
  */
 export async function duplicateElements(): Promise<void> {
-	const perfStart = performance.now();
-	console.log('[PERF] 🔄 Duplicate: START');
-
-	const copyStart = performance.now();
 	copyElements();
-	console.log(`[PERF] ✅ Duplicate: Copy completed in ${(performance.now() - copyStart).toFixed(2)}ms`);
-
-	const pasteStart = performance.now();
 	await pasteElements();
-	console.log(`[PERF] ✅ Duplicate: Paste completed in ${(performance.now() - pasteStart).toFixed(2)}ms`);
-
-	const totalTime = performance.now() - perfStart;
-	console.log(`[PERF] 🎯 Duplicate: TOTAL ${totalTime.toFixed(2)}ms`);
 }
 
 /**
@@ -2193,9 +2179,13 @@ export function selectAll(): void {
  */
 export async function toggleVisibility(elementId: string, visible: boolean): Promise<void> {
 	await dispatch({
-		type: 'UPDATE_ELEMENT',
-		elementId,
-		updates: { visible }
+		id: uuidv4(),
+		type: 'TOGGLE_VISIBILITY',
+		timestamp: Date.now(),
+		payload: {
+			elementId,
+			visible
+		}
 	});
 }
 
@@ -2204,9 +2194,13 @@ export async function toggleVisibility(elementId: string, visible: boolean): Pro
  */
 export async function toggleLock(elementId: string, locked: boolean): Promise<void> {
 	await dispatch({
-		type: 'UPDATE_ELEMENT',
-		elementId,
-		updates: { locked }
+		id: uuidv4(),
+		type: 'TOGGLE_LOCK',
+		timestamp: Date.now(),
+		payload: {
+			elementId,
+			locked
+		}
 	});
 }
 
@@ -2215,10 +2209,73 @@ export async function toggleLock(elementId: string, locked: boolean): Promise<vo
  */
 export async function renameElement(elementId: string, name: string): Promise<void> {
 	await dispatch({
-		type: 'UPDATE_ELEMENT',
-		elementId,
-		updates: { name }
+		id: uuidv4(),
+		type: 'RENAME_ELEMENT',
+		timestamp: Date.now(),
+		payload: {
+			elementId,
+			name
+		}
 	});
+}
+
+// ============================================================================
+// Layer Ordering
+// ============================================================================
+
+/**
+ * Shift element layer (Z-index equivalent in DOM order)
+ * Dispatches the SHIFT_ELEMENT_LAYER event which is handled entirely in the reducer
+ */
+export async function shiftElementLayer(
+	elementId: string,
+	direction: 'forward' | 'backward' | 'front' | 'back'
+): Promise<void> {
+	await dispatch({
+		id: uuidv4(),
+		type: 'SHIFT_ELEMENT_LAYER',
+		timestamp: Date.now(),
+		payload: {
+			elementId,
+			direction
+		}
+	});
+}
+
+/**
+ * Move selected elements backward (down) one layer
+ */
+function moveLayerBackward(elements: Element[]): void {
+	for (const element of elements) {
+		shiftElementLayer(element.id, 'backward');
+	}
+}
+
+/**
+ * Move selected elements forward (up) one layer
+ */
+function moveLayerForward(elements: Element[]): void {
+	for (const element of elements) {
+		shiftElementLayer(element.id, 'forward');
+	}
+}
+
+/**
+ * Send selected elements to back (bottom layer)
+ */
+function sendToBack(elements: Element[]): void {
+	for (const element of elements) {
+		shiftElementLayer(element.id, 'back');
+	}
+}
+
+/**
+ * Bring selected elements to front (top layer)
+ */
+function bringToFront(elements: Element[]): void {
+	for (const element of elements) {
+		shiftElementLayer(element.id, 'front');
+	}
 }
 
 // ============================================================================
@@ -2529,26 +2586,36 @@ export function setupKeyboardShortcuts(): (() => void) | undefined {
 			e.preventDefault();
 			currentTool.set('media');
 		}
-		// Cmd/Ctrl + [ - Rotate 15° counter-clockwise
+		// [ - Send to back
+		else if (e.key === '[' && !e.metaKey && !e.ctrlKey && !isTyping) {
+			e.preventDefault();
+			const selected = get(selectedElements);
+			if (selected.length > 0) {
+				sendToBack(selected);
+			}
+		}
+		// ] - Bring to front
+		else if (e.key === ']' && !e.metaKey && !e.ctrlKey && !isTyping) {
+			e.preventDefault();
+			const selected = get(selectedElements);
+			if (selected.length > 0) {
+				bringToFront(selected);
+			}
+		}
+		// Cmd/Ctrl + [ - Move layer backward (down one level)
 		else if ((e.metaKey || e.ctrlKey) && e.key === '[' && !isTyping) {
 			e.preventDefault();
 			const selected = get(selectedElements);
 			if (selected.length > 0) {
-				selected.forEach(el => {
-					const currentRotation = el.rotation || 0;
-					rotateElement(el.id, currentRotation - 15);
-				});
+				moveLayerBackward(selected);
 			}
 		}
-		// Cmd/Ctrl + ] - Rotate 15° clockwise
+		// Cmd/Ctrl + ] - Move layer forward (up one level)
 		else if ((e.metaKey || e.ctrlKey) && e.key === ']' && !isTyping) {
 			e.preventDefault();
 			const selected = get(selectedElements);
 			if (selected.length > 0) {
-				selected.forEach(el => {
-					const currentRotation = el.rotation || 0;
-					rotateElement(el.id, currentRotation + 15);
-				});
+				moveLayerForward(selected);
 			}
 		}
 		// Cmd+Backspace (Mac) or Ctrl+Backspace (Windows) - Unwrap selected div

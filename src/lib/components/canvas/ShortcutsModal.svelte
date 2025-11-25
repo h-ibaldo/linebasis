@@ -60,6 +60,12 @@
 			{ keys: ['Cmd', 'G'], description: 'Group selected elements' },
 			{ keys: ['Cmd', 'Shift', 'G'], description: 'Ungroup elements' },
 			{ keys: ['Shift', 'A'], description: 'Toggle auto layout' }
+		],
+		layers: [
+			{ keys: ['['], description: 'Send to back' },
+			{ keys: [']'], description: 'Bring to front' },
+			{ keys: ['Cmd', '['], description: 'Move layer backward' },
+			{ keys: ['Cmd', ']'], description: 'Move layer forward' }
 		]
 	};
 </script>
@@ -151,6 +157,26 @@
 			<h3>Layout & Structure</h3>
 			<div class="shortcuts-list">
 				{#each shortcuts.layout as shortcut}
+					<div class="shortcut-row">
+						<div class="keys">
+							{#each shortcut.keys as key, i}
+								<kbd>{key}</kbd>
+								{#if i < shortcut.keys.length - 1}
+									<span class="plus">+</span>
+								{/if}
+							{/each}
+						</div>
+						<span class="description">{shortcut.description}</span>
+					</div>
+				{/each}
+			</div>
+		</section>
+
+		<!-- Layers -->
+		<section class="shortcuts-section">
+			<h3>Layers</h3>
+			<div class="shortcuts-list">
+				{#each shortcuts.layers as shortcut}
 					<div class="shortcut-row">
 						<div class="keys">
 							{#each shortcut.keys as key, i}

@@ -22,6 +22,7 @@ import type {
 	ResizeElementEvent,
 	RotateElementEvent,
 	ReorderElementEvent,
+	ShiftElementLayerEvent,
 	ToggleViewEvent,
 	ToggleVisibilityEvent,
 	ToggleLockEvent,
@@ -134,6 +135,8 @@ export function reduceEvent(state: DesignState, event: DesignEvent): DesignState
 			return handleRotateElement(state, event);
 		case 'REORDER_ELEMENT':
 			return handleReorderElement(state, event);
+		case 'SHIFT_ELEMENT_LAYER':
+			return handleShiftElementLayer(state, event);
 		case 'TOGGLE_VIEW':
 			return handleToggleView(state, event);
 		case 'TOGGLE_VISIBILITY':
@@ -213,6 +216,19 @@ function handleCreateElement(state: DesignState, event: CreateElementEvent): Des
 	// New elements are added to end of array (visual top layer)
 	// Array position determines stacking: index 0 = bottom, last = top
 
+	// Calculate default zIndex for root elements (fallback for when views aren't used)
+	// Find the highest zIndex among existing root elements and add 1
+	let defaultZIndex: number | undefined = undefined;
+	if (!parentId) {
+		const rootElements = Object.values(state.elements).filter(el => !el.parentId);
+		if (rootElements.length > 0) {
+			const maxZ = Math.max(...rootElements.map(el => el.zIndex ?? 0));
+			defaultZIndex = maxZ + 1;
+		} else {
+			defaultZIndex = 0;
+		}
+	}
+
 	const element: Element = {
 		id: elementId,
 		type: elementType,
@@ -225,7 +241,8 @@ function handleCreateElement(state: DesignState, event: CreateElementEvent): Des
 		spacing: {},
 		autoLayout: {},
 		content,
-		children: []
+		children: [],
+		...(defaultZIndex !== undefined && { zIndex: defaultZIndex })
 	};
 
 	// Add element to state
@@ -426,6 +443,142 @@ function handleReorderElement(state: DesignState, event: ReorderElementEvent): D
 		};
 	}
 
+	return {
+		...state,
+		elements: newElements,
+		views: newViews
+	};
+}
+
+function handleShiftElementLayer(state: DesignState, event: ShiftElementLayerEvent): DesignState {
+	const { elementId, direction } = event.payload;
+	const element = state.elements[elementId];
+
+	if (!element) {
+		return state;
+	}
+
+	const newElements = { ...state.elements };
+	const newViews = { ...state.views };
+
+	// Check if element is nested in a parent
+	if (element.parentId && state.elements[element.parentId]) {
+		// Nested element - reorder within parent's children array
+		const parent = state.elements[element.parentId];
+		const siblings = [...parent.children];
+		const currentIndex = siblings.indexOf(elementId);
+		
+		if (currentIndex === -1) return state;
+		
+		siblings.splice(currentIndex, 1);
+		
+		let newIndex = currentIndex;
+		const maxIndex = siblings.length;
+		
+		switch (direction) {
+			case 'backward':
+				newIndex = Math.max(0, currentIndex - 1);
+				break;
+			case 'forward':
+				newIndex = Math.min(maxIndex, currentIndex + 1);
+				break;
+			case 'back':
+				newIndex = 0;
+				break;
+			case 'front':
+				newIndex = maxIndex;
+				break;
+		}
+		
+		siblings.splice(newIndex, 0, elementId);
+		
+		newElements[element.parentId] = {
+			...parent,
+			children: siblings
+		};
+		
+		return {
+			...state,
+			elements: newElements
+		};
+	}
+
+	// Check if element is in a view
+	if (element.viewId && state.views[element.viewId]) {
+		const view = state.views[element.viewId];
+		const siblings = [...view.elements];
+		const currentIndex = siblings.indexOf(elementId);
+		
+		if (currentIndex === -1) return state;
+		
+		siblings.splice(currentIndex, 1);
+		
+		let newIndex = currentIndex;
+		const maxIndex = siblings.length;
+		
+		switch (direction) {
+			case 'backward':
+				newIndex = Math.max(0, currentIndex - 1);
+				break;
+			case 'forward':
+				newIndex = Math.min(maxIndex, currentIndex + 1);
+				break;
+			case 'back':
+				newIndex = 0;
+				break;
+			case 'front':
+				newIndex = maxIndex;
+				break;
+		}
+		
+		siblings.splice(newIndex, 0, elementId);
+		
+		newViews[element.viewId] = {
+			...view,
+			elements: siblings
+		};
+		
+		return {
+			...state,
+			elements: newElements,
+			views: newViews
+		};
+	}
+
+	// FALLBACK: No view system active - use zIndex for root elements
+	// Get all root elements and their current zIndex values
+	const rootElements = Object.values(state.elements).filter(el => !el.parentId);
+	const currentZIndex = element.zIndex ?? 0;
+	
+	// Calculate new zIndex based on direction
+	let newZIndex = currentZIndex;
+	
+	switch (direction) {
+		case 'backward':
+			// Move down one layer
+			newZIndex = currentZIndex - 1;
+			break;
+		case 'forward':
+			// Move up one layer
+			newZIndex = currentZIndex + 1;
+			break;
+		case 'back':
+			// Send to bottom - find minimum zIndex and go below it
+			const minZ = Math.min(...rootElements.map(el => el.zIndex ?? 0));
+			newZIndex = minZ - 1;
+			break;
+		case 'front':
+			// Bring to top - find maximum zIndex and go above it
+			const maxZ = Math.max(...rootElements.map(el => el.zIndex ?? 0));
+			newZIndex = maxZ + 1;
+			break;
+	}
+	
+	newElements[elementId] = {
+		...element,
+		zIndex: newZIndex
+	};
+	
 	return {
 		...state,
 		elements: newElements,
