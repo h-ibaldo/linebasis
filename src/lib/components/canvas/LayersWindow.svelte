@@ -22,7 +22,7 @@
 	// Get root elements from current view's elements array (in DOM order)
 	// Array index 0 = bottom layer (renders first), last index = top layer (renders last)
 	// Reverse the array for display so top layers appear first in the list (like Figma)
-	// Fallback: if no view, show all root elements (parentId === null) for backwards compatibility
+	// Fallback: if no view, show all root elements (parentId === null) sorted by zIndex
 	$: rootElements = $designState.currentViewId && $designState.views[$designState.currentViewId]
 		? $designState.views[$designState.currentViewId].elements
 			.map(id => $designState.elements[id])
@@ -30,7 +30,7 @@
 			.reverse() // Reverse for display: top layers first
 		: Object.values($designState.elements)
 			.filter(el => !el.parentId)
-			.reverse(); // Fallback: show all root elements reversed
+			.sort((a, b) => (b.zIndex ?? 0) - (a.zIndex ?? 0)); // Fallback: sort by zIndex descending (top layers first)
 
 	// Build layer items that can be groups or individual elements
 	// Groups should appear as single items containing their members

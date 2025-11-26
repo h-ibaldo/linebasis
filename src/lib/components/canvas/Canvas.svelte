@@ -507,10 +507,10 @@
 			style="transform: translate({viewport.x}px, {viewport.y}px) scale({viewport.scale});"
 		>
 			<!-- Render all root elements in view.elements array order (first = bottom layer, last = top layer) -->
-			<!-- Fallback: if no view, show all root elements (parentId === null) for backwards compatibility -->
+			<!-- Fallback: if no view, show all root elements (parentId === null) sorted by zIndex -->
 			{#each ($designState.currentViewId && $designState.views[$designState.currentViewId]
 				? $designState.views[$designState.currentViewId].elements.map(id => $designState.elements[id]).filter(Boolean)
-				: Object.values($designState.elements).filter(el => el.parentId === null)
+				: Object.values($designState.elements).filter(el => el.parentId === null).sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0))
 			) as element (element.id)}
 				<CanvasElement
 					{element}

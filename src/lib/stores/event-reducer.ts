@@ -549,36 +549,77 @@ function handleShiftElementLayer(state: DesignState, event: ShiftElementLayerEve
 	// Get all root elements and their current zIndex values
 	const rootElements = Object.values(state.elements).filter(el => !el.parentId);
 	const currentZIndex = element.zIndex ?? 0;
-	
+
+	// Get sorted unique zIndex values of other elements
+	const otherZIndices = rootElements
+		.filter(el => el.id !== elementId)
+		.map(el => el.zIndex ?? 0)
+		.sort((a, b) => a - b);
+
 	// Calculate new zIndex based on direction
 	let newZIndex = currentZIndex;
-	
+
 	switch (direction) {
 		case 'backward':
-			// Move down one layer
-			newZIndex = currentZIndex - 1;
+			// Move down one layer - find the next lower zIndex and swap with it
+			const lowerIndices = otherZIndices.filter(z => z < currentZIndex);
+			if (lowerIndices.length > 0) {
+				// Swap with the element immediately below (highest lower zIndex)
+				const targetZ = lowerIndices[lowerIndices.length - 1];
+				newZIndex = targetZ;
+
+				// Find the element with targetZ and swap its zIndex with current
+				const swapElement = rootElements.find(el => el.id !== elementId && (el.zIndex ?? 0) === targetZ);
+				if (swapElement) {
+					newElements[swapElement.id] = {
+						...swapElement,
+						zIndex: currentZIndex
+					};
+				}
+			}
+			// If already at bottom, don't change
 			break;
 		case 'forward':
-			// Move up one layer
-			newZIndex = currentZIndex + 1;
+			// Move up one layer - find the next higher zIndex and swap with it
+			const higherIndices = otherZIndices.filter(z => z > currentZIndex);
+			if (higherIndices.length > 0) {
+				// Swap with the element immediately above (lowest higher zIndex)
+				const targetZ = higherIndices[0];
+				newZIndex = targetZ;
+
+				// Find the element with targetZ and swap its zIndex with current
+				const swapElement = rootElements.find(el => el.id !== elementId && (el.zIndex ?? 0) === targetZ);
+				if (swapElement) {
+					newElements[swapElement.id] = {
+						...swapElement,
+						zIndex: currentZIndex
+					};
+				}
+			}
+			// If already at top, don't change
 			break;
 		case 'back':
 			// Send to bottom - find minimum zIndex and go below it
-			const minZ = Math.min(...rootElements.map(el => el.zIndex ?? 0));
+			const minZ = otherZIndices.length > 0 ? Math.min(...otherZIndices) : 0;
 			newZIndex = minZ - 1;
 			break;
 		case 'front':
 			// Bring to top - find maximum zIndex and go above it
-			const maxZ = Math.max(...rootElements.map(el => el.zIndex ?? 0));
+			const maxZ = otherZIndices.length > 0 ? Math.max(...otherZIndices) : 0;
 			newZIndex = maxZ + 1;
 			break;
 	}
-	
+
+	// Only update if zIndex actually changed
+	if (newZIndex === currentZIndex) {
+		return state;
+	}
+
 	newElements[elementId] = {
 		...element,
 		zIndex: newZIndex
 	};
-	
+
 	return {
 		...state,
 		elements: newElements,
