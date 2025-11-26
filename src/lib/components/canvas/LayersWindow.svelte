@@ -12,12 +12,16 @@
 	 * - Drag to reorder (array position changes, not z-index)
 	 */
 
-	import { designState, selectElement, selectElements, toggleVisibility, toggleLock, renameElement } from '$lib/stores/design-store';
+	import { designState, selectElement, selectElements, toggleVisibility, toggleLock, renameElement, shiftElementLayer } from '$lib/stores/design-store';
 	import FloatingWindow from '$lib/components/ui/FloatingWindow.svelte';
 	import LayerTreeItem from './LayerTreeItem.svelte';
 	import type { Element, Group } from '$lib/types/events';
 
 	$: selectedIds = $designState.selectedElementIds;
+
+	// Drag and drop state
+	let draggedElementId: string | null = null;
+	let dropTargetIndex: number | null = null;
 
 	// Get root elements from current view's elements array (in DOM order)
 	// Array index 0 = bottom layer (renders first), last index = top layer (renders last)
@@ -113,6 +117,78 @@
 	function handleRename(elementId: string, newName: string) {
 		renameElement(elementId, newName);
 	}
+
+	// Drag and drop handlers
+	function handleDragStart(event: DragEvent, elementId: string) {
+		if (!event.dataTransfer) return;
+
+		draggedElementId = elementId;
+		event.dataTransfer.effectAllowed = 'move';
+		event.dataTransfer.setData('text/plain', elementId);
+
+		// Add visual feedback
+		if (event.target instanceof HTMLElement) {
+			event.target.style.opacity = '0.5';
+		}
+	}
+
+	function handleDragEnd(event: DragEvent) {
+		draggedElementId = null;
+		dropTargetIndex = null;
+
+		// Reset visual feedback
+		if (event.target instanceof HTMLElement) {
+			event.target.style.opacity = '1';
+		}
+	}
+
+	function handleDragOver(event: DragEvent, targetIndex: number) {
+		event.preventDefault();
+		if (!event.dataTransfer) return;
+
+		event.dataTransfer.dropEffect = 'move';
+		dropTargetIndex = targetIndex;
+	}
+
+	function handleDragLeave() {
+		dropTargetIndex = null;
+	}
+
+	function handleDrop(event: DragEvent, targetIndex: number) {
+		event.preventDefault();
+
+		if (!draggedElementId) return;
+
+		const draggedElement = $designState.elements[draggedElementId];
+		if (!draggedElement) return;
+
+		// Find current index of dragged element in rootElements
+		const currentIndex = rootElements.findIndex(el => el.id === draggedElementId);
+		if (currentIndex === -1) return;
+
+		// Calculate how many positions to move
+		// Remember: rootElements is reversed (top layers first in UI)
+		// But zIndex/layer order is normal (higher = on top)
+		const positionDiff = targetIndex - currentIndex;
+
+		if (positionDiff === 0) {
+			// No movement needed
+			dropTargetIndex = null;
+			draggedElementId = null;
+			return;
+		}
+
+		// Use the shift layer function multiple times to move the element
+		const direction = positionDiff > 0 ? 'backward' : 'forward';
+		const steps = Math.abs(positionDiff);
+
+		for (let i = 0; i < steps; i++) {
+			shiftElementLayer(draggedElementId, direction);
+		}
+
+		dropTargetIndex = null;
+		draggedElementId = null;
+	}
 </script>
 
 <FloatingWindow
@@ -131,49 +207,60 @@
 			</div>
 		{:else}
 			<div class="layers-tree">
-				{#each layerItems as item (item.id)}
-					{#if item.type === 'group' && item.groupElements}
-						<!-- Group item -->
-						<div class="group-item">
-							<div
-								class="group-header"
-								class:selected={item.groupElements.some(el => selectedIds.includes(el.id))}
-								on:click={() => handleSelectGroup(item.id)}
-							>
-								<button class="expand-btn" on:click|stopPropagation={() => {}} aria-label="Expand">
-									<span class="arrow expanded">▸</span>
-								</button>
-								<span class="group-icon">⊞</span>
-								<span class="group-name">Group</span>
+				{#each layerItems as item, index (item.id)}
+					<div
+						class="layer-wrapper"
+						class:drop-target={dropTargetIndex === index}
+						draggable="true"
+						on:dragstart={(e) => item.element && handleDragStart(e, item.element.id)}
+						on:dragend={handleDragEnd}
+						on:dragover={(e) => handleDragOver(e, index)}
+						on:dragleave={handleDragLeave}
+						on:drop={(e) => handleDrop(e, index)}
+					>
+						{#if item.type === 'group' && item.groupElements}
+							<!-- Group item -->
+							<div class="group-item">
+								<div
+									class="group-header"
+									class:selected={item.groupElements.some(el => selectedIds.includes(el.id))}
+									on:click={() => handleSelectGroup(item.id)}
+								>
+									<button class="expand-btn" on:click|stopPropagation={() => {}} aria-label="Expand">
+										<span class="arrow expanded">▸</span>
+									</button>
+									<span class="group-icon">⊞</span>
+									<span class="group-name">Group</span>
+								</div>
+								<!-- Group members (always expanded for now, collapsible in future) -->
+								<div class="group-children">
+									{#each item.groupElements as element (element.id)}
+										<LayerTreeItem
+											{element}
+											elements={$designState.elements}
+											{selectedIds}
+											onSelect={handleSelectElement}
+											onToggleVisibility={handleToggleVisibility}
+											onToggleLock={handleToggleLock}
+											onRename={handleRename}
+											depth={1}
+										/>
+									{/each}
+								</div>
 							</div>
-							<!-- Group members (always expanded for now, collapsible in future) -->
-							<div class="group-children">
-								{#each item.groupElements as element (element.id)}
-									<LayerTreeItem
-										{element}
-										elements={$designState.elements}
-										{selectedIds}
-										onSelect={handleSelectElement}
-										onToggleVisibility={handleToggleVisibility}
-										onToggleLock={handleToggleLock}
-										onRename={handleRename}
-										depth={1}
-									/>
-								{/each}
-							</div>
-						</div>
-					{:else if item.element}
-						<!-- Regular element -->
-						<LayerTreeItem
-							element={item.element}
-							elements={$designState.elements}
-							{selectedIds}
-							onSelect={handleSelectElement}
-							onToggleVisibility={handleToggleVisibility}
-							onToggleLock={handleToggleLock}
-							onRename={handleRename}
-						/>
-					{/if}
+						{:else if item.element}
+							<!-- Regular element -->
+							<LayerTreeItem
+								element={item.element}
+								elements={$designState.elements}
+								{selectedIds}
+								onSelect={handleSelectElement}
+								onToggleVisibility={handleToggleVisibility}
+								onToggleLock={handleToggleLock}
+								onRename={handleRename}
+							/>
+						{/if}
+					</div>
 				{/each}
 			</div>
 		{/if}
@@ -211,6 +298,20 @@
 
 	.layers-tree {
 		padding: 8px 0;
+	}
+
+	.layer-wrapper {
+		position: relative;
+		transition: transform 0.1s ease;
+	}
+
+	.layer-wrapper.drop-target {
+		border-top: 2px solid #007aff;
+		margin-top: 2px;
+	}
+
+	.layer-wrapper:active {
+		cursor: grabbing;
 	}
 
 	.group-item {
