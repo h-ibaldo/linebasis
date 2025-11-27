@@ -88,14 +88,6 @@
 		}
 	}
 
-	function handleNameClick(e: Event) {
-		if (!locked) {
-			e.stopPropagation();
-			isRenaming = true;
-			editingName = displayName;
-		}
-	}
-
 	function handleRenameSubmit() {
 		if (editingName.trim() && editingName !== displayName) {
 			onRename(element.id, editingName.trim());
@@ -155,7 +147,6 @@
 			<span
 				class="element-name"
 				class:dimmed={!visible}
-				on:click={handleNameClick}
 			>
 				{displayName}
 			</span>
