@@ -550,27 +550,6 @@
 					{/if}
 				</div>
 			{/if}
-
-			<!-- Render views as visual artboards (breakpoints) -->
-			{#each Object.values($designState.views) as view (view.id)}
-				<div
-					class="view-artboard"
-					style="
-						position: absolute;
-						left: {view.position.x}px;
-						top: {view.position.y}px;
-						width: {view.breakpointWidth}px;
-						height: {view.height}px;
-					"
-				>
-					<!-- Baseline grid per view -->
-					<BaselineGrid />
-
-					<div class="view-artboard-label">
-						{view.name} ({view.breakpointWidth}px)
-					</div>
-				</div>
-			{/each}
 		</div>
 
 		<!-- Selection Overlay - handles selection UI and interactions -->
