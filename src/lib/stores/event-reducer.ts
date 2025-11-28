@@ -11,7 +11,6 @@ import type {
 	DesignEvent,
 	DesignState,
 	Element,
-	View,
 	Page,
 	Group,
 	Component,
@@ -37,10 +36,6 @@ import type {
 	UpdateTypographyEvent,
 	UpdateSpacingEvent,
 	UpdateAutoLayoutEvent,
-	CreateViewEvent,
-	UpdateViewEvent,
-	DeleteViewEvent,
-	ResizeViewEvent,
 	CreatePageEvent,
 	UpdatePageEvent,
 	DeletePageEvent,
@@ -57,13 +52,11 @@ import type {
 export function getInitialState(): DesignState {
 	return {
 		pages: {},
-		views: {},
 		elements: {},
 		groups: {},
 		components: {},
 		pageOrder: [],
 		currentPageId: null,
-		currentViewId: null,
 		selectedElementIds: []
 	};
 }
@@ -170,16 +163,6 @@ export function reduceEvent(state: DesignState, event: DesignEvent): DesignState
 		case 'UPDATE_AUTO_LAYOUT':
 			return handleUpdateAutoLayout(state, event);
 
-		// View operations (breakpoint views)
-		case 'CREATE_VIEW':
-			return handleCreateView(state, event);
-		case 'UPDATE_VIEW':
-			return handleUpdateView(state, event);
-		case 'DELETE_VIEW':
-			return handleDeleteView(state, event);
-		case 'RESIZE_VIEW':
-			return handleResizeView(state, event);
-
 		// Page operations
 		case 'CREATE_PAGE':
 			return handleCreatePage(state, event);
@@ -210,30 +193,18 @@ export function reduceEvent(state: DesignState, event: DesignEvent): DesignState
 // ============================================================================
 
 function handleCreateElement(state: DesignState, event: CreateElementEvent): DesignState {
-	const { elementId, parentId, viewId, elementType, position, size, styles, content } =
+	const { elementId, parentId, pageId, elementType, position, size, styles, content } =
 		event.payload;
 
 	// New elements are added to end of array (visual top layer)
 	// Array position determines stacking: index 0 = bottom, last = top
-
-	// Calculate default zIndex for root elements (fallback for when views aren't used)
-	// Find the highest zIndex among existing root elements and add 1
-	let defaultZIndex: number | undefined = undefined;
-	if (!parentId) {
-		const rootElements = Object.values(state.elements).filter(el => !el.parentId);
-		if (rootElements.length > 0) {
-			const maxZ = Math.max(...rootElements.map(el => el.zIndex ?? 0));
-			defaultZIndex = maxZ + 1;
-		} else {
-			defaultZIndex = 0;
-		}
-	}
+	// LAYERS ARE DOM POSITION - no zIndex needed
 
 	const element: Element = {
 		id: elementId,
 		type: elementType,
 		parentId,
-		viewId,
+		pageId,
 		position,
 		size,
 		styles: styles || {},
@@ -241,14 +212,13 @@ function handleCreateElement(state: DesignState, event: CreateElementEvent): Des
 		spacing: {},
 		autoLayout: {},
 		content,
-		children: [],
-		...(defaultZIndex !== undefined && { zIndex: defaultZIndex })
+		children: []
 	};
 
 	// Add element to state
 	const newElements = { ...state.elements, [elementId]: element };
 
-	// Add element to parent's children
+	// Add element to parent's children if it has a parent
 	if (parentId && newElements[parentId]) {
 		newElements[parentId] = {
 			...newElements[parentId],
@@ -256,19 +226,19 @@ function handleCreateElement(state: DesignState, event: CreateElementEvent): Des
 		};
 	}
 
-	// Add element to view's root elements if no parent
-	const newViews = { ...state.views };
-	if (!parentId && newViews[viewId]) {
-		newViews[viewId] = {
-			...newViews[viewId],
-			elements: [...newViews[viewId].elements, elementId]
+	// Add element to page's canvas if it's a root element (no parent)
+	const newPages = { ...state.pages };
+	if (!parentId && newPages[pageId]) {
+		newPages[pageId] = {
+			...newPages[pageId],
+			canvasElements: [...newPages[pageId].canvasElements, elementId]
 		};
 	}
 
 	return {
 		...state,
 		elements: newElements,
-		views: newViews
+		pages: newPages
 	};
 }
 
@@ -297,7 +267,7 @@ function handleDeleteElement(state: DesignState, event: DeleteElementEvent): Des
 	if (!element) return state;
 
 	const newElements = { ...state.elements };
-	const newViews = { ...state.views };
+	const newPages = { ...state.pages };
 
 	// Remove from parent's children
 	if (element.parentId && newElements[element.parentId]) {
@@ -307,11 +277,11 @@ function handleDeleteElement(state: DesignState, event: DeleteElementEvent): Des
 		};
 	}
 
-	// Remove from view's root elements
-	if (!element.parentId && newViews[element.viewId]) {
-		newViews[element.viewId] = {
-			...newViews[element.viewId],
-			elements: newViews[element.viewId].elements.filter((id) => id !== elementId)
+	// Remove from page's canvas if it's a root element
+	if (!element.parentId && newPages[element.pageId]) {
+		newPages[element.pageId] = {
+			...newPages[element.pageId],
+			canvasElements: newPages[element.pageId].canvasElements.filter((id) => id !== elementId)
 		};
 	}
 
@@ -333,7 +303,7 @@ function handleDeleteElement(state: DesignState, event: DeleteElementEvent): Des
 	return {
 		...state,
 		elements: newElements,
-		views: newViews,
+		pages: newPages,
 		selectedElementIds: newSelectedElementIds
 	};
 }
@@ -401,7 +371,7 @@ function handleReorderElement(state: DesignState, event: ReorderElementEvent): D
 	if (!element) return state;
 
 	const newElements = { ...state.elements };
-	const newViews = { ...state.views };
+	const newPages = { ...state.pages };
 
 	// Remove from old parent
 	if (element.parentId && newElements[element.parentId]) {
@@ -409,21 +379,19 @@ function handleReorderElement(state: DesignState, event: ReorderElementEvent): D
 			...newElements[element.parentId],
 			children: newElements[element.parentId].children.filter((id) => id !== elementId)
 		};
-	} else if (!element.parentId && newViews[element.viewId]) {
-		newViews[element.viewId] = {
-			...newViews[element.viewId],
-			elements: newViews[element.viewId].elements.filter((id) => id !== elementId)
+	} else if (!element.parentId && newPages[element.pageId]) {
+		// Remove from page's canvas
+		newPages[element.pageId] = {
+			...newPages[element.pageId],
+			canvasElements: newPages[element.pageId].canvasElements.filter((id) => id !== elementId)
 		};
 	}
 
-	// Update element parent
-	// When moving to a parent element, clear viewId (element is now nested)
-	// When moving to view root (parentId = null), keep existing viewId
+	// Update element parent (parentId only - pageId stays the same)
 	// newIndex is used for array position insertion (not z-index)
 	newElements[elementId] = {
 		...element,
-		parentId: newParentId,
-		...(newParentId !== null && { viewId: '' })
+		parentId: newParentId
 	};
 
 	// Add to new parent
@@ -434,19 +402,20 @@ function handleReorderElement(state: DesignState, event: ReorderElementEvent): D
 			...newElements[newParentId],
 			children
 		};
-	} else if (!newParentId && newViews[element.viewId]) {
-		const elements = [...newViews[element.viewId].elements];
-		elements.splice(newIndex, 0, elementId);
-		newViews[element.viewId] = {
-			...newViews[element.viewId],
-			elements
+	} else if (!newParentId && newPages[element.pageId]) {
+		// Add to page's canvas
+		const canvasElements = [...newPages[element.pageId].canvasElements];
+		canvasElements.splice(newIndex, 0, elementId);
+		newPages[element.pageId] = {
+			...newPages[element.pageId],
+			canvasElements
 		};
 	}
 
 	return {
 		...state,
 		elements: newElements,
-		views: newViews
+		pages: newPages
 	};
 }
 
@@ -459,7 +428,6 @@ function handleShiftElementLayer(state: DesignState, event: ShiftElementLayerEve
 	}
 
 	const newElements = { ...state.elements };
-	const newViews = { ...state.views };
 
 	// Check if element is nested in a parent
 	if (element.parentId && state.elements[element.parentId]) {
@@ -503,19 +471,20 @@ function handleShiftElementLayer(state: DesignState, event: ShiftElementLayerEve
 		};
 	}
 
-	// Check if element is in a view
-	if (element.viewId && state.views[element.viewId]) {
-		const view = state.views[element.viewId];
-		const siblings = [...view.elements];
+	// Check if element is a root canvas element
+	if (element.pageId && state.pages[element.pageId]) {
+		const page = state.pages[element.pageId];
+		const newPages = { ...state.pages };
+		const siblings = [...page.canvasElements];
 		const currentIndex = siblings.indexOf(elementId);
-		
+
 		if (currentIndex === -1) return state;
-		
+
 		siblings.splice(currentIndex, 1);
-		
+
 		let newIndex = currentIndex;
 		const maxIndex = siblings.length;
-		
+
 		switch (direction) {
 			case 'backward':
 				newIndex = Math.max(0, currentIndex - 1);
@@ -530,101 +499,32 @@ function handleShiftElementLayer(state: DesignState, event: ShiftElementLayerEve
 				newIndex = maxIndex;
 				break;
 		}
-		
+
 		siblings.splice(newIndex, 0, elementId);
-		
-		newViews[element.viewId] = {
-			...view,
-			elements: siblings
+
+		newPages[element.pageId] = {
+			...page,
+			canvasElements: siblings
 		};
-		
+
 		return {
 			...state,
 			elements: newElements,
-			views: newViews
+			pages: newPages
 		};
 	}
 
-	// FALLBACK: No view system active - use zIndex for root elements
-	// Get all root elements and their current zIndex values
-	const rootElements = Object.values(state.elements).filter(el => !el.parentId);
-	const currentZIndex = element.zIndex ?? 0;
+	// CRITICAL ERROR: No page found for root element
+	// LAYERS ARE DOM POSITION - root elements MUST belong to a page
+	// This should never happen if the system is properly initialized
+	console.error(
+		`❌ CRITICAL: Element "${elementId}" is a root element but has no page.`,
+		"LAYERS ARE DOM POSITION. Root elements MUST belong to a page's canvas to have a DOM order.",
+		"Element data:", element
+	);
 
-	// Get sorted unique zIndex values of other elements
-	const otherZIndices = rootElements
-		.filter(el => el.id !== elementId)
-		.map(el => el.zIndex ?? 0)
-		.sort((a, b) => a - b);
-
-	// Calculate new zIndex based on direction
-	let newZIndex = currentZIndex;
-
-	switch (direction) {
-		case 'backward':
-			// Move down one layer - find the next lower zIndex and swap with it
-			const lowerIndices = otherZIndices.filter(z => z < currentZIndex);
-			if (lowerIndices.length > 0) {
-				// Swap with the element immediately below (highest lower zIndex)
-				const targetZ = lowerIndices[lowerIndices.length - 1];
-				newZIndex = targetZ;
-
-				// Find the element with targetZ and swap its zIndex with current
-				const swapElement = rootElements.find(el => el.id !== elementId && (el.zIndex ?? 0) === targetZ);
-				if (swapElement) {
-					newElements[swapElement.id] = {
-						...swapElement,
-						zIndex: currentZIndex
-					};
-				}
-			}
-			// If already at bottom, don't change
-			break;
-		case 'forward':
-			// Move up one layer - find the next higher zIndex and swap with it
-			const higherIndices = otherZIndices.filter(z => z > currentZIndex);
-			if (higherIndices.length > 0) {
-				// Swap with the element immediately above (lowest higher zIndex)
-				const targetZ = higherIndices[0];
-				newZIndex = targetZ;
-
-				// Find the element with targetZ and swap its zIndex with current
-				const swapElement = rootElements.find(el => el.id !== elementId && (el.zIndex ?? 0) === targetZ);
-				if (swapElement) {
-					newElements[swapElement.id] = {
-						...swapElement,
-						zIndex: currentZIndex
-					};
-				}
-			}
-			// If already at top, don't change
-			break;
-		case 'back':
-			// Send to bottom - find minimum zIndex and go below it
-			const minZ = otherZIndices.length > 0 ? Math.min(...otherZIndices) : 0;
-			newZIndex = minZ - 1;
-			break;
-		case 'front':
-			// Bring to top - find maximum zIndex and go above it
-			const maxZ = otherZIndices.length > 0 ? Math.max(...otherZIndices) : 0;
-			newZIndex = maxZ + 1;
-			break;
-	}
-
-	// Only update if zIndex actually changed
-	if (newZIndex === currentZIndex) {
-		return state;
-	}
-
-	newElements[elementId] = {
-		...element,
-		zIndex: newZIndex
-	};
-
-	return {
-		...state,
-		elements: newElements,
-		views: newViews
-	};
+	// Return state unchanged - do not attempt zIndex fallback
+	return state;
 }
 
 function handleGroupMoveElements(state: DesignState, event: GroupMoveElementsEvent): DesignState {
@@ -739,7 +639,7 @@ function handleGroupElements(state: DesignState, event: GroupElementsEvent): Des
 	const parentId = elementsToGroup[0].parentId;
 	const allSameParent = elementsToGroup.every(el => el.parentId === parentId);
 
-	let newViews = state.views;
+	let newPages = state.pages;
 	let newElements = { ...state.elements };
 
 	if (allSameParent && parentId) {
@@ -770,12 +670,12 @@ function handleGroupElements(state: DesignState, event: GroupElementsEvent): Des
 			};
 		}
 	} else if (allSameParent && !parentId) {
-		// Root elements - reorder in view's elements array
-		const viewId = elementsToGroup[0].viewId;
-		const view = state.views[viewId];
+		// Root elements - reorder in page's canvasElements array
+		const pageId = elementsToGroup[0].pageId;
+		const page = state.pages[pageId];
 
-		if (view) {
-			const allRootIds = [...view.elements];
+		if (page) {
+			const allRootIds = [...page.canvasElements];
 
 			// Find the highest array position (topmost layer) among grouped elements
 			const groupedIndices = elementIds.map(id => allRootIds.indexOf(id)).filter(i => i !== -1);
@@ -792,12 +692,12 @@ function handleGroupElements(state: DesignState, event: GroupElementsEvent): Des
 				...filteredRootIds.slice(topmostIndex)
 			];
 
-			// Update view's elements array
-			newViews = {
-				...state.views,
-				[viewId]: {
-					...view,
-					elements: newRootIds
+			// Update page's canvasElements array
+			newPages = {
+				...state.pages,
+				[pageId]: {
+					...page,
+					canvasElements: newRootIds
 				}
 			};
 		}
@@ -818,7 +718,7 @@ function handleGroupElements(state: DesignState, event: GroupElementsEvent): Des
 			[groupId]: group
 		},
 		elements: newElements,
-		views: newViews
+		pages: newPages
 	};
 }
 
@@ -1014,122 +914,6 @@ function handleRenameElement(state: DesignState, event: RenameElementEvent): Des
 }
 
 // ============================================================================
-// View Handlers (Breakpoint Views)
-// ============================================================================
-
-function handleCreateView(state: DesignState, event: CreateViewEvent): DesignState {
-	const { viewId, pageId, name, breakpointWidth, position, height } = event.payload;
-
-	const view: View = {
-		id: viewId,
-		pageId,
-		name,
-		breakpointWidth,
-		position,
-		height: height || 900,
-		elements: []
-	};
-
-	// Add view to state
-	const newViews = { ...state.views, [viewId]: view };
-
-	// Add view to page
-	const newPages = { ...state.pages };
-	if (newPages[pageId]) {
-		newPages[pageId] = {
-			...newPages[pageId],
-			views: [...newPages[pageId].views, viewId]
-		};
-	}
-
-	return {
-		...state,
-		views: newViews,
-		pages: newPages,
-		currentViewId: state.currentViewId || viewId // Set as current if first view
-	};
-}
-
-function handleUpdateView(state: DesignState, event: UpdateViewEvent): DesignState {
-	const { viewId, changes } = event.payload;
-	const view = state.views[viewId];
-
-	if (!view) return state;
-
-	return {
-		...state,
-		views: {
-			...state.views,
-			[viewId]: {
-				...view,
-				...changes
-			}
-		}
-	};
-}
-
-function handleDeleteView(state: DesignState, event: DeleteViewEvent): DesignState {
-	const { viewId } = event.payload;
-	const view = state.views[viewId];
-
-	if (!view) return state;
-
-	const newViews = { ...state.views };
-	delete newViews[viewId];
-
-	// Delete all elements in this view
-	const newElements = { ...state.elements };
-	Object.keys(newElements).forEach((elementId) => {
-		if (newElements[elementId].viewId === viewId) {
-			delete newElements[elementId];
-		}
-	});
-
-	// Remove from page
-	const newPages = { ...state.pages };
-	if (newPages[view.pageId]) {
-		newPages[view.pageId] = {
-			...newPages[view.pageId],
-			views: newPages[view.pageId].views.filter((id) => id !== viewId)
-		};
-	}
-
-	// Update current view if deleted
-	let newCurrentViewId = state.currentViewId;
-	if (state.currentViewId === viewId) {
-		const remainingViews = Object.keys(newViews);
-		newCurrentViewId = remainingViews.length > 0 ? remainingViews[0] : null;
-	}
-
-	return {
-		...state,
-		views: newViews,
-		elements: newElements,
-		pages: newPages,
-		currentViewId: newCurrentViewId
-	};
-}
-
-function handleResizeView(state: DesignState, event: ResizeViewEvent): DesignState {
-	const { viewId, width, height } = event.payload;
-	const view = state.views[viewId];
-
-	if (!view) return state;
-
-	return {
-		...state,
-		views: {
-			...state.views,
-			[viewId]: {
-				...view,
-				breakpointWidth: width,
-				...(height && { height })
-			}
-		}
-	};
-}
-
-// ============================================================================
 // Page Handlers
 // ============================================================================
 
@@ -1140,7 +924,7 @@ function handleCreatePage(state: DesignState, event: CreatePageEvent): DesignSta
 		id: pageId,
 		name,
 		slug: slug || name.toLowerCase().replace(/\s+/g, '-'),
-		views: []
+		canvasElements: []
 	};
 
 	return {
@@ -1181,17 +965,10 @@ function handleDeletePage(state: DesignState, event: DeletePageEvent): DesignSta
 	const newPages = { ...state.pages };
 	delete newPages[pageId];
 
-	// Delete all views belonging to this page
-	const newViews = { ...state.views };
-	const viewsToDelete = Object.keys(newViews).filter((viewId) => newViews[viewId].pageId === pageId);
-	viewsToDelete.forEach((viewId) => {
-		delete newViews[viewId];
-	});
-
-	// Delete all elements in those views
+	// Delete all elements belonging to this page
 	const newElements = { ...state.elements };
 	Object.keys(newElements).forEach((elementId) => {
-		if (viewsToDelete.includes(newElements[elementId].viewId)) {
+		if (newElements[elementId].pageId === pageId) {
 			delete newElements[elementId];
 		}
 	});
@@ -1208,7 +985,6 @@ function handleDeletePage(state: DesignState, event: DeletePageEvent): DesignSta
 	return {
 		...state,
 		pages: newPages,
-		views: newViews,
 		elements: newElements,
 		pageOrder: newPageOrder,
 		currentPageId: newCurrentPageId
@@ -1296,10 +1072,11 @@ function handleInstanceComponent(
 	});
 
 	// Second pass: clone elements with updated IDs and references
-	// Note: Component instances need to be assigned to a view
-	const currentView = state.currentViewId ? state.views[state.currentViewId] : null;
-	if (!currentView) {
-		// Cannot instance component without a current view
+	// Note: Component instances need to be assigned to a page
+	const page = state.pages[pageId];
+	if (!page) {
+		// Cannot instance component without a valid page
+		console.error(`Cannot instance component: page ${pageId} not found`);
 		return state;
 	}
 
@@ -1314,7 +1091,7 @@ function handleInstanceComponent(
 			...oldElement,
 			id: newId,
 			parentId: newParentId,
-			viewId: currentView.id,
+			pageId: pageId,
 			position: {
 				x: position.x + oldElement.position.x,
 				y: position.y + oldElement.position.y
@@ -1323,20 +1100,20 @@ function handleInstanceComponent(
 		};
 	});
 
-	// Add root elements to current view
+	// Add root elements to page's canvas
 	const rootElementIds = component.elementIds
 		.filter((id) => !state.elements[id]?.parentId)
 		.map((id) => idMap.get(id)!);
 
-	const newViews = { ...state.views };
-	newViews[currentView.id] = {
-		...currentView,
-		elements: [...currentView.elements, ...rootElementIds]
+	const newPages = { ...state.pages };
+	newPages[pageId] = {
+		...page,
+		canvasElements: [...page.canvasElements, ...rootElementIds]
 	};
 
 	return {
 		...state,
 		elements: newElements,
-		views: newViews
+		pages: newPages
 	};
 }

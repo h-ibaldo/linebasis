@@ -12,7 +12,7 @@
 	 * - Drag to reorder (array position changes, not z-index)
 	 */
 
-	import { designState, selectElement, selectElements, toggleVisibility, toggleLock, renameElement, shiftElementLayer } from '$lib/stores/design-store';
+	import { designState, selectElement, selectElements, toggleVisibility, toggleLock, renameElement, shiftElementLayer, reorderElement } from '$lib/stores/design-store';
 	import FloatingWindow from '$lib/components/ui/FloatingWindow.svelte';
 	import LayerTreeItem from './LayerTreeItem.svelte';
 	import type { Element, Group } from '$lib/types/events';
@@ -21,20 +21,24 @@
 
 	// Drag and drop state
 	let draggedElementId: string | null = null;
+	let draggedParentId: string | null = null;
 	let dropTargetIndex: number | null = null;
+	let dropTarget: { elementId: string; position: 'before' | 'after' | 'inside' } | null = null;
 
-	// Get root elements from current view's elements array (in DOM order)
+	// Get current page
+	$: currentPage = $designState.currentPageId
+		? $designState.pages[$designState.currentPageId]
+		: null;
+
+	// Get root elements from current page's canvasElements array (in DOM order)
 	// Array index 0 = bottom layer (renders first), last index = top layer (renders last)
 	// Reverse the array for display so top layers appear first in the list (like Figma)
-	// Fallback: if no view, show all root elements (parentId === null) sorted by zIndex
-	$: rootElements = $designState.currentViewId && $designState.views[$designState.currentViewId]
-		? $designState.views[$designState.currentViewId].elements
+	$: rootElements = currentPage
+		? currentPage.canvasElements
 			.map(id => $designState.elements[id])
 			.filter(Boolean)
 			.reverse() // Reverse for display: top layers first
-		: Object.values($designState.elements)
-			.filter(el => !el.parentId)
-			.sort((a, b) => (b.zIndex ?? 0) - (a.zIndex ?? 0)); // Fallback: sort by zIndex descending (top layers first)
+		: [];
 
 	// Build layer items that can be groups or individual elements
 	// Groups should appear as single items containing their members
@@ -118,11 +122,108 @@
 		renameElement(elementId, newName);
 	}
 
-	// Drag and drop handlers
-	function handleDragStart(event: DragEvent, elementId: string) {
+	// Drag and drop handlers for nested layers
+	function handleDragStart(elementId: string, parentId: string | null) {
+		draggedElementId = elementId;
+		draggedParentId = parentId;
+	}
+
+	function handleDragEnd() {
+		draggedElementId = null;
+		draggedParentId = null;
+		dropTarget = null;
+		dropTargetIndex = null;
+	}
+
+	function handleDragOver(targetElementId: string, position: 'before' | 'after' | 'inside') {
+		dropTarget = { elementId: targetElementId, position };
+	}
+
+	async function handleDrop(targetElementId: string, position: 'before' | 'after' | 'inside') {
+		if (!draggedElementId) return;
+
+		const draggedElement = $designState.elements[draggedElementId];
+		const targetElement = $designState.elements[targetElementId];
+
+		if (!draggedElement || !targetElement) return;
+
+		let newParentId: string | null;
+		let newIndex: number;
+
+		if (position === 'inside') {
+			// Drop inside the target element (make it a child)
+			newParentId = targetElementId;
+			// Add as first child (top layer)
+			newIndex = 0;
+		} else {
+			// Drop before or after the target (same parent as target)
+			newParentId = targetElement.parentId ?? null;
+
+			// Find target's position in its parent's children array
+			let siblings: string[];
+			if (newParentId) {
+				// Has a parent - get parent's children
+				const parent = $designState.elements[newParentId];
+				if (!parent) return;
+				siblings = parent.children || [];
+			} else {
+				// Root level - MUST have a page for DOM-based layer ordering
+				// LAYERS ARE DOM POSITION, NOT Z-INDEX
+				if (!currentPage) {
+					console.error('❌ CRITICAL: No page found for root elements. Cannot reorder layers without a page.');
+					console.error('   LAYERS ARE DOM POSITION. Root elements MUST belong to a page\'s canvas to have a DOM order.');
+					handleDragEnd();
+					return;
+				}
+
+				// Use page's canvasElements array (DOM order)
+				siblings = currentPage.canvasElements;
+			}
+
+			const targetIndex = siblings.indexOf(targetElementId);
+			if (targetIndex === -1) return;
+
+			// Calculate new index
+			// Array: [A(0), B(1), C(2)] where 0=bottom layer, 2=top layer
+			// Visual display (reversed): C, B, A (top layer C shows first)
+			//
+			// When hovering over B in the UI:
+			//   - Mouse in TOP half: position='before', wants ABOVE B visually
+			//     → Between C and B in UI → Array: [A, B, ★, C] → Index = targetIndex + 1
+			//   - Mouse in BOTTOM half: position='after', wants BELOW B visually
+			//     → Between B and A in UI → Array: [A, ★, B, C] → Index = targetIndex
+			//
+			// ★ represents where the dragged element will be inserted
+			if (position === 'before') {
+				newIndex = targetIndex + 1;
+			} else {
+				newIndex = targetIndex;
+			}
+
+			// Adjust index if moving within same parent
+			if (newParentId === draggedParentId) {
+				const currentIndex = siblings.indexOf(draggedElementId);
+				if (currentIndex !== -1 && currentIndex < newIndex) {
+					// Element will be removed first, so adjust index
+					newIndex--;
+				}
+			}
+		}
+
+		// Perform the reorder
+		await reorderElement(draggedElementId, newParentId, newIndex);
+
+		// Clear drag state
+		handleDragEnd();
+	}
+
+	// Old drag handlers for root-level elements (kept for backwards compatibility)
+	function handleDragStartOld(event: DragEvent, elementId: string) {
 		if (!event.dataTransfer) return;
 
 		draggedElementId = elementId;
+		const element = $designState.elements[elementId];
+		draggedParentId = element?.parentId ?? null;
 		event.dataTransfer.effectAllowed = 'move';
 		event.dataTransfer.setData('text/plain', elementId);
 
@@ -132,9 +233,8 @@
 		}
 	}
 
-	function handleDragEnd(event: DragEvent) {
-		draggedElementId = null;
-		dropTargetIndex = null;
+	function handleDragEndOld(event: DragEvent) {
+		handleDragEnd();
 
 		// Reset visual feedback
 		if (event.target instanceof HTMLElement) {
@@ -142,7 +242,7 @@
 		}
 	}
 
-	function handleDragOver(event: DragEvent, targetIndex: number) {
+	function handleDragOverOld(event: DragEvent, targetIndex: number) {
 		event.preventDefault();
 		if (!event.dataTransfer) return;
 
@@ -150,11 +250,11 @@
 		dropTargetIndex = targetIndex;
 	}
 
-	function handleDragLeave() {
+	function handleDragLeaveOld() {
 		dropTargetIndex = null;
 	}
 
-	function handleDrop(event: DragEvent, targetIndex: number) {
+	async function handleDropOld(event: DragEvent, targetIndex: number) {
 		event.preventDefault();
 
 		if (!draggedElementId) return;
@@ -173,8 +273,7 @@
 
 		if (positionDiff === 0) {
 			// No movement needed
-			dropTargetIndex = null;
-			draggedElementId = null;
+			handleDragEnd();
 			return;
 		}
 
@@ -186,8 +285,7 @@
 			shiftElementLayer(draggedElementId, direction);
 		}
 
-		dropTargetIndex = null;
-		draggedElementId = null;
+		handleDragEnd();
 	}
 </script>
 
@@ -207,60 +305,61 @@
 			</div>
 		{:else}
 			<div class="layers-tree">
-				{#each layerItems as item, index (item.id)}
-					<div
-						class="layer-wrapper"
-						class:drop-target={dropTargetIndex === index}
-						draggable="true"
-						on:dragstart={(e) => item.element && handleDragStart(e, item.element.id)}
-						on:dragend={handleDragEnd}
-						on:dragover={(e) => handleDragOver(e, index)}
-						on:dragleave={handleDragLeave}
-						on:drop={(e) => handleDrop(e, index)}
-					>
-						{#if item.type === 'group' && item.groupElements}
-							<!-- Group item -->
-							<div class="group-item">
-								<div
-									class="group-header"
-									class:selected={item.groupElements.some(el => selectedIds.includes(el.id))}
-									on:click={() => handleSelectGroup(item.id)}
-								>
-									<button class="expand-btn" on:click|stopPropagation={() => {}} aria-label="Expand">
-										<span class="arrow expanded">▸</span>
-									</button>
-									<span class="group-icon">⊞</span>
-									<span class="group-name">Group</span>
-								</div>
-								<!-- Group members (always expanded for now, collapsible in future) -->
-								<div class="group-children">
-									{#each item.groupElements as element (element.id)}
-										<LayerTreeItem
-											{element}
-											elements={$designState.elements}
-											{selectedIds}
-											onSelect={handleSelectElement}
-											onToggleVisibility={handleToggleVisibility}
-											onToggleLock={handleToggleLock}
-											onRename={handleRename}
-											depth={1}
-										/>
-									{/each}
-								</div>
+				{#each layerItems as item (item.id)}
+					{#if item.type === 'group' && item.groupElements}
+						<!-- Group item -->
+						<div class="group-item">
+							<div
+								class="group-header"
+								class:selected={item.groupElements.some(el => selectedIds.includes(el.id))}
+								on:click={() => handleSelectGroup(item.id)}
+							>
+								<button class="expand-btn" on:click|stopPropagation={() => {}} aria-label="Expand">
+									<span class="arrow expanded">▸</span>
+								</button>
+								<span class="group-icon">⊞</span>
+								<span class="group-name">Group</span>
 							</div>
-						{:else if item.element}
-							<!-- Regular element -->
-							<LayerTreeItem
-								element={item.element}
-								elements={$designState.elements}
-								{selectedIds}
-								onSelect={handleSelectElement}
-								onToggleVisibility={handleToggleVisibility}
-								onToggleLock={handleToggleLock}
-								onRename={handleRename}
-							/>
-						{/if}
-					</div>
+							<!-- Group members (always expanded for now, collapsible in future) -->
+							<div class="group-children">
+								{#each item.groupElements as element (element.id)}
+									<LayerTreeItem
+										{element}
+										elements={$designState.elements}
+										{selectedIds}
+										onSelect={handleSelectElement}
+										onToggleVisibility={handleToggleVisibility}
+										onToggleLock={handleToggleLock}
+										onRename={handleRename}
+										onDragStart={handleDragStart}
+										onDragEnd={handleDragEnd}
+										onDragOver={handleDragOver}
+										onDrop={handleDrop}
+										{draggedElementId}
+										{dropTarget}
+										depth={1}
+									/>
+								{/each}
+							</div>
+						</div>
+					{:else if item.element}
+						<!-- Regular element -->
+						<LayerTreeItem
+							element={item.element}
+							elements={$designState.elements}
+							{selectedIds}
+							onSelect={handleSelectElement}
+							onToggleVisibility={handleToggleVisibility}
+							onToggleLock={handleToggleLock}
+							onRename={handleRename}
+							onDragStart={handleDragStart}
+							onDragEnd={handleDragEnd}
+							onDragOver={handleDragOver}
+							onDrop={handleDrop}
+							{draggedElementId}
+							{dropTarget}
+						/>
+					{/if}
 				{/each}
 			</div>
 		{/if}
@@ -276,14 +375,12 @@
 		overflow-y: auto;
 	}
 
-	.no-view,
 	.no-elements {
 		text-align: center;
 		padding: 40px 20px;
 		color: #666;
 	}
 
-	.no-view p:first-child,
 	.no-elements p:first-child {
 		font-size: 14px;
 		font-weight: 500;
@@ -298,20 +395,6 @@
 
 	.layers-tree {
 		padding: 8px 0;
-	}
-
-	.layer-wrapper {
-		position: relative;
-		transition: transform 0.1s ease;
-	}
-
-	.layer-wrapper.drop-target {
-		border-top: 2px solid #007aff;
-		margin-top: 2px;
-	}
-
-	.layer-wrapper:active {
-		cursor: grabbing;
 	}
 
 	.group-item {
@@ -382,6 +465,7 @@
 	}
 
 	.group-children {
-		/* No extra padding needed as LayerTreeItem handles its own depth padding */
+		/* LayerTreeItem handles its own depth padding */
+		padding: 0;
 	}
 </style>

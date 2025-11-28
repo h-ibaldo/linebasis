@@ -124,65 +124,71 @@ The infinite canvas is where frames and design elements live. Users can pan, zoo
 
 ---
 
-## Frames
+## Canvas, Pages, and Views
 
-Frames are artboards on the canvas that represent different breakpoints of a page. A canvas contains multiple frames, each representing a different responsive breakpoint. Frames are special Div components with additional properties.
+### Core Concepts
 
-### Frame Appearance
+**Page**: A route/URL (e.g., `/homepage`, `/about`). Each page has ONE canvas.
+
+**Canvas**: The design environment for a single page. When you click "Edit Page", you open that page's canvas. The canvas contains all elements for that page, including views.
+
+**View**: A div element with `isView = true` that represents a responsive breakpoint (e.g., Desktop 1920px, Mobile 375px). Views are created by drawing a div and converting it to a view. A canvas can have multiple views representing different breakpoints of the same page.
+
+### Page Structure
 
 ```
-┌─────────────────────────────┐
-│ Homepage - Desktop          │ ← Frame header
-│ Breakpoint: 1920px          │
-├─────────────────────────────┤
-│                             │
-│   [Design content here]     │
-│                             │
-│                             │
-└─────────────────────────────┘
+Page: "Homepage" (route: /homepage)
+└── Canvas (design environment)
+    ├── canvasElements: [] ← Root elements (DOM layer order)
+    │
+    ├── View Element (isView: true, width: 1920px) - Desktop breakpoint
+    │   └── children: [header, hero, footer...]
+    │
+    ├── View Element (isView: true, width: 768px) - Tablet breakpoint
+    │   └── children: [header, hero, footer...]
+    │
+    └── View Element (isView: true, width: 375px) - Mobile breakpoint
+        └── children: [header, hero, footer...]
 ```
 
-### Frame Header
+### Creating Views (Breakpoints)
 
-- **Frame Name**: Editable name (click to rename)
-- **Breakpoint Size**: Shows current breakpoint width (e.g., "1920px")
+**Method 1**: Convert existing div
+1. Draw a div on the canvas
+2. Right-click div → "Convert to View"
+3. Set view name (e.g., "Desktop") and breakpoint width (e.g., 1920px)
+4. The div is now a breakpoint container - add your content inside it
 
-### Frame Actions (Right-click on frame header)
+**Method 2**: New view tool (future)
+- Toolbar → "New View" button
+- Drag to create view boundary on canvas
+- Automatically creates a div with `isView = true`
 
-- Rename Frame
-- Duplicate Frame
-- Add Breakpoint (creates new frame with different width)
-- Set as Default Breakpoint (which frame shows by default)
-- Delete Frame (requires confirmation)
-- Frame Settings:
-  - Input: Frame width (px)
-  - Input: Frame height (auto or fixed px)
+### View Element Properties
 
-### Creating Frames
+A view is a regular div element with these additional properties:
+- `isView: true` - Marks this div as a breakpoint container
+- `viewName: string` - e.g., "Desktop", "Mobile", "Tablet"
+- `breakpointWidth: number` - e.g., 1920, 768, 375
+- `children: string[]` - Child elements (content visible at this breakpoint)
 
-**Method 1**: From toolbar
-- Click "New Frame" button (or Cmd+N)
-- Drag to define size on canvas
-- Frame created with default breakpoint (1920px desktop)
+Views appear in the Layers panel with a □ icon, just like any other element.
 
-**Method 2**: From existing frame
-- Right-click frame header → "Add Breakpoint"
-- Creates new frame for different screen size
-- Auto-links frames as breakpoints of same page
+### Common Breakpoint Sizes
 
-**Method 3**: From Pages list
-- Click "New Page" in `/admin/pages`
-- Opens designer with blank frame
+**Desktop**: 1920px, 1440px, 1366px
+**Tablet**: 1024px, 768px
+**Mobile**: 375px, 414px
 
-### Frame Types & Breakpoints
+Users can define custom breakpoint sizes by setting the view element's width.
 
-**Desktop Frames**: 1920px, 1440px, 1366px (default: 1920px)
-**Tablet Frames**: 1024px, 768px
-**Mobile Frames**: 375px, 414px
+### Publishing
 
-Users can define custom breakpoint sizes.
-
-**Note**: Publishing happens at the page level, not the frame level. When a page is published, all its frames (breakpoints) are published together as a responsive design.
+When you publish a page:
+1. System finds all view elements (with `isView = true`) on the canvas
+2. Generates responsive code with media queries based on view widths
+3. Each view's children become the content for that breakpoint
+4. Result: One responsive webpage with all breakpoints
 
 ---
 
@@ -819,12 +825,13 @@ Div elements have three distinct states that control their container behavior:
 - **Move children**: ✅ Only via cut (Cmd/Ctrl+X) and paste (Cmd/Ctrl+V)
 - **Use case**: Static container for grouped elements that should stay together
 
-#### 2. View Div (Page Breakpoint)
+#### 2. View Div (Breakpoint Container)
 - **Properties**: `isView = true`, has `viewName` and `breakpointWidth`
 - **Drag-in behavior**: ✅ Can accept dropped elements
 - **Drag-out behavior**: ✅ Children can be dragged out freely
 - **Move children**: ✅ Via drag or cut/paste
-- **Use case**: Page breakpoint/artboard representing different screen sizes
+- **Use case**: Represents a responsive breakpoint (see "Canvas, Pages, and Views" section)
+- **Note**: Views are regular div elements with special properties for breakpoint management
 
 #### 3. Auto-Layout Div (Flexbox Container)
 - **Properties**: `autoLayout.enabled = true`
@@ -845,7 +852,7 @@ Div elements have three distinct states that control their container behavior:
 **Implementation Details**:
 - Drop detection happens in `findDropParentAtPosition()` function
 - Regular divs force elements to stay via early return when `isRegularDiv = true`
-- Views and auto-layout divs use boundary detection for natural drag behavior
+- View Divs and auto-layout divs use boundary detection for natural drag behavior
 - Cut/paste operations bypass container restrictions (DOM manipulation, not drag)
 
 ---

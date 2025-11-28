@@ -3456,7 +3456,7 @@
 				id: 'group',
 				type: 'div',
 				parentId: null,
-				viewId: '',
+				pageId: '',
 				position: { x: groupBounds.x, y: groupBounds.y },
 				size: { width: groupBounds.width, height: groupBounds.height },
 				styles: {},

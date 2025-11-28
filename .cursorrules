@@ -85,6 +85,33 @@ type(scope): description
 - Document architecture changes in `architecture.md`
 - Format: `feat(scope): complete [item name]` with details in body
 
+## ⚠️ CRITICAL ARCHITECTURAL PRINCIPLES
+
+### 1. LAYERS ARE DOM POSITION, NOT Z-INDEX
+
+This is the single most important principle in the page builder:
+
+- **Layers = DOM tree structure** - The layer order IS the HTML output
+- **NEVER use z-index for layer ordering** - Z-index is ONLY for CSS stacking context
+- **Root canvas elements** - Stored in `page.canvasElements[]` array (DOM order)
+- **Nested elements** - Stored in `parent.children[]` array (DOM order)
+- **Reordering = array manipulation** - Use splice(), NEVER change z-index
+- **No page = CRITICAL ERROR** - Elements must belong to a page's canvas
+
+### 2. VIEWS ARE ELEMENTS, NOT DATA STRUCTURES
+
+- **View** = A div element with `isView = true` (represents a breakpoint)
+- **NO separate View object** - Views are regular elements on the canvas
+- **Canvas** = Design environment for ONE page
+- **Page** = Route (e.g., `/homepage`) with ONE canvas
+- **Multiple views** = Multiple breakpoints on the same canvas
+
+**READ `docs/planning/LAYERS-ARCHITECTURE.md` BEFORE working on anything layer-related.**
+
+Violating these principles breaks the fundamental contract with users about what they're building.
+
+---
+
 ## Project-Specific Guidelines
 
 ### Design Philosophy

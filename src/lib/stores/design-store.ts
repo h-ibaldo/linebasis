@@ -104,7 +104,7 @@ export async function initialize(): Promise<void> {
 	await initDB();
 	const events = await getAllEvents();
 
-	const designState = reduceEvents(events);
+	let designState = reduceEvents(events);
 
 	storeState.update((state) => ({
 		...state,
@@ -118,6 +118,7 @@ export async function initialize(): Promise<void> {
 	if (Object.keys(designState.pages).length === 0) {
 		const pageId = await createPage('Untitled Page', 'untitled');
 		setCurrentPage(pageId);
+		designState = get(storeState).designState; // Refresh after creating page
 	} else {
 		// Set the first page as current if not set
 		if (!designState.currentPageId) {
@@ -127,6 +128,9 @@ export async function initialize(): Promise<void> {
 			}
 		}
 	}
+
+	// Note: Old migration code for view.elements[] was removed
+	// Users should clear IndexedDB if they have old data from before the architecture refactor
 }
 
 /**
@@ -366,9 +370,8 @@ export function redo(): void {
 
 export async function createPage(name: string, slug?: string): Promise<string> {
 	const pageId = uuidv4();
-	const viewId = uuidv4();
 
-	// Create page
+	// Create page with empty canvas
 	await dispatch({
 		id: uuidv4(),
 		type: 'CREATE_PAGE',
@@ -380,27 +383,12 @@ export async function createPage(name: string, slug?: string): Promise<string> {
 		}
 	});
 
-	// Create default desktop view for the page
-	await dispatch({
-		id: uuidv4(),
-		type: 'CREATE_VIEW',
-		timestamp: Date.now(),
-		payload: {
-			viewId,
-			pageId,
-			name: 'Desktop',
-			breakpointWidth: 1920,
-			position: { x: 0, y: 0 },
-			height: 1080
-		}
-	});
-
-	// Set the new view as current
+	// Set as current page
 	storeState.update((state) => ({
 		...state,
 		designState: {
 			...state.designState,
-			currentViewId: viewId
+			currentPageId: pageId
 		}
 	}));
 
@@ -445,13 +433,21 @@ export async function reorderPages(pageIds: string[]): Promise<void> {
 }
 
 export function setCurrentPage(pageId: string): void {
-	storeState.update((state) => ({
-		...state,
-		designState: {
-			...state.designState,
-			currentPageId: pageId
+	storeState.update((state) => {
+		const page = state.designState.pages[pageId];
+		if (!page) {
+			console.error(`Page ${pageId} not found`);
+			return state;
 		}
-	}));
+
+		return {
+			...state,
+			designState: {
+				...state.designState,
+				currentPageId: pageId
+			}
+		};
+	});
 }
 
 // ============================================================================
@@ -470,9 +466,15 @@ export async function createElement(data: {
 	const elementId = uuidv4();
 	const state = get(designState);
 
-	// Get viewId from currentViewId or default to empty string
-	// (Elements belong to views (breakpoint views) in the new architecture)
-	const viewId = state.currentViewId || '';
+	// CRITICAL: Root elements MUST belong to a page (LAYERS = DOM POSITION)
+	// Check that the page exists
+	if (!data.parentId && !state.pages[data.pageId]) {
+		throw new Error(
+			'CRITICAL: Cannot create root element without a valid page. ' +
+			'LAYERS ARE DOM POSITION. Root elements must belong to a page\'s canvas to have a DOM order. ' +
+			`pageId: ${data.pageId}, pages: ${Object.keys(state.pages)}`
+		);
+	}
 
 	await dispatch({
 		id: uuidv4(),
@@ -481,7 +483,7 @@ export async function createElement(data: {
 		payload: {
 			elementId,
 			parentId: data.parentId,
-			viewId,
+			pageId: data.pageId,
 			elementType: data.elementType,
 			position: data.position,
 			size: data.size,
@@ -1827,8 +1829,6 @@ export async function pasteElements(): Promise<void> {
 
 		// Generate new element ID
 		const newElementId = uuidv4();
-		const currentState = get(designState);
-		const viewId = currentState.currentViewId || '';
 
 		// Dispatch CREATE_ELEMENT event (batched in transaction)
 		dispatch({
@@ -1838,7 +1838,7 @@ export async function pasteElements(): Promise<void> {
 			payload: {
 				elementId: newElementId,
 				parentId: newParentId,
-				viewId,
+				pageId,
 				elementType: element.type,
 				position,
 				size: element.size,
@@ -2032,8 +2032,6 @@ export async function pasteElementsInside(): Promise<void> {
 
 			// Generate new element ID
 			const newElementId = uuidv4();
-			const currentState = get(designState);
-			const viewId = currentState.currentViewId || '';
 
 			// Dispatch CREATE_ELEMENT event (batched in transaction)
 			dispatch({
@@ -2043,7 +2041,7 @@ export async function pasteElementsInside(): Promise<void> {
 				payload: {
 					elementId: newElementId,
 					parentId: newParentId,
-					viewId,
+					pageId,
 					elementType: element.type,
 					position,
 					size: element.size,

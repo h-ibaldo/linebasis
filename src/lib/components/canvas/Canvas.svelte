@@ -277,6 +277,8 @@
 			const tool = $currentTool;
 			let newElementId: string;
 
+			try {
+
 			// Get current page ID
 			const pageId = $designState.currentPageId;
 			if (!pageId) {
@@ -412,9 +414,17 @@
 			// Automatically select the newly created element
 			selectElement(newElementId);
 
-			// Reset drawing state (keep tool selected)
-			isDrawing = false;
-			drawPreview = null;
+			} catch (error) {
+				console.error('Failed to create element:', error);
+				// Show error to user
+				if (error instanceof Error) {
+					alert(`Failed to create element: ${error.message}`);
+				}
+			} finally {
+				// Always reset drawing state, even if creation failed
+				isDrawing = false;
+				drawPreview = null;
+			}
 
 			// Don't switch back to move tool - keep current tool selected
 		}
@@ -506,11 +516,10 @@
 			class="canvas-viewport"
 			style="transform: translate({viewport.x}px, {viewport.y}px) scale({viewport.scale});"
 		>
-			<!-- Render all root elements in view.elements array order (first = bottom layer, last = top layer) -->
-			<!-- Fallback: if no view, show all root elements (parentId === null) sorted by zIndex -->
-			{#each ($designState.currentViewId && $designState.views[$designState.currentViewId]
-				? $designState.views[$designState.currentViewId].elements.map(id => $designState.elements[id]).filter(Boolean)
-				: Object.values($designState.elements).filter(el => el.parentId === null).sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0))
+			<!-- Render all root elements in page.canvasElements array order (first = bottom layer, last = top layer) -->
+			{#each ($designState.currentPageId && $designState.pages[$designState.currentPageId]
+				? $designState.pages[$designState.currentPageId].canvasElements.map(id => $designState.elements[id]).filter(Boolean)
+				: []
 			) as element (element.id)}
 				<CanvasElement
 					{element}

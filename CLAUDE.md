@@ -18,6 +18,24 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ---
 
+## ⚠️ CRITICAL ARCHITECTURAL PRINCIPLE
+
+**LAYERS ARE DOM POSITION, NOT Z-INDEX**
+
+This is the single most important principle in the page builder architecture:
+
+- **Layers represent DOM structure** - The layer order IS the HTML render order
+- **NEVER use z-index for layer ordering** - Z-index is only for CSS stacking context
+- **Root elements MUST have a view** - No view = no DOM array = cannot exist
+- **Nested elements MUST have a parent** - Stored in parent.children[] array
+- **Reordering = array manipulation** - splice(), not z-index changes
+
+**If you're working on anything layer-related, READ [docs/planning/LAYERS-ARCHITECTURE.md](docs/planning/LAYERS-ARCHITECTURE.md) FIRST.**
+
+Violating this principle breaks the fundamental contract with users about what they're building. Users must see and understand the actual DOM tree they're creating.
+
+---
+
 ## Development Commands
 
 ### Core Development

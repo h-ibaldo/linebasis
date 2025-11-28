@@ -35,11 +35,6 @@ export type EventType =
 	| 'UPDATE_TYPOGRAPHY'
 	| 'UPDATE_SPACING'
 	| 'UPDATE_AUTO_LAYOUT'
-	// View operations (breakpoint views)
-	| 'CREATE_VIEW'
-	| 'UPDATE_VIEW'
-	| 'DELETE_VIEW'
-	| 'RESIZE_VIEW'
 	// Page operations
 	| 'CREATE_PAGE'
 	| 'UPDATE_PAGE'
@@ -66,8 +61,8 @@ export interface CreateElementEvent extends BaseEvent {
 	type: 'CREATE_ELEMENT';
 	payload: {
 		elementId: string;
-		parentId: string | null; // null for root elements
-		viewId: string; // Elements belong to views (breakpoint views), not pages
+		parentId: string | null; // null for root elements (canvas elements)
+		pageId: string; // Elements belong to a page's canvas
 		elementType: ElementType;
 		position: Position;
 		size: Size;
@@ -271,51 +266,6 @@ export interface UpdateAutoLayoutEvent extends BaseEvent {
 }
 
 // ============================================================================
-// View Events (Breakpoint Views)
-// ============================================================================
-
-export interface CreateViewEvent extends BaseEvent {
-	type: 'CREATE_VIEW';
-	payload: {
-		viewId: string;
-		pageId: string; // Views belong to pages
-		name: string;
-		breakpointWidth: number; // e.g., 1920, 768, 375
-		position: Position; // Position on canvas
-		height?: number; // Auto or fixed
-	};
-}
-
-export interface UpdateViewEvent extends BaseEvent {
-	type: 'UPDATE_VIEW';
-	payload: {
-		viewId: string;
-		changes: {
-			name?: string;
-			breakpointWidth?: number;
-			position?: Position;
-			height?: number;
-		};
-	};
-}
-
-export interface DeleteViewEvent extends BaseEvent {
-	type: 'DELETE_VIEW';
-	payload: {
-		viewId: string;
-	};
-}
-
-export interface ResizeViewEvent extends BaseEvent {
-	type: 'RESIZE_VIEW';
-	payload: {
-		viewId: string;
-		width: number;
-		height?: number;
-	};
-}
-
-// ============================================================================
 // Page Events
 // ============================================================================
 
@@ -424,10 +374,6 @@ export type DesignEvent =
 	| UpdateTypographyEvent
 	| UpdateSpacingEvent
 	| UpdateAutoLayoutEvent
-	| CreateViewEvent
-	| UpdateViewEvent
-	| DeleteViewEvent
-	| ResizeViewEvent
 	| CreatePageEvent
 	| UpdatePageEvent
 	| DeletePageEvent
@@ -543,7 +489,7 @@ export interface Element {
 	type: ElementType;
 	name?: string; // Custom name for the element (for layers panel)
 	parentId: string | null;
-	viewId: string; // Elements belong to views (breakpoint views)
+	pageId: string; // Elements belong to a page's canvas
 	groupId?: string | null; // Group ID if element belongs to a group
 	position: Position;
 	size: Size;
@@ -568,21 +514,12 @@ export interface Element {
 	breakpointWidth?: number; // Width of the view if isView is true
 }
 
-export interface View {
-	id: string;
-	pageId: string; // View belongs to a page
-	name: string; // e.g., "Desktop", "Mobile", "Tablet"
-	breakpointWidth: number; // e.g., 1920, 768, 375
-	position: Position; // Position on canvas
-	height: number; // Height in pixels (auto-grows with content)
-	elements: string[]; // Root element IDs
-}
-
 export interface Page {
 	id: string;
 	name: string; // e.g., "Homepage", "About"
 	slug: string; // URL slug
-	views: string[]; // View IDs (different breakpoints)
+	canvasElements: string[]; // Root element IDs on canvas (DOM order for layer ordering)
+	// Array index 0 = bottom layer, last index = top layer
 }
 
 export interface Group {
@@ -598,13 +535,11 @@ export interface Component {
 
 export interface DesignState {
 	pages: Record<string, Page>;
-	views: Record<string, View>;
 	elements: Record<string, Element>;
 	groups: Record<string, Group>;
 	components: Record<string, Component>;
 	pageOrder: string[];
 	currentPageId: string | null;
-	currentViewId: string | null; // Currently selected view (breakpoint)
 	selectedElementIds: string[];
 }
 

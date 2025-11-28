@@ -22,6 +22,12 @@
 	export let onToggleVisibility: (elementId: string, currentVisible: boolean) => void;
 	export let onToggleLock: (elementId: string, currentLocked: boolean) => void;
 	export let onRename: (elementId: string, newName: string) => void;
+	export let onDragStart: (elementId: string, parentId: string | null) => void;
+	export let onDragEnd: () => void;
+	export let onDragOver: (targetElementId: string, position: 'before' | 'after' | 'inside') => void;
+	export let onDrop: (targetElementId: string, position: 'before' | 'after' | 'inside') => void;
+	export let draggedElementId: string | null = null;
+	export let dropTarget: { elementId: string; position: 'before' | 'after' | 'inside' } | null = null;
 	export let depth: number = 0;
 
 	let isExpanded = true;
@@ -116,10 +122,122 @@
 		nameInput.focus();
 		nameInput.select();
 	}
+
+	// Drag and drop state
+	$: isDragging = draggedElementId === element.id;
+	$: isDropTarget = dropTarget?.elementId === element.id;
+	$: dropPosition = isDropTarget && dropTarget ? dropTarget.position : null;
+
+	// Drag handlers
+	function handleDragStartLocal(e: DragEvent) {
+		if (locked || isRenaming) {
+			e.preventDefault();
+			return;
+		}
+		e.stopPropagation();
+		if (e.dataTransfer) {
+			e.dataTransfer.effectAllowed = 'move';
+			e.dataTransfer.setData('text/plain', element.id);
+		}
+		onDragStart(element.id, element.parentId ?? null);
+	}
+
+	function handleDragEndLocal(e: DragEvent) {
+		e.stopPropagation();
+		onDragEnd();
+	}
+
+	function handleDragOverLocal(e: DragEvent) {
+		e.preventDefault();
+		e.stopPropagation();
+
+		if (!draggedElementId || draggedElementId === element.id) return;
+
+		// Prevent dropping parent into its own child
+		if (isAncestor(draggedElementId, element.id)) return;
+
+		const draggedElement = elements[draggedElementId];
+		if (!draggedElement) return;
+
+		// Determine drop position based on mouse Y position
+		const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+		const y = e.clientY - rect.top;
+		const height = rect.height;
+
+		let position: 'before' | 'after' | 'inside';
+
+		// Check if dragged element and target element are siblings (same parent)
+		const areSiblings = draggedElement.parentId === element.parentId;
+
+		// Only allow "inside" drop if:
+		// 1. Element has children and is expanded
+		// 2. Mouse is in the middle zone (30-70%)
+		// 3. Elements are NOT siblings (different parents or dragging root into nested)
+		if (hasChildren && isExpanded && y > height * 0.3 && y < height * 0.7 && !areSiblings) {
+			position = 'inside';
+		} else if (y < height / 2) {
+			position = 'before';
+		} else {
+			position = 'after';
+		}
+
+		onDragOver(element.id, position);
+	}
+
+	function handleDropLocal(e: DragEvent) {
+		e.preventDefault();
+		e.stopPropagation();
+
+		if (!draggedElementId || draggedElementId === element.id) return;
+		if (isAncestor(draggedElementId, element.id)) return;
+
+		if (dropPosition) {
+			onDrop(element.id, dropPosition);
+		}
+	}
+
+	function handleDragLeaveLocal(e: DragEvent) {
+		e.stopPropagation();
+		// Only clear if leaving this element (not entering a child)
+		const relatedTarget = e.relatedTarget as HTMLElement;
+		if (!relatedTarget || !(e.currentTarget as HTMLElement).contains(relatedTarget)) {
+			// onDragOver will be called again if entering another element
+		}
+	}
+
+	// Check if an element is an ancestor of another
+	function isAncestor(ancestorId: string, descendantId: string): boolean {
+		let current = elements[descendantId];
+		while (current) {
+			if (current.parentId === ancestorId) return true;
+			if (!current.parentId) return false;
+			current = elements[current.parentId];
+		}
+		return false;
+	}
 </script>
 
 <div class="layer-item" style="padding-left: {depth * 16}px">
-	<div class="layer-row" class:selected={isSelected} class:locked on:click={handleClick} on:dblclick={handleDoubleClick}>
+	<!-- Drop indicator before -->
+	{#if dropPosition === 'before'}
+		<div class="drop-indicator drop-before"></div>
+	{/if}
+
+	<div
+		class="layer-row"
+		class:selected={isSelected}
+		class:locked
+		class:dragging={isDragging}
+		class:drop-target={isDropTarget && dropPosition === 'inside'}
+		draggable={!locked && !isRenaming}
+		on:click={handleClick}
+		on:dblclick={handleDoubleClick}
+		on:dragstart={handleDragStartLocal}
+		on:dragend={handleDragEndLocal}
+		on:dragover={handleDragOverLocal}
+		on:drop={handleDropLocal}
+		on:dragleave={handleDragLeaveLocal}
+	>
 		<!-- Expand/collapse arrow -->
 		{#if hasChildren}
 			<button class="expand-btn" on:click={handleToggleExpand} aria-label={isExpanded ? 'Collapse' : 'Expand'}>
@@ -178,6 +296,11 @@
 		</div>
 	</div>
 
+	<!-- Drop indicator after -->
+	{#if dropPosition === 'after'}
+		<div class="drop-indicator drop-after"></div>
+	{/if}
+
 	<!-- Children -->
 	{#if hasChildren && isExpanded}
 		{#each children as child (child.id)}
@@ -189,6 +312,12 @@
 				{onToggleVisibility}
 				{onToggleLock}
 				{onRename}
+				{onDragStart}
+				{onDragEnd}
+				{onDragOver}
+				{onDrop}
+				{draggedElementId}
+				{dropTarget}
 				depth={depth + 1}
 			/>
 		{/each}
@@ -321,5 +450,41 @@
 
 	.layer-row.selected .control-btn:hover {
 		opacity: 1;
+	}
+
+	/* Drag and drop styles */
+	.layer-row.dragging {
+		opacity: 0.4;
+	}
+
+	.layer-row.drop-target {
+		background-color: #007aff33;
+		border: 2px solid #007aff;
+	}
+
+	.drop-indicator {
+		height: 2px;
+		background-color: #007aff;
+		margin: 0 8px;
+		position: relative;
+	}
+
+	.drop-indicator::before {
+		content: '';
+		position: absolute;
+		left: -4px;
+		top: -3px;
+		width: 8px;
+		height: 8px;
+		background-color: #007aff;
+		border-radius: 50%;
+	}
+
+	.drop-before {
+		margin-top: -2px;
+	}
+
+	.drop-after {
+		margin-bottom: -2px;
 	}
 </style>
