@@ -8,6 +8,7 @@
 	 * - NO selection or interaction logic (handled by SelectionOverlay)
 	 */
 
+	import { createEventDispatcher } from 'svelte';
 	import {
 		designState,
 		selectElement,
@@ -20,6 +21,8 @@
 	} from '$lib/stores/design-store';
 import { interactionState, startEditingText, stopEditingText } from '$lib/stores/interaction-store';
 import { sanitizeTextContent } from '$lib/utils/sanitize';
+
+	const dispatch = createEventDispatcher<{ contextmenu: { elementId: string; x: number; y: number } }>();
 
 type DocumentWithCaret = Document & {
 	caretRangeFromPoint?: (x: number, y: number) => Range | null;
@@ -769,6 +772,17 @@ function focusTextEditor(position?: { x: number; y: number } | null) {
 $: if (isEditing && textEditorElement && !hasFocusedEditor) {
 	focusTextEditor(textToolClickPosition);
 }
+
+// Context menu handler
+function handleContextMenu(e: MouseEvent) {
+	e.preventDefault();
+	e.stopPropagation();
+	dispatch('contextmenu', {
+		elementId: element.id,
+		x: e.clientX,
+		y: e.clientY
+	});
+}
 </script>
 
 <!-- Canvas element - absolutely positioned, clickable for selection -->
@@ -780,6 +794,7 @@ $: if (isEditing && textEditorElement && !hasFocusedEditor) {
 	style={elementStyles}
 	on:mousedown={handleMouseDown}
 	on:dblclick={handleDoubleClick}
+	on:contextmenu={handleContextMenu}
 	role="button"
 	tabindex={isEditing ? -1 : 0}
 >

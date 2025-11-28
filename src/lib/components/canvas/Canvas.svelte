@@ -31,6 +31,10 @@
 	import BaselineGrid from './BaselineGrid.svelte';
 	import SelectionOverlay from './SelectionOverlay.svelte';
 	import SelectionBox from './SelectionBox.svelte';
+	import ViewLabels from './ViewLabels.svelte';
+	import ContextMenu from '$lib/components/ui/ContextMenu.svelte';
+	import type { MenuItem } from '$lib/components/ui/ContextMenu.svelte';
+	import { toggleView } from '$lib/stores/design-store';
 
 	let canvasElement: HTMLDivElement;
 	let viewport = { x: 0, y: 0, scale: 1 };
@@ -44,6 +48,105 @@
 	let selectionOverlay: {
 		startDrag: (e: MouseEvent, el: Element, handle?: string, selectedElements?: Element[]) => void;
 	} | undefined = undefined;
+
+	// Helper function to recursively find all view elements
+	function findAllViews(elements: Record<string, Element>, rootIds: string[]): Element[] {
+		const views: Element[] = [];
+
+		function traverse(elementId: string) {
+			const element = elements[elementId];
+			if (!element) return;
+
+			// Check if this element is a view
+			if (element.isView) {
+				views.push(element);
+			}
+
+			// Recursively check children
+			if (element.children && element.children.length > 0) {
+				element.children.forEach(childId => traverse(childId));
+			}
+		}
+
+		// Start traversal from root elements
+		rootIds.forEach(id => traverse(id));
+
+		return views;
+	}
+
+	// Get all view elements (including nested ones)
+	$: allViewElements = $designState.currentPageId && $designState.pages[$designState.currentPageId]
+		? findAllViews($designState.elements, $designState.pages[$designState.currentPageId].canvasElements)
+		: [];
+
+	// Context menu state
+	let contextMenu: { x: number; y: number; elementId: string } | null = null;
+
+	// Count existing views to auto-name
+	$: viewCount = Object.values($designState.elements).filter(el => el.isView).length;
+
+	// Handler for opening context menu from canvas elements
+	function handleCanvasContextMenu(e: CustomEvent<{ elementId: string; x: number; y: number }>) {
+		const { elementId, x, y } = e.detail;
+		contextMenu = { elementId, x, y };
+	}
+
+	function handleContextMenuClose() {
+		contextMenu = null;
+	}
+
+	async function handleContextMenuSelect(e: CustomEvent<string>) {
+		const action = e.detail;
+		if (!contextMenu) return;
+
+		const element = $designState.elements[contextMenu.elementId];
+		if (!element) return;
+
+		switch (action) {
+			case 'convert-to-view':
+				if (element.type === 'div') {
+					const viewName = `View ${viewCount + 1}`;
+					const breakpointWidth = element.size.width;
+					await toggleView(contextMenu.elementId, true, viewName, breakpointWidth);
+				}
+				break;
+			case 'convert-to-div':
+				if (element.type === 'div' && element.isView) {
+					await toggleView(contextMenu.elementId, false);
+				}
+				break;
+		}
+
+		contextMenu = null;
+	}
+
+	// Build context menu items
+	$: contextMenuItems = contextMenu ? buildContextMenuItems($designState.elements[contextMenu.elementId]) : [];
+
+	function buildContextMenuItems(element: Element | undefined): MenuItem[] {
+		if (!element) return [];
+
+		const items: MenuItem[] = [];
+
+		// Convert to View / Convert to Regular Div
+		if (element.type === 'div' && !element.parentId) {
+			if (element.isView) {
+				items.push({
+					id: 'convert-to-div',
+					label: 'Convert to Regular Div',
+					shortcut: ''
+				});
+			} else {
+				items.push({
+					id: 'convert-to-view',
+					label: 'Convert to View',
+					shortcut: ''
+				});
+			}
+		}
+
+		return items;
+	}
 
 	// Handler for starting drag operations
 	const handleStartDrag = (e: MouseEvent, el: Element, handle?: string, selectedElems?: Element[]) => {
@@ -526,6 +629,7 @@
 					{isPanning}
 					{isDragging}
 					onStartDrag={selectionOverlay ? handleStartDrag : undefined}
+					on:contextmenu={handleCanvasContextMenu}
 				/>
 			{/each}
 
@@ -552,6 +656,16 @@
 			{/if}
 		</div>
 
+		<!-- View Labels (outside viewport transform so they don't scale) -->
+		{#each allViewElements as element (element.id)}
+			<ViewLabels
+				{element}
+				canvasZoom={viewport.scale}
+				canvasPanX={viewport.x}
+				canvasPanY={viewport.y}
+			/>
+		{/each}
+
 		<!-- Selection Overlay - handles selection UI and interactions -->
 		<SelectionOverlay bind:this={selectionOverlay} {viewport} {isPanning} selectedElements={$selectedElements} />
 		
@@ -561,6 +675,17 @@
 		{/if}
 	</div>
 </div>
+
+<!-- Context Menu -->
+{#if contextMenu}
+	<ContextMenu
+		x={contextMenu.x}
+		y={contextMenu.y}
+		items={contextMenuItems}
+		on:select={handleContextMenuSelect}
+		on:close={handleContextMenuClose}
+	/>
+{/if}
 
 <style>
 	/* STYLE: Add your design here! */

@@ -13,7 +13,7 @@
 	 */
 
 	import type { Element } from '$lib/types/events';
-	import { onMount } from 'svelte';
+	import { onMount, createEventDispatcher } from 'svelte';
 
 	export let element: Element;
 	export let elements: Record<string, Element>;
@@ -29,6 +29,8 @@
 	export let draggedElementId: string | null = null;
 	export let dropTarget: { elementId: string; position: 'before' | 'after' | 'inside' } | null = null;
 	export let depth: number = 0;
+
+	const dispatch = createEventDispatcher<{ contextmenu: { elementId: string; x: number; y: number } }>();
 
 	let isExpanded = true;
 	let isRenaming = false;
@@ -48,8 +50,14 @@
 	$: displayName = element.name || getDefaultName(element);
 
 	function getDefaultName(el: Element): string {
+		// Views show their view name and breakpoint
+		if (el.isView) {
+			const viewName = el.viewName || 'View';
+			const width = el.breakpointWidth ? ` (${el.breakpointWidth}px)` : '';
+			return `${viewName}${width}`;
+		}
+
 		const type = el.type;
-		if (el.isView) return el.viewName || 'View';
 		if (type === 'div') return 'Div';
 		if (type === 'p') return el.content ? el.content.substring(0, 20) + (el.content.length > 20 ? '...' : '') : 'Text';
 		if (type === 'img') return 'Image';
@@ -57,8 +65,10 @@
 	}
 
 	function getElementIcon(el: Element): string {
+		// Views get special icon
+		if (el.isView) return '□'; // Box icon for views/breakpoints
+
 		const type = el.type;
-		if (el.isView) return '□';
 		if (type === 'div') return '▭';
 		if (type === 'p') return 'T';
 		if (type === 'img') return '⬚';
@@ -215,6 +225,17 @@
 		}
 		return false;
 	}
+
+	// Context menu handler
+	function handleContextMenu(e: MouseEvent) {
+		e.preventDefault();
+		e.stopPropagation();
+		dispatch('contextmenu', {
+			elementId: element.id,
+			x: e.clientX,
+			y: e.clientY
+		});
+	}
 </script>
 
 <div class="layer-item" style="padding-left: {depth * 16}px">
@@ -232,6 +253,7 @@
 		draggable={!locked && !isRenaming}
 		on:click={handleClick}
 		on:dblclick={handleDoubleClick}
+		on:contextmenu={handleContextMenu}
 		on:dragstart={handleDragStartLocal}
 		on:dragend={handleDragEndLocal}
 		on:dragover={handleDragOverLocal}
@@ -319,6 +341,7 @@
 				{draggedElementId}
 				{dropTarget}
 				depth={depth + 1}
+				on:contextmenu
 			/>
 		{/each}
 	{/if}

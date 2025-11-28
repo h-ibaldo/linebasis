@@ -9,15 +9,29 @@
 	 */
 
 	import type { Element } from '$lib/types/events';
-	import { updateElementStyles, toggleView, updateElementAutoLayout } from '$lib/stores/design-store';
+	import { updateElementStyles, toggleView, updateElementAutoLayout, designState } from '$lib/stores/design-store';
 
 	export let element: Element;
 
 	// View toggle state (stored in element metadata)
 	$: isView = element.isView || false;
 
-	async function handleToggleView() {
-		await toggleView(element.id, !isView, `View ${element.id.slice(0, 8)}`, 1440);
+	// Count existing views to auto-name
+	$: viewCount = Object.values($designState.elements).filter(el => el.isView).length;
+
+	async function handleToggleView(e: Event) {
+		const checkbox = e.target as HTMLInputElement;
+		const willBeView = checkbox.checked;
+
+		if (willBeView) {
+			// Converting TO view - auto-name and use current width
+			const viewName = `View ${viewCount + 1}`;
+			const breakpointWidth = element.size.width;
+			await toggleView(element.id, true, viewName, breakpointWidth);
+		} else {
+			// Converting FROM view - directly toggle off
+			await toggleView(element.id, false);
+		}
 	}
 
 	// Background color
@@ -63,17 +77,19 @@
 </script>
 
 <div class="div-properties">
-	<!-- View Toggle -->
-	<div class="property-section">
-		<h3>Type</h3>
-		<label class="toggle-label">
-			<input type="checkbox" checked={isView} on:change={handleToggleView} />
-			<span>Convert to View</span>
-		</label>
-		{#if isView}
-			<p class="hint">This div is a view (breakpoint view)</p>
-		{/if}
-	</div>
+	<!-- View Toggle (only for root-level divs) -->
+	{#if !element.parentId}
+		<div class="property-section">
+			<h3>Type</h3>
+			<label class="toggle-label">
+				<input type="checkbox" checked={isView} on:change={handleToggleView} />
+				<span>Convert to View</span>
+			</label>
+			{#if isView}
+				<p class="hint">This div is a view (breakpoint view)</p>
+			{/if}
+		</div>
+	{/if}
 
 	<!-- Background -->
 	<div class="property-section">

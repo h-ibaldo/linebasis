@@ -12,10 +12,12 @@
 	 * - Drag to reorder (array position changes, not z-index)
 	 */
 
-	import { designState, selectElement, selectElements, toggleVisibility, toggleLock, renameElement, shiftElementLayer, reorderElement } from '$lib/stores/design-store';
+	import { designState, selectElement, selectElements, toggleVisibility, toggleLock, renameElement, shiftElementLayer, reorderElement, toggleView } from '$lib/stores/design-store';
 	import FloatingWindow from '$lib/components/ui/FloatingWindow.svelte';
 	import LayerTreeItem from './LayerTreeItem.svelte';
+	import ContextMenu from '$lib/components/ui/ContextMenu.svelte';
 	import type { Element, Group } from '$lib/types/events';
+	import type { MenuItem } from '$lib/components/ui/ContextMenu.svelte';
 
 	$: selectedIds = $designState.selectedElementIds;
 
@@ -24,6 +26,12 @@
 	let draggedParentId: string | null = null;
 	let dropTargetIndex: number | null = null;
 	let dropTarget: { elementId: string; position: 'before' | 'after' | 'inside' } | null = null;
+
+	// Context menu state
+	let contextMenu: { x: number; y: number; elementId: string } | null = null;
+
+	// Count existing views to auto-name
+	$: viewCount = Object.values($designState.elements).filter(el => el.isView).length;
 
 	// Get current page
 	$: currentPage = $designState.currentPageId
@@ -287,6 +295,82 @@
 
 		handleDragEnd();
 	}
+
+	// Context menu handlers
+	function handleContextMenuOpen(e: CustomEvent<{ elementId: string; x: number; y: number }>) {
+		const { elementId, x, y } = e.detail;
+		contextMenu = { elementId, x, y };
+	}
+
+	function handleContextMenuClose() {
+		contextMenu = null;
+	}
+
+	async function handleContextMenuSelect(e: CustomEvent<string>) {
+		const action = e.detail;
+		if (!contextMenu) return;
+
+		const element = $designState.elements[contextMenu.elementId];
+		if (!element) return;
+
+		switch (action) {
+			case 'convert-to-view':
+				if (element.type === 'div') {
+					// Auto-name and use current width
+					const viewName = `View ${viewCount + 1}`;
+					const breakpointWidth = element.size.width;
+					await toggleView(contextMenu.elementId, true, viewName, breakpointWidth);
+				}
+				break;
+			case 'convert-to-div':
+				if (element.type === 'div' && element.isView) {
+					// Convert back to regular div
+					await toggleView(contextMenu.elementId, false);
+				}
+				break;
+			// Future actions: duplicate, delete, copy, paste, etc.
+		}
+
+		contextMenu = null;
+	}
+
+	// Build context menu items based on selected element
+	$: contextMenuItems = contextMenu ? buildContextMenuItems($designState.elements[contextMenu.elementId]) : [];
+
+	function buildContextMenuItems(element: Element | undefined): MenuItem[] {
+		if (!element) return [];
+
+		const items: MenuItem[] = [];
+
+		// Convert to View / Convert to Regular Div
+		if (element.type === 'div' && !element.parentId) {
+			if (element.isView) {
+				// Already a view - offer to convert back to regular div
+				items.push({
+					id: 'convert-to-div',
+					label: 'Convert to Div',
+					shortcut: ''
+				});
+			} else {
+				// Regular div - offer to convert to view
+				items.push({
+					id: 'convert-to-view',
+					label: 'Convert to View',
+					shortcut: ''
+				});
+			}
+		}
+
+		// Future menu items:
+		// - Duplicate
+		// - Copy/Paste
+		// - Delete
+		// - Group/Ungroup
+		// - Lock/Unlock
+		// - Hide/Show
+
+		return items;
+	}
 </script>
 
 <FloatingWindow
@@ -338,6 +422,7 @@
 										{draggedElementId}
 										{dropTarget}
 										depth={1}
+										on:contextmenu={handleContextMenuOpen}
 									/>
 								{/each}
 							</div>
@@ -358,6 +443,7 @@
 							onDrop={handleDrop}
 							{draggedElementId}
 							{dropTarget}
+							on:contextmenu={handleContextMenuOpen}
 						/>
 					{/if}
 				{/each}
@@ -365,6 +451,17 @@
 		{/if}
 	</div>
 </FloatingWindow>
+
+<!-- Context Menu -->
+{#if contextMenu}
+	<ContextMenu
+		x={contextMenu.x}
+		y={contextMenu.y}
+		items={contextMenuItems}
+		on:select={handleContextMenuSelect}
+		on:close={handleContextMenuClose}
+	/>
+{/if}
 
 <style>
 	.layers-panel {
