@@ -758,6 +758,21 @@ export async function updateElementTypography(
 	});
 }
 
+export async function applyTypographyPreset(
+	elementId: string,
+	preset: import('$lib/types/events').TypographyPreset
+): Promise<void> {
+	await dispatch({
+		id: uuidv4(),
+		type: 'APPLY_TYPOGRAPHY_PRESET',
+		timestamp: Date.now(),
+		payload: {
+			elementId,
+			preset
+		}
+	});
+}
+
 export async function updateElementSpacing(
 	elementId: string,
 	spacing: Partial<Element['spacing']>

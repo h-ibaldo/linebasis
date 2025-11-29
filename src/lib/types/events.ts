@@ -34,6 +34,7 @@ export type EventType =
 	| 'UPDATE_STYLES'
 	| 'GROUP_UPDATE_STYLES'
 	| 'UPDATE_TYPOGRAPHY'
+	| 'APPLY_TYPOGRAPHY_PRESET'
 	| 'UPDATE_SPACING'
 	| 'UPDATE_AUTO_LAYOUT'
 	// Page operations
@@ -257,6 +258,14 @@ export interface UpdateTypographyEvent extends BaseEvent {
 	};
 }
 
+export interface ApplyTypographyPresetEvent extends BaseEvent {
+	type: 'APPLY_TYPOGRAPHY_PRESET';
+	payload: {
+		elementId: string;
+		preset: TypographyPreset;
+	};
+}
+
 export interface UpdateSpacingEvent extends BaseEvent {
 	type: 'UPDATE_SPACING';
 	payload: {
@@ -381,6 +390,7 @@ export type DesignEvent =
 	| UngroupElementsEvent
 	| UpdateStylesEvent
 	| UpdateTypographyEvent
+	| ApplyTypographyPresetEvent
 	| UpdateSpacingEvent
 	| UpdateAutoLayoutEvent
 	| CreatePageEvent
@@ -462,15 +472,43 @@ export interface ElementStyles {
 	objectFit: 'cover' | 'contain' | 'fill' | 'none' | 'scale-down';
 }
 
+export type TypographyPreset =
+	| 'heading-1'
+	| 'heading-2'
+	| 'heading-3'
+	| 'heading-4'
+	| 'heading-5'
+	| 'heading-6'
+	| 'body'
+	| 'caption'
+	| 'small'
+	| 'custom';
+
 export interface TypographyStyle {
+	// Preset selection
+	preset?: TypographyPreset; // Predefined typography style
+
+	// Font properties
 	fontFamily: string;
 	fontSize: string;
 	fontWeight: string;
+	fontStyle?: 'normal' | 'italic' | 'oblique'; // Font style
 	lineHeight: string;
 	letterSpacing: string;
+
+	// Text alignment and formatting
 	textAlign: 'left' | 'center' | 'right' | 'justify';
 	textDecoration: string;
+	textDecorationColor?: string; // Decoration color
+	textDecorationStyle?: 'solid' | 'double' | 'dotted' | 'dashed' | 'wavy'; // Decoration style
 	textTransform: 'none' | 'uppercase' | 'lowercase' | 'capitalize';
+
+	// Advanced features
+	textIndent?: string; // First line indentation
+	wordSpacing?: string; // Space between words
+	whiteSpace?: 'normal' | 'nowrap' | 'pre' | 'pre-wrap' | 'pre-line'; // White space handling
+	wordBreak?: 'normal' | 'break-all' | 'keep-all' | 'break-word'; // Word breaking behavior
+	hyphens?: 'none' | 'manual' | 'auto'; // Hyphenation
 }
 
 export interface SpacingStyle {

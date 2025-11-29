@@ -662,11 +662,19 @@ type DocumentWithCaret = Document & {
 		if (element.typography.fontFamily) styles.push(`font-family: ${element.typography.fontFamily}`);
 		if (element.typography.fontSize) styles.push(`font-size: ${element.typography.fontSize}`);
 		if (element.typography.fontWeight) styles.push(`font-weight: ${element.typography.fontWeight}`);
+		if (element.typography.fontStyle) styles.push(`font-style: ${element.typography.fontStyle}`);
 		if (element.typography.lineHeight) styles.push(`line-height: ${element.typography.lineHeight}`);
 		if (element.typography.letterSpacing) styles.push(`letter-spacing: ${element.typography.letterSpacing}`);
+		if (element.typography.wordSpacing) styles.push(`word-spacing: ${element.typography.wordSpacing}`);
 		if (element.typography.textAlign) styles.push(`text-align: ${element.typography.textAlign}`);
 		if (element.typography.textDecoration) styles.push(`text-decoration: ${element.typography.textDecoration}`);
+		if (element.typography.textDecorationColor) styles.push(`text-decoration-color: ${element.typography.textDecorationColor}`);
+		if (element.typography.textDecorationStyle) styles.push(`text-decoration-style: ${element.typography.textDecorationStyle}`);
 		if (element.typography.textTransform) styles.push(`text-transform: ${element.typography.textTransform}`);
+		if (element.typography.textIndent) styles.push(`text-indent: ${element.typography.textIndent}`);
+		if (element.typography.whiteSpace) styles.push(`white-space: ${element.typography.whiteSpace}`);
+		if (element.typography.wordBreak) styles.push(`word-break: ${element.typography.wordBreak}`);
+		if (element.typography.hyphens) styles.push(`hyphens: ${element.typography.hyphens}`);
 
 		// Spacing
 		if (element.spacing.marginTop) styles.push(`margin-top: ${element.spacing.marginTop}`);
@@ -834,7 +842,19 @@ function handleContextMenu(e: MouseEvent) {
 				aria-multiline={element.type === 'span' || element.type === 'label' ? 'false' : 'true'}
 				spellcheck="true"
 				on:blur={handleBlur}
-				on:keydown={handleKeyDown}
+				on:keydown={(e) => {
+					console.log('[text-editor] keydown:', e.key, 'isContentEditable:', e.target?.isContentEditable);
+					handleKeyDown(e);
+				}}
+				on:input={() => {
+					console.log('[text-editor] input event fired');
+				}}
+				on:beforeinput={() => {
+					console.log('[text-editor] beforeinput fired');
+				}}
+				on:focus={() => {
+					console.log('[text-editor] FOCUSED!');
+				}}
 			></div>
 		{:else}
 			<!-- Render element content based on type -->

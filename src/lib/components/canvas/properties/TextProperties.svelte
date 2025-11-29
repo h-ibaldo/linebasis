@@ -1,66 +1,181 @@
 <script lang="ts">
 	/**
-	 * TextProperties - Typography and text editing controls
+	 * TextProperties - Advanced typography and text editing controls
 	 *
-	 * Displays typography properties for text elements (p, h1-h6, span, etc.)
+	 * Features:
+	 * - Typography presets (H1-H6, Body, Caption, Small)
+	 * - Custom typography controls
+	 * - Font family, size, weight, style
+	 * - Line height and letter spacing
+	 * - Text alignment and formatting
+	 * - Advanced text controls (word spacing, white space, hyphenation)
 	 */
 
-	import { updateElementTypography, updateElementStyles } from '$lib/stores/design-store';
-	import type { Element } from '$lib/types/events';
+	import {
+		updateElementTypography,
+		updateElementStyles,
+		applyTypographyPreset
+	} from '$lib/stores/design-store';
+	import { defaultTokens } from '$lib/types/tokens';
+	import type { Element, TypographyPreset } from '$lib/types/events';
 
 	export let element: Element;
 
-	// Font families (common web fonts)
-	const fontFamilies = [
-		{ value: 'system-ui, sans-serif', label: 'System UI' },
-		{ value: 'Arial, sans-serif', label: 'Arial' },
-		{ value: 'Helvetica, sans-serif', label: 'Helvetica' },
-		{ value: '"Times New Roman", serif', label: 'Times New Roman' },
-		{ value: 'Georgia, serif', label: 'Georgia' },
-		{ value: '"Courier New", monospace', label: 'Courier New' },
-		{ value: 'monospace', label: 'Monospace' },
-		{ value: 'Inter, sans-serif', label: 'Inter' },
-		{ value: '"Roboto", sans-serif', label: 'Roboto' }
+	// Typography presets with preview
+	const presets: Array<{
+		value: TypographyPreset;
+		label: string;
+		preview: string;
+	}> = [
+		{ value: 'heading-1', label: 'Heading 1', preview: '36px · Bold' },
+		{ value: 'heading-2', label: 'Heading 2', preview: '30px · Bold' },
+		{ value: 'heading-3', label: 'Heading 3', preview: '24px · SemiBold' },
+		{ value: 'heading-4', label: 'Heading 4', preview: '20px · SemiBold' },
+		{ value: 'heading-5', label: 'Heading 5', preview: '18px · SemiBold' },
+		{ value: 'heading-6', label: 'Heading 6', preview: '16px · SemiBold' },
+		{ value: 'body', label: 'Body', preview: '16px · Regular' },
+		{ value: 'caption', label: 'Caption', preview: '14px · Regular' },
+		{ value: 'small', label: 'Small', preview: '12px · Regular' },
+		{ value: 'custom', label: 'Custom', preview: 'Custom settings' }
 	];
 
-	// Font sizes
-	const fontSizes = ['12px', '14px', '16px', '18px', '20px', '24px', '28px', '32px', '36px', '48px', '64px', '72px'];
+	// Font families (common web fonts + Google Fonts)
+	const fontFamilies = [
+		{ value: 'system-ui, sans-serif', label: 'System UI', category: 'System' },
+		{ value: 'Arial, sans-serif', label: 'Arial', category: 'Sans Serif' },
+		{ value: 'Helvetica, sans-serif', label: 'Helvetica', category: 'Sans Serif' },
+		{ value: '"Times New Roman", serif', label: 'Times New Roman', category: 'Serif' },
+		{ value: 'Georgia, serif', label: 'Georgia', category: 'Serif' },
+		{ value: '"Courier New", monospace', label: 'Courier New', category: 'Monospace' },
+		{ value: 'monospace', label: 'Monospace', category: 'Monospace' },
+		{ value: 'Inter, sans-serif', label: 'Inter (Google)', category: 'Google Fonts' },
+		{ value: '"Roboto", sans-serif', label: 'Roboto (Google)', category: 'Google Fonts' },
+		{ value: '"Open Sans", sans-serif', label: 'Open Sans (Google)', category: 'Google Fonts' },
+		{ value: '"Lato", sans-serif', label: 'Lato (Google)', category: 'Google Fonts' },
+		{ value: '"Montserrat", sans-serif', label: 'Montserrat (Google)', category: 'Google Fonts' },
+		{ value: '"Playfair Display", serif', label: 'Playfair Display (Google)', category: 'Google Fonts' },
+		{ value: '"Merriweather", serif', label: 'Merriweather (Google)', category: 'Google Fonts' }
+	];
+
+	// Font sizes (px values)
+	const fontSizes = [
+		'10px', '12px', '14px', '16px', '18px', '20px', '22px', '24px',
+		'28px', '32px', '36px', '40px', '48px', '56px', '64px', '72px', '96px'
+	];
 
 	// Font weights
 	const fontWeights = [
+		{ value: '100', label: 'Thin' },
+		{ value: '200', label: 'Extra Light' },
 		{ value: '300', label: 'Light' },
 		{ value: '400', label: 'Regular' },
 		{ value: '500', label: 'Medium' },
 		{ value: '600', label: 'Semi Bold' },
 		{ value: '700', label: 'Bold' },
-		{ value: '800', label: 'Extra Bold' }
+		{ value: '800', label: 'Extra Bold' },
+		{ value: '900', label: 'Black' }
+	];
+
+	// Font styles
+	const fontStyles: Array<{ value: 'normal' | 'italic' | 'oblique'; label: string; icon: string }> = [
+		{ value: 'normal', label: 'Normal', icon: 'R' },
+		{ value: 'italic', label: 'Italic', icon: 'I' },
+		{ value: 'oblique', label: 'Oblique', icon: 'O' }
 	];
 
 	// Line heights
-	const lineHeights = ['1', '1.2', '1.4', '1.5', '1.6', '1.8', '2'];
+	const lineHeights = ['1', '1.1', '1.2', '1.3', '1.4', '1.5', '1.6', '1.75', '1.8', '2', '2.5', '3'];
 
 	// Text align options
-	const textAligns: Array<{ value: 'left' | 'center' | 'right' | 'justify'; label: string }> = [
-		{ value: 'left', label: 'Left' },
-		{ value: 'center', label: 'Center' },
-		{ value: 'right', label: 'Right' },
-		{ value: 'justify', label: 'Justify' }
+	const textAligns: Array<{ value: 'left' | 'center' | 'right' | 'justify'; label: string; icon: string }> = [
+		{ value: 'left', label: 'Left', icon: '≡' },
+		{ value: 'center', label: 'Center', icon: '≡' },
+		{ value: 'right', label: 'Right', icon: '≡' },
+		{ value: 'justify', label: 'Justify', icon: '≡' }
 	];
 
-	// Update typography
-	function handleTypographyChange(property: string, value: string) {
-		updateElementTypography(element.id, { [property]: value });
+	// Text decoration styles
+	const decorationStyles: Array<{ value: 'solid' | 'double' | 'dotted' | 'dashed' | 'wavy'; label: string }> = [
+		{ value: 'solid', label: 'Solid' },
+		{ value: 'double', label: 'Double' },
+		{ value: 'dotted', label: 'Dotted' },
+		{ value: 'dashed', label: 'Dashed' },
+		{ value: 'wavy', label: 'Wavy' }
+	];
+
+	// White space options
+	const whiteSpaceOptions: Array<{ value: 'normal' | 'nowrap' | 'pre' | 'pre-wrap' | 'pre-line'; label: string }> = [
+		{ value: 'normal', label: 'Normal' },
+		{ value: 'nowrap', label: 'No Wrap' },
+		{ value: 'pre', label: 'Pre' },
+		{ value: 'pre-wrap', label: 'Pre Wrap' },
+		{ value: 'pre-line', label: 'Pre Line' }
+	];
+
+	// Word break options
+	const wordBreakOptions: Array<{ value: 'normal' | 'break-all' | 'keep-all' | 'break-word'; label: string }> = [
+		{ value: 'normal', label: 'Normal' },
+		{ value: 'break-all', label: 'Break All' },
+		{ value: 'keep-all', label: 'Keep All' },
+		{ value: 'break-word', label: 'Break Word' }
+	];
+
+	// Current preset
+	$: currentPreset = element.typography.preset || 'custom';
+	$: isCustom = currentPreset === 'custom';
+
+	// Apply preset
+	async function handlePresetChange(preset: TypographyPreset) {
+		await applyTypographyPreset(element.id, preset);
+	}
+
+	// Update typography property
+	function handleTypographyChange(property: string, value: any) {
+		updateElementTypography(element.id, {
+			preset: 'custom', // Switch to custom when manually editing
+			[property]: value
+		});
+	}
+
+	// Toggle font style (italic)
+	function toggleFontStyle(style: 'normal' | 'italic' | 'oblique') {
+		handleTypographyChange('fontStyle', style);
+	}
+
+	// Toggle text decoration
+	function toggleTextDecoration(decoration: 'underline' | 'line-through' | 'overline' | 'none') {
+		const current = element.typography.textDecoration || 'none';
+		handleTypographyChange('textDecoration', current === decoration ? 'none' : decoration);
 	}
 </script>
 
 <div class="text-properties">
-	<!-- Typography Section -->
+	<!-- Typography Presets -->
 	<section class="property-section">
-		<h3 class="section-title">Typography</h3>
+		<h3 class="section-title">Typography Preset</h3>
+
+		<div class="preset-grid">
+			{#each presets as preset}
+				<button
+					class="preset-button"
+					class:active={currentPreset === preset.value}
+					on:click={() => handlePresetChange(preset.value)}
+					title={preset.preview}
+				>
+					<div class="preset-label">{preset.label}</div>
+					<div class="preset-preview">{preset.preview}</div>
+				</button>
+			{/each}
+		</div>
+	</section>
+
+	<!-- Font Properties -->
+	<section class="property-section">
+		<h3 class="section-title">Font</h3>
 
 		<!-- Font Family -->
 		<div class="property-group">
-			<label for="fontFamily">Font Family</label>
+			<label for="fontFamily">Family</label>
 			<select
 				id="fontFamily"
 				value={element.typography.fontFamily || 'system-ui, sans-serif'}
@@ -101,6 +216,28 @@
 			</div>
 		</div>
 
+		<!-- Font Style -->
+		<div class="property-group">
+			<label>Style</label>
+			<div class="button-group">
+				{#each fontStyles as style}
+					<button
+						class="toggle-button"
+						class:active={element.typography.fontStyle === style.value}
+						on:click={() => toggleFontStyle(style.value)}
+						title={style.label}
+					>
+						{style.icon}
+					</button>
+				{/each}
+			</div>
+		</div>
+	</section>
+
+	<!-- Text Spacing -->
+	<section class="property-section">
+		<h3 class="section-title">Spacing</h3>
+
 		<!-- Line Height -->
 		<div class="property-group">
 			<label for="lineHeight">Line Height</label>
@@ -127,17 +264,47 @@
 			/>
 		</div>
 
+		<!-- Word Spacing -->
+		<div class="property-group">
+			<label for="wordSpacing">Word Spacing</label>
+			<input
+				type="text"
+				id="wordSpacing"
+				value={element.typography.wordSpacing || '0'}
+				on:input={(e) => handleTypographyChange('wordSpacing', e.currentTarget.value)}
+				placeholder="0px"
+			/>
+		</div>
+
+		<!-- Text Indent -->
+		<div class="property-group">
+			<label for="textIndent">Text Indent</label>
+			<input
+				type="text"
+				id="textIndent"
+				value={element.typography.textIndent || '0'}
+				on:input={(e) => handleTypographyChange('textIndent', e.currentTarget.value)}
+				placeholder="0px"
+			/>
+		</div>
+	</section>
+
+	<!-- Text Formatting -->
+	<section class="property-section">
+		<h3 class="section-title">Formatting</h3>
+
 		<!-- Text Alignment -->
 		<div class="property-group">
-			<label for="textAlign">Text Align</label>
-			<div class="button-group" id="textAlign" role="group">
+			<label>Alignment</label>
+			<div class="button-group">
 				{#each textAligns as align}
 					<button
 						class="toggle-button"
 						class:active={element.typography.textAlign === align.value}
 						on:click={() => handleTypographyChange('textAlign', align.value)}
+						title={align.label}
 					>
-						{align.label}
+						{align.icon}
 					</button>
 				{/each}
 			</div>
@@ -145,28 +312,68 @@
 
 		<!-- Text Decoration -->
 		<div class="property-group">
-			<label for="textDecoration">Decoration</label>
-			<div class="button-group" id="textDecoration" role="group">
+			<label>Decoration</label>
+			<div class="button-group">
 				<button
 					class="toggle-button"
 					class:active={element.typography.textDecoration?.includes('underline')}
-					on:click={() => handleTypographyChange('textDecoration',
-						element.typography.textDecoration?.includes('underline') ? 'none' : 'underline'
-					)}
+					on:click={() => toggleTextDecoration('underline')}
+					title="Underline"
 				>
-					Underline
+					U
 				</button>
 				<button
 					class="toggle-button"
 					class:active={element.typography.textDecoration?.includes('line-through')}
-					on:click={() => handleTypographyChange('textDecoration',
-						element.typography.textDecoration?.includes('line-through') ? 'none' : 'line-through'
-					)}
+					on:click={() => toggleTextDecoration('line-through')}
+					title="Strikethrough"
 				>
-					Strikethrough
+					S
+				</button>
+				<button
+					class="toggle-button"
+					class:active={element.typography.textDecoration?.includes('overline')}
+					on:click={() => toggleTextDecoration('overline')}
+					title="Overline"
+				>
+					O
 				</button>
 			</div>
 		</div>
+
+		<!-- Decoration Style (only show if decoration is active) -->
+		{#if element.typography.textDecoration && element.typography.textDecoration !== 'none'}
+			<div class="property-group">
+				<label for="decorationStyle">Decoration Style</label>
+				<select
+					id="decorationStyle"
+					value={element.typography.textDecorationStyle || 'solid'}
+					on:change={(e) => handleTypographyChange('textDecorationStyle', e.currentTarget.value)}
+				>
+					{#each decorationStyles as style}
+						<option value={style.value}>{style.label}</option>
+					{/each}
+				</select>
+			</div>
+
+			<div class="property-group">
+				<label for="decorationColor">Decoration Color</label>
+				<div class="color-input-group">
+					<input
+						type="color"
+						id="decorationColor"
+						value={element.typography.textDecorationColor || element.styles.color || '#000000'}
+						on:input={(e) => handleTypographyChange('textDecorationColor', e.currentTarget.value)}
+					/>
+					<input
+						type="text"
+						value={element.typography.textDecorationColor || element.styles.color || '#000000'}
+						on:input={(e) => handleTypographyChange('textDecorationColor', e.currentTarget.value)}
+						placeholder="#000000"
+					/>
+				</div>
+			</div>
+		{/if}
 
 		<!-- Text Transform -->
 		<div class="property-group">
@@ -184,7 +391,54 @@
 		</div>
 	</section>
 
-	<!-- Color Section -->
+	<!-- Advanced -->
+	<section class="property-section">
+		<h3 class="section-title">Advanced</h3>
+
+		<!-- White Space -->
+		<div class="property-group">
+			<label for="whiteSpace">White Space</label>
+			<select
+				id="whiteSpace"
+				value={element.typography.whiteSpace || 'normal'}
+				on:change={(e) => handleTypographyChange('whiteSpace', e.currentTarget.value)}
+			>
+				{#each whiteSpaceOptions as option}
+					<option value={option.value}>{option.label}</option>
+				{/each}
+			</select>
+		</div>
+
+		<!-- Word Break -->
+		<div class="property-group">
+			<label for="wordBreak">Word Break</label>
+			<select
+				id="wordBreak"
+				value={element.typography.wordBreak || 'normal'}
+				on:change={(e) => handleTypographyChange('wordBreak', e.currentTarget.value)}
+			>
+				{#each wordBreakOptions as option}
+					<option value={option.value}>{option.label}</option>
+				{/each}
+			</select>
+		</div>
+
+		<!-- Hyphens -->
+		<div class="property-group">
+			<label for="hyphens">Hyphens</label>
+			<select
+				id="hyphens"
+				value={element.typography.hyphens || 'none'}
+				on:change={(e) => handleTypographyChange('hyphens', e.currentTarget.value)}
+			>
+				<option value="none">None</option>
+				<option value="manual">Manual</option>
+				<option value="auto">Auto</option>
+			</select>
+		</div>
+	</section>
+
+	<!-- Color -->
 	<section class="property-section">
 		<h3 class="section-title">Color</h3>
 
@@ -211,11 +465,13 @@
 <style>
 	.text-properties {
 		padding: 16px;
+		max-height: calc(100vh - 200px);
+		overflow-y: auto;
 	}
 
 	.property-section {
-		margin-bottom: 24px;
-		padding-bottom: 24px;
+		margin-bottom: 20px;
+		padding-bottom: 20px;
 		border-bottom: 1px solid #e5e7eb;
 	}
 
@@ -226,7 +482,7 @@
 	}
 
 	.section-title {
-		font-size: 12px;
+		font-size: 11px;
 		font-weight: 600;
 		text-transform: uppercase;
 		color: #6b7280;
@@ -251,65 +507,39 @@
 
 	label {
 		display: block;
-		font-size: 12px;
+		font-size: 11px;
 		font-weight: 500;
 		color: #374151;
 		margin-bottom: 6px;
 	}
 
 	input[type='text'],
-	textarea,
 	select {
 		width: 100%;
 		padding: 6px 8px;
 		border: 1px solid #d1d5db;
 		border-radius: 4px;
-		font-size: 13px;
+		font-size: 12px;
 		font-family: inherit;
 		background: white;
 		transition: border-color 0.2s;
 	}
 
 	input[type='text']:focus,
-	textarea:focus,
 	select:focus {
 		outline: none;
 		border-color: #3b82f6;
 	}
 
-	textarea {
-		resize: vertical;
-		min-height: 60px;
-	}
-
-	.edit-button {
-		width: 100%;
-		margin-top: 8px;
-		padding: 6px 12px;
-		background: #f3f4f6;
-		border: 1px solid #d1d5db;
-		border-radius: 4px;
-		font-size: 12px;
-		font-weight: 500;
-		color: #374151;
-		cursor: pointer;
-		transition: all 0.2s;
-	}
-
-	.edit-button:hover {
-		background: #e5e7eb;
-		border-color: #9ca3af;
-	}
-
 	.color-input-group {
 		display: grid;
-		grid-template-columns: 40px 1fr;
+		grid-template-columns: 36px 1fr;
 		gap: 8px;
 	}
 
 	input[type='color'] {
-		width: 40px;
-		height: 32px;
+		width: 36px;
+		height: 30px;
 		padding: 2px;
 		border: 1px solid #d1d5db;
 		border-radius: 4px;
@@ -328,10 +558,10 @@
 		border: 1px solid #d1d5db;
 		border-radius: 4px;
 		font-size: 11px;
-		font-weight: 500;
+		font-weight: 600;
 		color: #374151;
 		cursor: pointer;
-		transition: all 0.2s;
+		transition: all 0.15s;
 	}
 
 	.toggle-button:hover {
@@ -343,5 +573,54 @@
 		background: #3b82f6;
 		border-color: #3b82f6;
 		color: white;
+	}
+
+	/* Preset Grid */
+	.preset-grid {
+		display: grid;
+		grid-template-columns: repeat(2, 1fr);
+		gap: 8px;
+	}
+
+	.preset-button {
+		padding: 10px;
+		background: #f9fafb;
+		border: 1px solid #e5e7eb;
+		border-radius: 6px;
+		cursor: pointer;
+		transition: all 0.2s;
+		text-align: left;
+	}
+
+	.preset-button:hover {
+		background: #f3f4f6;
+		border-color: #d1d5db;
+	}
+
+	.preset-button.active {
+		background: #eff6ff;
+		border-color: #3b82f6;
+		box-shadow: 0 0 0 1px #3b82f6;
+	}
+
+	.preset-label {
+		font-size: 12px;
+		font-weight: 600;
+		color: #374151;
+		margin-bottom: 2px;
+	}
+
+	.preset-button.active .preset-label {
+		color: #3b82f6;
+	}
+
+	.preset-preview {
+		font-size: 10px;
+		color: #6b7280;
+		line-height: 1.3;
+	}
+
+	.preset-button.active .preset-preview {
+		color: #2563eb;
 	}
 </style>
