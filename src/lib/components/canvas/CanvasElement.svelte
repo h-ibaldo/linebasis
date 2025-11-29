@@ -861,6 +861,7 @@ function handleContextMenu(e: MouseEvent) {
 	/* Allow text selection when in editing mode */
 .canvas-element.editing-text {
 	cursor: text;
+	user-select: text; /* Re-enable text selection for editing */
 }
 
 .text-editor,
@@ -882,13 +883,19 @@ function handleContextMenu(e: MouseEvent) {
 	box-sizing: border-box;
 	cursor: text;
 	user-select: text;
+	-webkit-user-select: text; /* Safari support */
+	-moz-user-select: text; /* Firefox support */
 	outline: 2px solid #3b82f6;
 	outline-offset: 2px;
 	white-space: pre-wrap;
+	pointer-events: auto; /* Ensure editor receives pointer events */
+	position: relative; /* Ensure stacking context */
+	z-index: 1; /* Above other content */
 }
 
 .text-editor:focus {
 	outline: 2px solid #3b82f6;
+	outline-offset: 2px;
 }
 
 	/* Selection indicator - blue outline overlay (Figma/Illustrator style) */
