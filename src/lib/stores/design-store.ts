@@ -567,6 +567,29 @@ export async function deleteElement(elementId: string): Promise<void> {
 	});
 }
 
+/**
+ * Delete multiple elements at once (batched for performance)
+ * Uses a single GROUP_DELETE_ELEMENTS event instead of N individual events
+ */
+export async function deleteElements(elementIds: string[]): Promise<void> {
+	if (elementIds.length === 0) return;
+
+	// Single deletion - use individual event for better event log
+	if (elementIds.length === 1) {
+		return deleteElement(elementIds[0]);
+	}
+
+	// Batch deletion - single event for performance
+	await dispatch({
+		id: uuidv4(),
+		type: 'GROUP_DELETE_ELEMENTS',
+		timestamp: Date.now(),
+		payload: {
+			elementIds
+		}
+	});
+}
+
 export async function moveElement(
 	elementId: string,
 	position: { x: number; y: number },
@@ -2673,8 +2696,8 @@ export function setupKeyboardShortcuts(): (() => void) | undefined {
 			e.preventDefault();
 			const selected = get(selectedElements);
 			if (selected.length > 0) {
-				// Delete all selected elements (await all deletions)
-				Promise.all(selected.map((element) => deleteElement(element.id)))
+				// Delete all selected elements using batched operation (single event for performance)
+				deleteElements(selected.map((element) => element.id))
 					.catch((error) => {
 						console.error('Failed to delete elements:', error);
 					});

@@ -14,6 +14,7 @@ export type EventType =
 	| 'CREATE_ELEMENT'
 	| 'UPDATE_ELEMENT'
 	| 'DELETE_ELEMENT'
+	| 'GROUP_DELETE_ELEMENTS'
 	| 'MOVE_ELEMENT'
 	| 'RESIZE_ELEMENT'
 	| 'ROTATE_ELEMENT'
@@ -88,6 +89,13 @@ export interface DeleteElementEvent extends BaseEvent {
 	type: 'DELETE_ELEMENT';
 	payload: {
 		elementId: string;
+	};
+}
+
+export interface GroupDeleteElementsEvent extends BaseEvent {
+	type: 'GROUP_DELETE_ELEMENTS';
+	payload: {
+		elementIds: string[];
 	};
 }
 
@@ -355,6 +363,7 @@ export type DesignEvent =
 	| CreateElementEvent
 	| UpdateElementEvent
 	| DeleteElementEvent
+	| GroupDeleteElementsEvent
 	| MoveElementEvent
 	| ResizeElementEvent
 	| RotateElementEvent

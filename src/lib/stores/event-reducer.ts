@@ -17,6 +17,7 @@ import type {
 	CreateElementEvent,
 	UpdateElementEvent,
 	DeleteElementEvent,
+	GroupDeleteElementsEvent,
 	MoveElementEvent,
 	ResizeElementEvent,
 	RotateElementEvent,
@@ -120,6 +121,8 @@ export function reduceEvent(state: DesignState, event: DesignEvent): DesignState
 			return handleUpdateElement(state, event);
 		case 'DELETE_ELEMENT':
 			return handleDeleteElement(state, event);
+		case 'GROUP_DELETE_ELEMENTS':
+			return handleGroupDeleteElements(state, event);
 		case 'MOVE_ELEMENT':
 			return handleMoveElement(state, event);
 		case 'RESIZE_ELEMENT':
@@ -299,6 +302,87 @@ function handleDeleteElement(state: DesignState, event: DeleteElementEvent): Des
 
 	// Remove from selection
 	const newSelectedElementIds = state.selectedElementIds.filter((id) => id !== elementId);
+
+	return {
+		...state,
+		elements: newElements,
+		pages: newPages,
+		selectedElementIds: newSelectedElementIds
+	};
+}
+
+function handleGroupDeleteElements(state: DesignState, event: GroupDeleteElementsEvent): DesignState {
+	const { elementIds } = event.payload;
+
+	// Clone state objects once
+	const newElements = { ...state.elements };
+	const newPages = { ...state.pages };
+
+	// Collect all element IDs to delete (including descendants)
+	const idsToDelete = new Set<string>();
+
+	// Recursively collect all descendants
+	const collectDescendants = (id: string) => {
+		const el = newElements[id];
+		if (el && !idsToDelete.has(id)) {
+			idsToDelete.add(id);
+			el.children.forEach(collectDescendants);
+		}
+	};
+
+	// Collect all elements and their descendants
+	elementIds.forEach(collectDescendants);
+
+	// Build sets of elements to remove by parent and page for efficient filtering
+	const elementsByParent = new Map<string | null, Set<string>>();
+	const elementsByPage = new Map<string, Set<string>>();
+
+	for (const id of idsToDelete) {
+		const element = newElements[id];
+		if (!element) continue;
+
+		// Track by parent
+		if (!elementsByParent.has(element.parentId)) {
+			elementsByParent.set(element.parentId, new Set());
+		}
+		elementsByParent.get(element.parentId)!.add(id);
+
+		// Track by page (only for root elements)
+		if (!element.parentId) {
+			if (!elementsByPage.has(element.pageId)) {
+				elementsByPage.set(element.pageId, new Set());
+			}
+			elementsByPage.get(element.pageId)!.add(id);
+		}
+	}
+
+	// Update parent elements - remove deleted children in one pass per parent
+	for (const [parentId, childIds] of elementsByParent.entries()) {
+		if (parentId && newElements[parentId]) {
+			newElements[parentId] = {
+				...newElements[parentId],
+				children: newElements[parentId].children.filter(id => !childIds.has(id))
+			};
+		}
+	}
+
+	// Update pages - remove deleted root elements in one pass per page
+	for (const [pageId, rootIds] of elementsByPage.entries()) {
+		if (newPages[pageId]) {
+			newPages[pageId] = {
+				...newPages[pageId],
+				canvasElements: newPages[pageId].canvasElements.filter(id => !rootIds.has(id))
+			};
+		}
+	}
+
+	// Delete all elements
+	for (const id of idsToDelete) {
+		delete newElements[id];
+	}
+
+	// Remove from selection
+	const newSelectedElementIds = state.selectedElementIds.filter(id => !idsToDelete.has(id));
 
 	return {
 		...state,
