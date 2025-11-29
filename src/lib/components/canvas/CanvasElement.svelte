@@ -14,6 +14,7 @@
 		selectElement,
 		selectElements,
 		selectedElements,
+		selectedElementIds as selectedIdsStore,
 		addToSelection,
 		removeFromSelection,
 		updateElement,
@@ -688,7 +689,9 @@ type DocumentWithCaret = Document & {
 	})();
 
 	// Check if this element is selected
-	$: isSelected = $selectedElements.some(el => el.id === element.id);
+	// Optimized: Use memoized selectedIds store and Set lookup O(1) instead of array.some() O(n)
+	$: selectedIdsSet = new Set($selectedIdsStore);
+	$: isSelected = selectedIdsSet.has(element.id);
 
 	// Check if this element is being edited
 	$: isEditing = $interactionState.editingElementId === element.id;

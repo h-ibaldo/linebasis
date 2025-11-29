@@ -38,6 +38,49 @@ const initialState: InteractionState = {
 
 export const interactionState = writable<InteractionState>(initialState);
 
+// ============================================================================
+// Performance Optimization: Throttled Updates
+// ============================================================================
+
+let rafId: number | null = null;
+let pendingUpdate: Partial<InteractionState> | null = null;
+
+/**
+ * Throttled interaction state update using requestAnimationFrame
+ * Limits updates to 60fps to prevent excessive re-renders during drag/resize
+ */
+export function updateInteractionStateThrottled(updates: Partial<InteractionState>): void {
+	// Merge with any pending updates
+	pendingUpdate = pendingUpdate ? { ...pendingUpdate, ...updates } : updates;
+
+	// If already scheduled, don't schedule again
+	if (rafId !== null) return;
+
+	rafId = requestAnimationFrame(() => {
+		if (pendingUpdate) {
+			interactionState.update(state => ({ ...state, ...pendingUpdate }));
+			pendingUpdate = null;
+		}
+		rafId = null;
+	});
+}
+
+/**
+ * Immediate (non-throttled) interaction state update
+ * Use for critical state changes that must be instant (e.g., mode changes)
+ */
+export function updateInteractionStateImmediate(updates: Partial<InteractionState>): void {
+	// Cancel any pending throttled update
+	if (rafId !== null) {
+		cancelAnimationFrame(rafId);
+		rafId = null;
+	}
+
+	// Apply immediately
+	interactionState.update(state => ({ ...state, ...updates }));
+	pendingUpdate = null;
+}
+
 /**
  * Enter text editing mode for an element
  */

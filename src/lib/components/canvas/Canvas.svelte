@@ -21,7 +21,9 @@
 		updateElement,
 		selectElement,
 		clearSelection,
-		selectedElements
+		selectedElements,
+		currentPageRootElementIds,
+		selectedElementIds as selectedIdsStore
 	} from '$lib/stores/design-store';
 	import { currentTool } from '$lib/stores/tool-store';
 	import { interactionState, startEditingText } from '$lib/stores/interaction-store';
@@ -35,6 +37,7 @@
 	import ContextMenu from '$lib/components/ui/ContextMenu.svelte';
 	import type { MenuItem } from '$lib/components/ui/ContextMenu.svelte';
 	import { toggleView } from '$lib/stores/design-store';
+	import { getVisibleArea, getVisibleElements } from '$lib/utils/viewport-culling';
 
 	let canvasElement: HTMLDivElement;
 	let viewport = { x: 0, y: 0, scale: 1 };
@@ -78,6 +81,27 @@
 	$: allViewElements = $designState.currentPageId && $designState.pages[$designState.currentPageId]
 		? findAllViews($designState.elements, $designState.pages[$designState.currentPageId].canvasElements)
 		: [];
+
+	// Viewport virtualization: Calculate visible area
+	let canvasBounds: DOMRect | null = null;
+	$: visibleArea = getVisibleArea(viewport, canvasBounds, 0.5);
+
+	// Virtualized elements: Only render what's visible in viewport
+	// Uses memoized stores to prevent redundant computations
+	$: visibleRootElements = getVisibleElements(
+		$currentPageRootElementIds,
+		$designState.elements,
+		visibleArea,
+		true, // Always include selected elements
+		$selectedIdsStore
+	);
+
+	// Update canvas bounds when viewport changes or on resize
+	function updateCanvasBounds() {
+		if (canvasElement) {
+			canvasBounds = canvasElement.getBoundingClientRect();
+		}
+	}
 
 	// Context menu state
 	let contextMenu: { x: number; y: number; elementId: string } | null = null;
@@ -181,6 +205,16 @@
 	onMount(async () => {
 		await initialize();
 		setupEventListeners();
+
+		// Initialize canvas bounds for virtualization
+		updateCanvasBounds();
+
+		// Update bounds on window resize
+		window.addEventListener('resize', updateCanvasBounds);
+
+		return () => {
+			window.removeEventListener('resize', updateCanvasBounds);
+		};
 	});
 
 	function setupEventListeners() {
@@ -619,11 +653,9 @@
 			class="canvas-viewport"
 			style="transform: translate({viewport.x}px, {viewport.y}px) scale({viewport.scale});"
 		>
-			<!-- Render all root elements in page.canvasElements array order (first = bottom layer, last = top layer) -->
-			{#each ($designState.currentPageId && $designState.pages[$designState.currentPageId]
-				? $designState.pages[$designState.currentPageId].canvasElements.map(id => $designState.elements[id]).filter(Boolean)
-				: []
-			) as element (element.id)}
+			<!-- Render only visible root elements (virtualized for performance) -->
+			<!-- Viewport culling: Only renders elements visible in current viewport + buffer zone -->
+			{#each visibleRootElements as element (element.id)}
 				<CanvasElement
 					{element}
 					{isPanning}

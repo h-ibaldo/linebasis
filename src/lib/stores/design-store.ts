@@ -94,6 +94,47 @@ export const lastSavedAt: Readable<number | null> = derived(
 );
 
 // ============================================================================
+// Performance-Optimized Derived Stores
+// ============================================================================
+
+/**
+ * Memoized store for current page root elements
+ * Prevents redundant .map() and .filter() operations on every render
+ */
+export const currentPageRootElements: Readable<Element[]> = derived(
+	designState,
+	($designState) => {
+		if (!$designState.currentPageId) return [];
+		const page = $designState.pages[$designState.currentPageId];
+		if (!page) return [];
+
+		return page.canvasElements
+			.map(id => $designState.elements[id])
+			.filter(Boolean);
+	}
+);
+
+/**
+ * Memoized store for current page root element IDs
+ */
+export const currentPageRootElementIds: Readable<string[]> = derived(
+	designState,
+	($designState) => {
+		if (!$designState.currentPageId) return [];
+		const page = $designState.pages[$designState.currentPageId];
+		return page ? page.canvasElements : [];
+	}
+);
+
+/**
+ * Memoized store for selected element IDs (array instead of object lookups)
+ */
+export const selectedElementIds: Readable<string[]> = derived(
+	designState,
+	($designState) => $designState.selectedElementIds
+);
+
+// ============================================================================
 // Initialization
 // ============================================================================
 

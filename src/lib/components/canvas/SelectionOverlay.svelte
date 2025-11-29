@@ -13,7 +13,7 @@
 	import { get } from 'svelte/store';
 	import type { Element, DesignState } from '$lib/types/events';
 	import { designState, moveElement, resizeElement, rotateElement, moveElementsGroup, resizeElementsGroup, rotateElementsGroup, selectElement, selectElements, clearSelection, addToSelection, removeFromSelection, updateElementStyles, reorderElement } from '$lib/stores/design-store';
-	import { interactionState } from '$lib/stores/interaction-store';
+	import { interactionState, updateInteractionStateThrottled, updateInteractionStateImmediate } from '$lib/stores/interaction-store';
 	import { currentTool } from '$lib/stores/tool-store';
 	import { CANVAS_INTERACTION } from '$lib/constants/canvas';
 	import SelectionUI from './SelectionUI.svelte';
@@ -488,7 +488,9 @@
 			}
 		}
 
-		interactionState.set({
+		// Use throttled updates during interactions for better performance
+		// Limits updates to 60fps via requestAnimationFrame
+		updateInteractionStateThrottled({
 			activeElementId,
 			mode: interactionMode,
 			pendingPosition,
