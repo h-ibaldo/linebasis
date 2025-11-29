@@ -2504,9 +2504,11 @@ export function setupKeyboardShortcuts(): (() => void) | undefined {
 	};
 
 	const handleKeyDown = (e: KeyboardEvent) => {
-		// Don't trigger shortcuts if user is typing in an input/textarea
+		// Don't trigger shortcuts if user is typing in an input/textarea/contenteditable
 		const target = e.target as HTMLElement;
-		const isTyping = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA';
+		const isTyping = target.tagName === 'INPUT' ||
+						 target.tagName === 'TEXTAREA' ||
+						 target.isContentEditable;
 
 		const textAction = getTextShortcutAction(e);
 		if (!isTyping && textAction) {

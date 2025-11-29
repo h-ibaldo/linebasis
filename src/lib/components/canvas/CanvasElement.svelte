@@ -52,9 +52,6 @@ type DocumentWithCaret = Document & {
 		$currentTool === 'scale' ? 'crosshair' :
 		'default';
 
-	// Track drag timeout for text elements to allow double-click
-	let dragStartTimeout: ReturnType<typeof setTimeout> | null = null;
-
 	// Handle mousedown - select element and potentially start drag
 	function handleMouseDown(e: MouseEvent) {
 		// If we're in text editing mode, don't handle mousedown
@@ -133,38 +130,18 @@ type DocumentWithCaret = Document & {
 
 		// If scale tool, start scaling from any click (not just handles)
 		// If onStartDrag is provided (from SelectionOverlay), call it
-		if (onStartDrag) {
+		// Don't start drag for text elements with move tool - they should only be dragged by handles
+		// This allows double-click to edit text without interference
+		if (onStartDrag && !(isTextElement && tool === 'move')) {
 			// For scale tool, pass 'se' handle to trigger resize mode with aspect ratio lock
 			const handle = tool === 'scale' ? 'se' : undefined;
-
-			// For text elements with move tool, delay drag to allow double-click detection
-			if (isTextElement && tool === 'move') {
-				// Cancel any existing timeout
-				if (dragStartTimeout) {
-					clearTimeout(dragStartTimeout);
-				}
-
-				// Wait 200ms before starting drag - if double-click happens, this will be cancelled
-				dragStartTimeout = setTimeout(() => {
-					onStartDrag(e, element, handle, elementsToDrag);
-					dragStartTimeout = null;
-				}, 200);
-			} else {
-				// For non-text elements or other tools, start drag immediately
-				onStartDrag(e, element, handle, elementsToDrag);
-			}
+			onStartDrag(e, element, handle, elementsToDrag);
 		}
 	}
 
 	// Handle double-click - enter text editing mode for text elements
 	async function handleDoubleClick(e: MouseEvent) {
 		e.stopPropagation();
-
-		// Cancel pending drag operation
-		if (dragStartTimeout) {
-			clearTimeout(dragStartTimeout);
-			dragStartTimeout = null;
-		}
 
 		// Only text-based elements can be edited
 		const textElements = ['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'span', 'a', 'button', 'label'];
