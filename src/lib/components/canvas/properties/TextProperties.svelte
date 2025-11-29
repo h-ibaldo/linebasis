@@ -5,8 +5,7 @@
 	 * Displays typography properties for text elements (p, h1-h6, span, etc.)
 	 */
 
-	import { updateElement, updateElementTypography, updateElementStyles } from '$lib/stores/design-store';
-	import { startEditingText } from '$lib/stores/interaction-store';
+	import { updateElementTypography, updateElementStyles } from '$lib/stores/design-store';
 	import type { Element } from '$lib/types/events';
 
 	export let element: Element;
@@ -48,49 +47,13 @@
 		{ value: 'justify', label: 'Justify' }
 	];
 
-	// Update content
-	function handleContentChange(e: Event) {
-		const target = e.target as HTMLTextAreaElement;
-		updateElement(element.id, { content: target.value });
-	}
-
 	// Update typography
 	function handleTypographyChange(property: string, value: string) {
 		updateElementTypography(element.id, { [property]: value });
 	}
-
-	// Enter text editing mode
-	function handleEditClick() {
-		startEditingText(element.id);
-		setTimeout(() => {
-			const el = document.querySelector(`[data-element-id="${element.id}"]`);
-			if (el instanceof HTMLElement) {
-				el.focus();
-			}
-		}, 0);
-	}
 </script>
 
 <div class="text-properties">
-	<!-- Content Section -->
-	<section class="property-section">
-		<h3 class="section-title">Content</h3>
-
-		<div class="property-group">
-			<label for="content">Text Content</label>
-			<textarea
-				id="content"
-				value={element.content || ''}
-				on:input={handleContentChange}
-				placeholder="Enter text..."
-				rows="3"
-			/>
-			<button class="edit-button" on:click={handleEditClick}>
-				Edit on Canvas
-			</button>
-		</div>
-	</section>
-
 	<!-- Typography Section -->
 	<section class="property-section">
 		<h3 class="section-title">Typography</h3>

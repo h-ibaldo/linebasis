@@ -8,7 +8,7 @@
 	 * - NO selection or interaction logic (handled by SelectionOverlay)
 	 */
 
-	import { createEventDispatcher } from 'svelte';
+	import { createEventDispatcher, tick } from 'svelte';
 	import {
 		designState,
 		selectElement,
@@ -52,6 +52,9 @@ type DocumentWithCaret = Document & {
 		$currentTool === 'scale' ? 'crosshair' :
 		'default';
 
+	// Track drag timeout for text elements to allow double-click
+	let dragStartTimeout: ReturnType<typeof setTimeout> | null = null;
+
 	// Handle mousedown - select element and potentially start drag
 	function handleMouseDown(e: MouseEvent) {
 		// If we're in text editing mode, don't handle mousedown
@@ -76,6 +79,12 @@ type DocumentWithCaret = Document & {
 			startEditingText(element.id);
 			focusTextEditor(textToolClickPosition);
 			return;
+		}
+
+		// For text elements with move tool, prevent default to allow double-click
+		// This prevents drag from interfering with double-click detection
+		if (isTextElement && tool === 'move') {
+			e.preventDefault();
 		}
 
 		// Handle selection based on Shift key
@@ -128,19 +137,43 @@ type DocumentWithCaret = Document & {
 			// For scale tool, pass 'se' handle to trigger resize mode with aspect ratio lock
 			const handle = tool === 'scale' ? 'se' : undefined;
 
-			// Pass the correct selection (group elements if element belongs to a group)
-			onStartDrag(e, element, handle, elementsToDrag);
+			// For text elements with move tool, delay drag to allow double-click detection
+			if (isTextElement && tool === 'move') {
+				// Cancel any existing timeout
+				if (dragStartTimeout) {
+					clearTimeout(dragStartTimeout);
+				}
+
+				// Wait 200ms before starting drag - if double-click happens, this will be cancelled
+				dragStartTimeout = setTimeout(() => {
+					onStartDrag(e, element, handle, elementsToDrag);
+					dragStartTimeout = null;
+				}, 200);
+			} else {
+				// For non-text elements or other tools, start drag immediately
+				onStartDrag(e, element, handle, elementsToDrag);
+			}
 		}
 	}
 
 	// Handle double-click - enter text editing mode for text elements
-	function handleDoubleClick(e: MouseEvent) {
+	async function handleDoubleClick(e: MouseEvent) {
 		e.stopPropagation();
+
+		// Cancel pending drag operation
+		if (dragStartTimeout) {
+			clearTimeout(dragStartTimeout);
+			dragStartTimeout = null;
+		}
 
 		// Only text-based elements can be edited
 		const textElements = ['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'span', 'a', 'button', 'label'];
 		if (textElements.includes(element.type)) {
 			startEditingText(element.id);
+
+			// Wait for Svelte to re-render with the text editor element
+			await tick();
+
 			focusTextEditor({ x: e.clientX, y: e.clientY });
 			// Attempt to mimic native double-click word selection
 			requestAnimationFrame(() => {
@@ -725,9 +758,13 @@ $: if (!isEditing) {
 
 function focusTextEditor(position?: { x: number; y: number } | null) {
 	hasFocusedEditor = true;
+
+	// Capture the editor element immediately, don't rely on it in RAF
+	const capturedEditor = textEditorElement;
+
 	requestAnimationFrame(() => {
-		const editor =
-			textEditorElement || document.querySelector(`[data-editor-for="${element.id}"]`);
+		// Use captured editor or query DOM as fallback
+		const editor = capturedEditor || document.querySelector(`[data-editor-for="${element.id}"]`);
 		if (!(editor instanceof HTMLElement)) {
 			return;
 		}
