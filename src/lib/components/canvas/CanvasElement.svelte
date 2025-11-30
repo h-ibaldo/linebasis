@@ -912,6 +912,11 @@ function handleContextMenu(e: MouseEvent) {
 		user-select: none;
 		box-sizing: border-box;
 		pointer-events: auto; /* Allow clicks for selection */
+		outline: none; /* Remove browser default focus outline */
+	}
+
+	.canvas-element:focus {
+		outline: none; /* Remove browser default focus outline */
 	}
 
 
@@ -932,6 +937,7 @@ function handleContextMenu(e: MouseEvent) {
 }
 
 .text-content {
+	height: 100%;
 	pointer-events: none;
 }
 
@@ -942,15 +948,13 @@ function handleContextMenu(e: MouseEvent) {
 	user-select: text;
 	-webkit-user-select: text; /* Safari support */
 	-moz-user-select: text; /* Firefox support */
-	outline: 2px solid #3b82f6;
-	outline-offset: 2px;
+	outline: none; /* Remove outline - SelectionUI shows the border */
 	white-space: pre-wrap;
 	pointer-events: auto; /* Ensure editor receives pointer events */
 	position: relative; /* Ensure stacking context */
 }
 
 .text-editor:focus {
-	outline: 2px solid #3b82f6;
-	outline-offset: 2px;
+	outline: none; /* Remove outline - SelectionUI shows the border */
 }
 </style>
