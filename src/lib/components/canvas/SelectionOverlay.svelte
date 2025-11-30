@@ -490,6 +490,8 @@
 
 		// Use throttled updates during interactions for better performance
 		// Limits updates to 60fps via requestAnimationFrame
+		// NOTE: Do NOT include editingElementId here - it's managed exclusively by startEditingText/stopEditingText
+		// Including it causes issues where it gets restored after being cleared
 		updateInteractionStateThrottled({
 			activeElementId,
 			mode: interactionMode,
@@ -499,7 +501,6 @@
 			pendingRadius,
 			pendingCornerRadii: cornerRadii,
 			groupTransforms: groupPendingTransforms,
-			editingElementId: null, // SelectionOverlay doesn't handle text editing
 			hiddenDuringTransition: $interactionState.hiddenDuringTransition // Preserve during reactive updates
 		});
 	}
@@ -3306,8 +3307,7 @@
 	});
 </script>
 
-<!-- Render selection UI (hide when text is being edited, during rotation, during auto layout reordering, or during parent change transition) -->
-	{#if $interactionState.mode !== 'editing-text'}
+<!-- Render selection UI (hide during rotation, during auto layout reordering, or during parent change transition) -->
 	{#if selectedElements.length === 1 && !(interactionMode === 'dragging' && reorderParentId) && interactionMode !== 'rotating' && !$interactionState.hiddenDuringTransition}
 		<!-- Single element selection (hidden during auto layout reordering - ghost shows instead) -->
 		{@const selectedElement = selectedElements[0]}
@@ -3476,7 +3476,6 @@
 			onMouseDown={(e, handle) => startGroupInteraction(e, handle)}
 		/>
 	{/if}
-{/if}
 
 <!-- Rotation angle display - follows cursor -->
 {#if interactionMode === 'rotating' && pendingRotation !== null && currentMouseScreen.x !== 0 && currentMouseScreen.y !== 0}

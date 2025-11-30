@@ -2525,6 +2525,7 @@ export function setupKeyboardShortcuts(): (() => void) | undefined {
 						 target.tagName === 'TEXTAREA' ||
 						 target.isContentEditable;
 
+
 		const textAction = getTextShortcutAction(e);
 		if (!isTyping && textAction) {
 			const applied = applyTextShortcutToSelection(textAction);

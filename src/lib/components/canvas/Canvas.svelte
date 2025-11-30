@@ -26,7 +26,7 @@
 		selectedElementIds as selectedIdsStore
 	} from '$lib/stores/design-store';
 	import { currentTool } from '$lib/stores/tool-store';
-	import { interactionState, startEditingText } from '$lib/stores/interaction-store';
+	import { interactionState, startEditingText, stopEditingText } from '$lib/stores/interaction-store';
 	import { viewport as viewportStore } from '$lib/stores/viewport-store';
 	import { CANVAS_INTERACTION } from '$lib/constants/canvas';
 	import CanvasElement from './CanvasElement.svelte';
@@ -321,6 +321,40 @@
 	function handleMouseDown(e: MouseEvent) {
 		const tool = $currentTool;
 
+		// FIRST: If there's an active text editor, blur it when clicking anywhere (even if mode is already idle)
+		// This ensures blur fires immediately instead of being delayed
+		const activeEditor = document.querySelector('.text-editor[contenteditable="true"]') as HTMLElement;
+		if (activeEditor && !(e.target as HTMLElement).closest('.text-editor')) {
+			activeEditor.blur();
+			// Return to let the blur handler process the exit
+			return;
+		}
+
+		// If in text editing mode and clicking outside the editor, save and exit
+		if ($interactionState.mode === 'editing-text') {
+			const target = e.target as HTMLElement;
+			// Check if click is outside the text editor
+			const clickedEditor = target.closest('.text-editor');
+			if (!clickedEditor) {
+				const editingElementId = $interactionState.editingElementId;
+				if (editingElementId) {
+					const editor = document.querySelector(`[data-editor-for="${editingElementId}"]`) as HTMLElement;
+					if (editor) {
+						// Save content before exiting
+						const newContent = editor.innerHTML || '';
+						const element = $designState.elements[editingElementId];
+						if (element && newContent !== (element.content || '')) {
+							updateElement(editingElementId, { content: newContent });
+						}
+						// Exit editing mode
+						stopEditingText();
+						// Don't process the click further if clicking outside any element
+						return;
+					}
+				}
+			}
+		}
+
 		// Hand tool or Space key = panning (works even over elements)
 		if (tool === 'hand' || isPanning) {
 			isDragging = true;
@@ -337,7 +371,7 @@
 		if ($interactionState.mode === 'editing-text') {
 			const editingElementId = $interactionState.editingElementId;
 			if (editingElementId) {
-				const el = document.querySelector(`[data-element-id="${editingElementId}"]`);
+				const el = document.querySelector(`[data-editor-for="${editingElementId}"]`);
 				if (el instanceof HTMLElement) {
 					el.blur();
 					// Clear selection after a small delay to allow blur event to process
@@ -647,6 +681,7 @@
 		on:mouseleave={handleMouseUp}
 		role="application"
 		aria-label="Page builder canvas"
+		tabindex="-1"
 	>
 		<!-- STYLE: Canvas viewport - transformed container with zoom/pan -->
 		<div

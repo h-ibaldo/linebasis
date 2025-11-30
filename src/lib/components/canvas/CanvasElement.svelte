@@ -130,9 +130,10 @@ type DocumentWithCaret = Document & {
 
 		// If scale tool, start scaling from any click (not just handles)
 		// If onStartDrag is provided (from SelectionOverlay), call it
-		// Don't start drag for text elements with move tool - they should only be dragged by handles
+		// Don't start drag for text elements with move tool WHEN EDITING - they should only be dragged by handles
 		// This allows double-click to edit text without interference
-		if (onStartDrag && !(isTextElement && tool === 'move')) {
+		const isEditingThisElement = $interactionState.editingElementId === element.id;
+		if (onStartDrag && !(isTextElement && tool === 'move' && isEditingThisElement)) {
 			// For scale tool, pass 'se' handle to trigger resize mode with aspect ratio lock
 			const handle = tool === 'scale' ? 'se' : undefined;
 			onStartDrag(e, element, handle, elementsToDrag);
@@ -188,6 +189,13 @@ type DocumentWithCaret = Document & {
 
 			// Set flag to prevent reactive updates during transition
 			justExitedEditing = true;
+
+			// IMMEDIATELY disable contenteditable and remove element to prevent further typing
+			target.contentEditable = 'false';
+			target.blur(); // Ensure focus is removed
+			// Manually remove the editor from DOM since Svelte reactivity is delayed
+			target.remove();
+			textEditorElement = null;
 
 			// Exit editing mode FIRST - this triggers the {#key} block to destroy/recreate
 			stopEditingText();
@@ -714,6 +722,13 @@ type DocumentWithCaret = Document & {
 	// Check if this element is being edited
 	$: isEditing = $interactionState.editingElementId === element.id;
 
+	// Force remove contenteditable when exiting editing mode
+	$: if (!isEditing && textEditorElement) {
+		textEditorElement.contentEditable = 'false';
+		textEditorElement.remove();
+		textEditorElement = null;
+	}
+
 // Ref to the editable element for manual content management
 let textEditorElement: HTMLDivElement | null = null;
 
@@ -726,13 +741,9 @@ let textToolClickPosition: { x: number; y: number } | null = null;
 // Ensure we focus once per editing session
 let hasFocusedEditor = false;
 
-// Ensure text editor shows current content on entry
-$: if (textEditorElement && isEditing && isTextElement && element.children.length === 0) {
-	if (!justExitedEditing) {
-		// Sanitize content to prevent XSS attacks
-		textEditorElement.innerHTML = sanitizeTextContent(element.content || '');
-	}
-}
+// Ensure text editor shows current content on entry - but only ONCE
+// NOTE: We removed the reactive statement here because setting innerHTML destroys DOM content
+// which causes focus to be lost. Instead, we set innerHTML in focusTextEditor BEFORE calling focus()
 
 // Reset flags when leaving editing mode
 $: if (!isEditing) {
@@ -741,57 +752,77 @@ $: if (!isEditing) {
 	hasFocusedEditor = false;
 }
 
-function focusTextEditor(position?: { x: number; y: number } | null) {
+async function focusTextEditor(position?: { x: number; y: number } | null) {
 	hasFocusedEditor = true;
 
-	// Capture the editor element immediately, don't rely on it in RAF
-	const capturedEditor = textEditorElement;
+	// Wait for Svelte to finish all pending DOM updates
+	await tick();
 
-	requestAnimationFrame(() => {
-		// Use captured editor or query DOM as fallback
-		const editor = capturedEditor || document.querySelector(`[data-editor-for="${element.id}"]`);
-		if (!(editor instanceof HTMLElement)) {
-			return;
-		}
+	// Query DOM to ensure we get the mounted element
+	const editor = document.querySelector(`[data-editor-for="${element.id}"]`) as HTMLElement | null;
 
-		editor.focus();
+	if (!editor || !(editor instanceof HTMLElement)) {
+		return;
+	}
 
-		if (!position) {
-			return;
-		}
+	if (!document.contains(editor)) {
+		// Last resort: use setTimeout to give browser time to paint
+		setTimeout(() => {
+			const editorRetry = document.querySelector(`[data-editor-for="${element.id}"]`) as HTMLElement | null;
+			if (editorRetry && document.contains(editorRetry)) {
+				// Set content before focusing
+				if (!justExitedEditing) {
+					editorRetry.innerHTML = sanitizeTextContent(element.content || '');
+				}
+				editorRetry.focus();
+			}
+		}, 0);
+		return;
+	}
 
-		const selection = window.getSelection();
-		if (!selection) {
-			return;
-		}
+	// Set the innerHTML BEFORE focusing to avoid focus being stolen
+	// when the DOM content is replaced
+	if (!justExitedEditing) {
+		editor.innerHTML = sanitizeTextContent(element.content || '');
+	}
 
-		const doc = document as DocumentWithCaret;
-		const rangeFromPoint = doc.caretRangeFromPoint?.(position.x, position.y);
-		const range =
-			rangeFromPoint ||
-			(() => {
-				const caretPosition = doc.caretPositionFromPoint?.(position.x, position.y);
-				if (!caretPosition) return null;
-				const r = document.createRange();
-				r.setStart(caretPosition.offsetNode, caretPosition.offset);
-				r.collapse(true);
-				return r;
-			})();
+	editor.focus();
 
-		if (range) {
-			selection.removeAllRanges();
-			selection.addRange(range);
-		} else {
-			// Fallback: place caret at end
-			selection.removeAllRanges();
-			const fallbackRange = document.createRange();
-			fallbackRange.selectNodeContents(editor);
-			fallbackRange.collapse(false);
-			selection.addRange(fallbackRange);
-		}
+	if (!position) {
+		return;
+	}
 
-		textToolClickPosition = null;
-	});
+	const selection = window.getSelection();
+	if (!selection) {
+		return;
+	}
+
+	const doc = document as DocumentWithCaret;
+	const rangeFromPoint = doc.caretRangeFromPoint?.(position.x, position.y);
+	const range =
+		rangeFromPoint ||
+		(() => {
+			const caretPosition = doc.caretPositionFromPoint?.(position.x, position.y);
+			if (!caretPosition) return null;
+			const r = document.createRange();
+			r.setStart(caretPosition.offsetNode, caretPosition.offset);
+			r.collapse(true);
+			return r;
+		})();
+
+	if (range) {
+		selection.removeAllRanges();
+		selection.addRange(range);
+	} else {
+		// Fallback: place caret at end
+		selection.removeAllRanges();
+		const fallbackRange = document.createRange();
+		fallbackRange.selectNodeContents(editor);
+		fallbackRange.collapse(false);
+		selection.addRange(fallbackRange);
+	}
+
+	textToolClickPosition = null;
 }
 
 $: if (isEditing && textEditorElement && !hasFocusedEditor) {
@@ -832,31 +863,28 @@ function handleContextMenu(e: MouseEvent) {
 			></div>
 		{/if}
 
-		{#if isEditing && isTextElement && element.children.length === 0}
-			<div
-				class="text-editor"
-				bind:this={textEditorElement}
-				data-editor-for={element.id}
-				contenteditable="true"
-				role="textbox"
-				aria-multiline={element.type === 'span' || element.type === 'label' ? 'false' : 'true'}
-				spellcheck="true"
-				on:blur={handleBlur}
-				on:keydown={(e) => {
-					console.log('[text-editor] keydown:', e.key, 'isContentEditable:', e.target?.isContentEditable);
-					handleKeyDown(e);
-				}}
-				on:input={() => {
-					console.log('[text-editor] input event fired');
-				}}
-				on:beforeinput={() => {
-					console.log('[text-editor] beforeinput fired');
-				}}
-				on:focus={() => {
-					console.log('[text-editor] FOCUSED!');
-				}}
-			></div>
-		{:else}
+		<!-- Key block forces re-render when editing state changes -->
+		{#key `${element.id}-${isEditing}`}
+			{#if isEditing && isTextElement && element.children.length === 0}
+				<div
+					class="text-editor"
+					bind:this={textEditorElement}
+					data-editor-for={element.id}
+					contenteditable="true"
+					tabindex="0"
+					role="textbox"
+					aria-multiline={element.type === 'span' || element.type === 'label' ? 'false' : 'true'}
+					spellcheck="true"
+					on:blur={handleBlur}
+					on:keydown={handleKeyDown}
+					on:mousedown={(e) => {
+						e.stopPropagation(); // Prevent drag from starting
+					}}
+					on:click={(e) => {
+						e.stopPropagation(); // Ensure focus isn't stolen
+					}}
+				></div>
+			{:else}
 			<!-- Render element content based on type -->
 			{#if element.type === 'img'}
 			<img src={element.src || ''} alt={element.alt || ''} style={imageStyles} />
@@ -875,6 +903,7 @@ function handleContextMenu(e: MouseEvent) {
 			</div>
 		{/if}
 		{/if}
+		{/key}
 
 		<!-- Render children recursively -->
 		{#each element.children as childId}
@@ -924,7 +953,6 @@ function handleContextMenu(e: MouseEvent) {
 	white-space: pre-wrap;
 	pointer-events: auto; /* Ensure editor receives pointer events */
 	position: relative; /* Ensure stacking context */
-	z-index: 1; /* Above other content */
 }
 
 .text-editor:focus {
