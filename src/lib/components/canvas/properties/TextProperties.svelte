@@ -3,41 +3,20 @@
 	 * TextProperties - Advanced typography and text editing controls
 	 *
 	 * Features:
-	 * - Typography presets (H1-H6, Body, Caption, Small)
-	 * - Custom typography controls
 	 * - Font family, size, weight, style
 	 * - Line height and letter spacing
 	 * - Text alignment and formatting
 	 * - Advanced text controls (word spacing, white space, hyphenation)
+	 * - Selection-based styling (bold, italic, underline on selected text)
 	 */
 
 	import {
 		updateElementTypography,
-		updateElementStyles,
-		applyTypographyPreset
+		updateElementStyles
 	} from '$lib/stores/design-store';
-	import { defaultTokens } from '$lib/types/tokens';
-	import type { Element, TypographyPreset } from '$lib/types/events';
+	import type { Element } from '$lib/types/events';
 
 	export let element: Element;
-
-	// Typography presets with preview
-	const presets: Array<{
-		value: TypographyPreset;
-		label: string;
-		preview: string;
-	}> = [
-		{ value: 'heading-1', label: 'Heading 1', preview: '36px · Bold' },
-		{ value: 'heading-2', label: 'Heading 2', preview: '30px · Bold' },
-		{ value: 'heading-3', label: 'Heading 3', preview: '24px · SemiBold' },
-		{ value: 'heading-4', label: 'Heading 4', preview: '20px · SemiBold' },
-		{ value: 'heading-5', label: 'Heading 5', preview: '18px · SemiBold' },
-		{ value: 'heading-6', label: 'Heading 6', preview: '16px · SemiBold' },
-		{ value: 'body', label: 'Body', preview: '16px · Regular' },
-		{ value: 'caption', label: 'Caption', preview: '14px · Regular' },
-		{ value: 'small', label: 'Small', preview: '12px · Regular' },
-		{ value: 'custom', label: 'Custom', preview: 'Custom settings' }
-	];
 
 	// Font families (common web fonts + Google Fonts)
 	const fontFamilies = [
@@ -120,19 +99,9 @@
 		{ value: 'break-word', label: 'Break Word' }
 	];
 
-	// Current preset
-	$: currentPreset = element.typography.preset || 'custom';
-	$: isCustom = currentPreset === 'custom';
-
-	// Apply preset
-	async function handlePresetChange(preset: TypographyPreset) {
-		await applyTypographyPreset(element.id, preset);
-	}
-
 	// Update typography property
 	function handleTypographyChange(property: string, value: any) {
 		updateElementTypography(element.id, {
-			preset: 'custom', // Switch to custom when manually editing
 			[property]: value
 		});
 	}
@@ -150,25 +119,6 @@
 </script>
 
 <div class="text-properties">
-	<!-- Typography Presets -->
-	<section class="property-section">
-		<h3 class="section-title">Typography Preset</h3>
-
-		<div class="preset-grid">
-			{#each presets as preset}
-				<button
-					class="preset-button"
-					class:active={currentPreset === preset.value}
-					on:click={() => handlePresetChange(preset.value)}
-					title={preset.preview}
-				>
-					<div class="preset-label">{preset.label}</div>
-					<div class="preset-preview">{preset.preview}</div>
-				</button>
-			{/each}
-		</div>
-	</section>
-
 	<!-- Font Properties -->
 	<section class="property-section">
 		<h3 class="section-title">Font</h3>
@@ -573,54 +523,5 @@
 		background: #3b82f6;
 		border-color: #3b82f6;
 		color: white;
-	}
-
-	/* Preset Grid */
-	.preset-grid {
-		display: grid;
-		grid-template-columns: repeat(2, 1fr);
-		gap: 8px;
-	}
-
-	.preset-button {
-		padding: 10px;
-		background: #f9fafb;
-		border: 1px solid #e5e7eb;
-		border-radius: 6px;
-		cursor: pointer;
-		transition: all 0.2s;
-		text-align: left;
-	}
-
-	.preset-button:hover {
-		background: #f3f4f6;
-		border-color: #d1d5db;
-	}
-
-	.preset-button.active {
-		background: #eff6ff;
-		border-color: #3b82f6;
-		box-shadow: 0 0 0 1px #3b82f6;
-	}
-
-	.preset-label {
-		font-size: 12px;
-		font-weight: 600;
-		color: #374151;
-		margin-bottom: 2px;
-	}
-
-	.preset-button.active .preset-label {
-		color: #3b82f6;
-	}
-
-	.preset-preview {
-		font-size: 10px;
-		color: #6b7280;
-		line-height: 1.3;
-	}
-
-	.preset-button.active .preset-preview {
-		color: #2563eb;
 	}
 </style>

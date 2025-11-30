@@ -7,7 +7,6 @@
  */
 
 import { produce } from 'immer';
-import { defaultTokens } from '$lib/types/tokens';
 import type {
 	DesignEvent,
 	DesignState,
@@ -163,8 +162,6 @@ export function reduceEvent(state: DesignState, event: DesignEvent): DesignState
 			return handleUpdateStyles(state, event);
 		case 'UPDATE_TYPOGRAPHY':
 			return handleUpdateTypography(state, event);
-		case 'APPLY_TYPOGRAPHY_PRESET':
-			return handleApplyTypographyPreset(state, event);
 		case 'UPDATE_SPACING':
 			return handleUpdateSpacing(state, event);
 		case 'UPDATE_AUTO_LAYOUT':
@@ -879,56 +876,6 @@ function handleUpdateTypography(state: DesignState, event: UpdateTypographyEvent
 				typography: {
 					...element.typography,
 					...typography
-				}
-			}
-		}
-	};
-}
-
-function handleApplyTypographyPreset(
-	state: DesignState,
-	event: ApplyTypographyPresetEvent
-): DesignState {
-	const { elementId, preset } = event.payload;
-	const element = state.elements[elementId];
-
-	if (!element) return state;
-
-	// Get typography values from preset
-	let typographyValues: Partial<import('$lib/types/events').TypographyStyle> = {
-		preset: preset
-	};
-
-	if (preset !== 'custom') {
-		// Map preset to token values
-		const tokenKey = preset.replace('-', '') as keyof typeof defaultTokens.typography;
-		const presetToken = defaultTokens.typography[tokenKey];
-
-		if (presetToken) {
-			typographyValues = {
-				preset: preset,
-				fontFamily: presetToken.fontFamily,
-				fontSize: presetToken.fontSize,
-				fontWeight: presetToken.fontWeight,
-				lineHeight: presetToken.lineHeight,
-				letterSpacing: presetToken.letterSpacing || '0',
-				// Keep existing alignment and decoration settings
-				textAlign: element.typography.textAlign || 'left',
-				textDecoration: element.typography.textDecoration || 'none',
-				textTransform: element.typography.textTransform || 'none'
-			};
-		}
-	}
-
-	return {
-		...state,
-		elements: {
-			...state.elements,
-			[elementId]: {
-				...element,
-				typography: {
-					...element.typography,
-					...typographyValues
 				}
 			}
 		}

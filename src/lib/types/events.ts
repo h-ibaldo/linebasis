@@ -34,7 +34,6 @@ export type EventType =
 	| 'UPDATE_STYLES'
 	| 'GROUP_UPDATE_STYLES'
 	| 'UPDATE_TYPOGRAPHY'
-	| 'APPLY_TYPOGRAPHY_PRESET'
 	| 'UPDATE_SPACING'
 	| 'UPDATE_AUTO_LAYOUT'
 	// Page operations
@@ -258,14 +257,6 @@ export interface UpdateTypographyEvent extends BaseEvent {
 	};
 }
 
-export interface ApplyTypographyPresetEvent extends BaseEvent {
-	type: 'APPLY_TYPOGRAPHY_PRESET';
-	payload: {
-		elementId: string;
-		preset: TypographyPreset;
-	};
-}
-
 export interface UpdateSpacingEvent extends BaseEvent {
 	type: 'UPDATE_SPACING';
 	payload: {
@@ -390,7 +381,6 @@ export type DesignEvent =
 	| UngroupElementsEvent
 	| UpdateStylesEvent
 	| UpdateTypographyEvent
-	| ApplyTypographyPresetEvent
 	| UpdateSpacingEvent
 	| UpdateAutoLayoutEvent
 	| CreatePageEvent
@@ -472,22 +462,7 @@ export interface ElementStyles {
 	objectFit: 'cover' | 'contain' | 'fill' | 'none' | 'scale-down';
 }
 
-export type TypographyPreset =
-	| 'heading-1'
-	| 'heading-2'
-	| 'heading-3'
-	| 'heading-4'
-	| 'heading-5'
-	| 'heading-6'
-	| 'body'
-	| 'caption'
-	| 'small'
-	| 'custom';
-
 export interface TypographyStyle {
-	// Preset selection
-	preset?: TypographyPreset; // Predefined typography style
-
 	// Font properties
 	fontFamily: string;
 	fontSize: string;

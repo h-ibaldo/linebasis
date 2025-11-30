@@ -42,15 +42,15 @@ The page builder core is **production-ready** with:
 - ✅ Properties panel (background, border, opacity, radius with sync/independent modes)
 - ✅ Multi-selection with "Mixed" value indicators for batch styling
 - ✅ Visual feedback system (ghost positioning, selection indicators, interaction zones)
-- ✅ **Advanced Typography System** (NEW - Nov 29, 2024):
-  - 10 typography presets (H1-H6, Body, Caption, Small) with visual preview grid
+- ✅ **Advanced Typography System** (Updated - Nov 2024):
   - 14 font families (system fonts + Google Fonts: Inter, Roboto, Open Sans, Lato, Montserrat, etc.)
   - Comprehensive controls: font size (17 options), weight (9 levels), style (italic/oblique)
   - Advanced spacing: line height, letter spacing, word spacing, text indent
   - Text formatting: alignment, decoration with style/color, text transform
   - Professional features: white space handling, word break, hyphenation
-  - Smart preset system that auto-applies design token values
-  - Full event sourcing support with APPLY_TYPOGRAPHY_PRESET event
+  - Selection-based text formatting: apply bold, italic, underline to selected text only
+  - Keyboard shortcuts for text formatting (Cmd+B, Cmd+I, Cmd+U, etc.)
+  - Full event sourcing support with UPDATE_TYPOGRAPHY event
 
 ### What's Missing
 
@@ -579,8 +579,7 @@ The following features were implemented during Milestone 5 that significantly ex
 - [x] **Media Properties**: Source input, alt text
 - [x] **Multi-Selection Properties**: All properties with "Mixed" indicators
 - [x] **Position/Size Display**: X/Y position, W×H size
-- [x] **Text Properties - Typography System**: ✨ **NEWLY IMPLEMENTED**
-  - [x] Typography presets (H1-H6, Body, Caption, Small, Custom)
+- [x] **Text Properties - Typography System**: ✨ **FULLY IMPLEMENTED**
   - [x] Font family (System fonts + Google Fonts)
   - [x] Font size, weight, and style (normal, italic, oblique)
   - [x] Line height, letter spacing, word spacing, text indent
@@ -589,12 +588,12 @@ The following features were implemented during Milestone 5 that significantly ex
   - [x] Text transform (uppercase, lowercase, capitalize)
   - [x] Advanced: white space handling, word break, hyphenation
   - [x] Text color with color picker
-  - [x] Visual preset grid with previews
+  - [x] Selection-based styling (apply formatting to selected text only)
 - [ ] **Layout Properties**: Position type, padding, margin
 - [ ] **Effects**: Box shadows, filters
 - [ ] Link to design tokens (e.g., select "Primary" color)
 
-**Note**: Typography system COMPLETE with comprehensive controls and preset support
+**Note**: Typography system COMPLETE with comprehensive controls and selection-based text formatting
 
 #### 6.5 Blocks Window ❌ NOT STARTED
 - [ ] List all user blocks (grouped by source page)
@@ -610,36 +609,40 @@ The following features were implemented during Milestone 5 that significantly ex
 - [ ] Edit tokens inline (opens modal)
 - [ ] Apply token to selected element
 
-**Deliverable**: 🚧 **60% COMPLETE** - Comprehensive typography system with presets, toolbar operational, properties window enhanced with advanced text controls
+**Deliverable**: 🚧 **60% COMPLETE** - Comprehensive typography system with selection-based formatting, toolbar operational, properties window enhanced with advanced text controls
 
-### Typography System Features (Newly Implemented - November 29, 2024)
+### Typography System Features (Implemented - November 2024)
 
 **Professional Typography Controls**:
-- ✅ **10 Typography Presets**: H1-H6, Body, Caption, Small, Custom with visual preview grid
 - ✅ **Comprehensive Font Controls**: Family (14 fonts including Google Fonts), size (17 options), weight (9 levels), style (normal/italic/oblique)
 - ✅ **Advanced Spacing**: Line height, letter spacing, word spacing, text indent with precise control
 - ✅ **Text Formatting**: Alignment (4 modes), decoration (underline/strikethrough/overline with style and color), transform (4 modes)
 - ✅ **Professional Features**: White space handling, word break control, hyphenation support
-- ✅ **Event System**: APPLY_TYPOGRAPHY_PRESET event for preset application, UPDATE_TYPOGRAPHY for custom changes
-- ✅ **Token Integration**: Presets automatically apply values from design tokens (defaultTokens)
-- ✅ **Smart Preset Detection**: Automatically switches to "Custom" when manually editing properties
+- ✅ **Selection-Based Styling**: Apply bold, italic, underline, strikethrough to selected text only using keyboard shortcuts
+- ✅ **Event System**: UPDATE_TYPOGRAPHY for typography changes, fully integrated with event sourcing
 - ✅ **Full Rendering Support**: All typography properties render correctly on canvas via CanvasElement
 
+**Selection-Based Text Formatting Shortcuts**:
+- **Cmd+B**: Bold selected text
+- **Cmd+I**: Italic selected text
+- **Cmd+U**: Underline selected text
+- **Cmd+Shift+X**: Strikethrough selected text
+- **Cmd+Shift+7**: Ordered list
+- **Cmd+Shift+8**: Unordered list
+- **Cmd+Alt+L/T/R/G**: Text alignment (left/center/right/justify)
+- **Cmd+Shift+>/<**: Increase/decrease font size
+
 **Implementation Details**:
-- Extended `TypographyStyle` interface with 9 new properties (fontStyle, textDecorationColor, textDecorationStyle, textIndent, wordSpacing, whiteSpace, wordBreak, hyphens, preset)
-- Added `TypographyPreset` type with 10 preset options
-- Created `ApplyTypographyPresetEvent` for event sourcing
-- Enhanced `TextProperties.svelte` with 626 lines of comprehensive UI (preset grid, font controls, spacing, formatting, advanced)
-- Updated event reducer with `handleApplyTypographyPreset` function
-- Added `applyTypographyPreset` function to design-store
+- Extended `TypographyStyle` interface with 16 typography properties (fontStyle, textDecorationColor, textDecorationStyle, textIndent, wordSpacing, whiteSpace, wordBreak, hyphens, etc.)
+- Enhanced `TextProperties.svelte` with 527 lines of comprehensive UI (font controls, spacing, formatting, advanced)
+- Selection-based formatting in `CanvasElement.svelte` using contenteditable with document.execCommand
 - Updated `CanvasElement.svelte` to render all 16 typography CSS properties
 
 **Code Statistics**:
-- Types: +60 lines (TypographyStyle, TypographyPreset, ApplyTypographyPresetEvent)
-- Event Reducer: +50 lines (preset handler with token mapping)
-- Design Store: +15 lines (applyTypographyPreset function)
-- TextProperties UI: 626 lines (complete rewrite with preset system)
-- CanvasElement Rendering: +7 CSS properties (total 16 typography properties)
+- Types: +50 lines (TypographyStyle interface)
+- TextProperties UI: 527 lines (comprehensive typography controls)
+- CanvasElement: +150 lines (text editing with selection-based formatting)
+- CanvasElement Rendering: 16 typography CSS properties
 
 ---
 
