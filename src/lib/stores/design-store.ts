@@ -901,10 +901,21 @@ function expandSelectionWithGroups(elementIds: string[], state: DesignState): st
 	const seen = new Set<string>();
 	const expanded: string[] = [];
 
+	// Check if any of the elements being selected is currently isolated
+	const isolatedId = get(interactionState).isolatedElementId;
+	const isIsolating = elementIds.length === 1 && isolatedId && elementIds.includes(isolatedId);
+
+	console.log('[expandSelectionWithGroups]', {
+		elementIds,
+		isolatedId,
+		isIsolating
+	});
+
 	for (const id of elementIds) {
 		const element = state.elements[id];
 
-		if (element?.groupId) {
+		// Skip group expansion if this element is isolated
+		if (element?.groupId && !isIsolating) {
 			const group = state.groups[element.groupId];
 			if (group) {
 				for (const memberId of group.elementIds) {

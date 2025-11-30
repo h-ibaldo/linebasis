@@ -1335,8 +1335,16 @@
 		const elementsToUse = passedSelectedElements || selectedElements;
 
 		// Check if we're working with a multi-selection
-		// If multiple elements are selected, this is a group interaction
-		isGroupInteraction = elementsToUse.length > 1;
+		// EXCEPTION: If this element has been isolated from its group, treat as single element
+		const isIsolated = $interactionState.isolatedElementId === element.id;
+		isGroupInteraction = !isIsolated && elementsToUse.length > 1;
+
+		console.log('[SelectionOverlay] handleStartInteraction', {
+			elementId: element.id,
+			isIsolated,
+			elementsToUseLength: elementsToUse.length,
+			isGroupInteraction
+		});
 
 		dragStartScreen = { x: e.clientX, y: e.clientY };
 		hasMovedBeyondThreshold = false; // Reset movement threshold flag

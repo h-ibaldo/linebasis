@@ -20,7 +20,7 @@
 		updateElement,
 		updateElementTypography
 	} from '$lib/stores/design-store';
-import { interactionState, startEditingText, stopEditingText } from '$lib/stores/interaction-store';
+import { interactionState, startEditingText, stopEditingText, isolateElementFromGroup, clearElementIsolation } from '$lib/stores/interaction-store';
 import { sanitizeTextContent } from '$lib/utils/sanitize';
 
 	const dispatch = createEventDispatcher<{ contextmenu: { elementId: string; x: number; y: number } }>();
@@ -52,21 +52,54 @@ type DocumentWithCaret = Document & {
 		$currentTool === 'scale' ? 'crosshair' :
 		'default';
 
+	// Track if this specific element has been isolated from its group
+	// This prevents re-selecting the group when clicking on an isolated element
+	let isIsolatedFromGroup = false;
+
+	// Track last mousedown timestamp to prevent duplicate processing
+	let lastMousedownTime = 0;
+
+	// Reset isolation ONLY when this element is deselected
+	// Don't auto-set isolation to true - only the double-click logic should do that
+	$: {
+		const selectedIds = Array.from($selectedIdsStore);
+		if (!selectedIds.includes(element.id)) {
+			// This element is not selected at all - reset isolation
+			isIsolatedFromGroup = false;
+			// Clear global isolation state if this was the isolated element
+			if ($interactionState.isolatedElementId === element.id) {
+				clearElementIsolation();
+			}
+		}
+	}
+
 	// Handle mousedown - select element and potentially start drag
 	function handleMouseDown(e: MouseEvent) {
+		// Prevent duplicate mousedown processing (debounce rapid events)
+		const now = Date.now();
+		if (now - lastMousedownTime < 50) {
+			console.log('[mousedown] SKIPPING duplicate event within 50ms');
+			return;
+		}
+		lastMousedownTime = now;
+		// Stop propagation FIRST to prevent parent elements from processing this event
+		// This ensures only the directly clicked element handles the mousedown
+		const tool = get(currentTool);
+
+		// Don't stop propagation if hand tool or space panning is active - let canvas handle it
+		if (tool !== 'hand' && !isPanning) {
+			e.stopPropagation();
+		}
+
 		// If we're in text editing mode, don't handle mousedown
 		if ($interactionState.mode === 'editing-text') {
 			return;
 		}
 
-		const tool = get(currentTool);
-
-		// Don't stop propagation if hand tool or space panning is active - let canvas handle it
+		// Already checked above
 		if (tool === 'hand' || isPanning) {
 			return;
 		}
-
-		e.stopPropagation();
 
 		// Text tool: start editing text element immediately on click
 		if (tool === 'text' && isTextElement) {
@@ -106,26 +139,57 @@ type DocumentWithCaret = Document & {
 		const currentSelection = get(selectedElements).map(el => el.id);
 		const isPartOfMultiSelection = currentSelection.length > 1 && currentSelection.includes(element.id);
 
+		// Use the browser's native click count (e.detail) to detect double-clicks
+		// e.detail = 1 for first click, 2 for second click (double), 3 for triple, etc.
+		const mightBeDoubleClick = e.detail >= 2;
+
+		console.log('[mousedown]', {
+			elementId: element.id,
+			detail: e.detail,
+			mightBeDoubleClick,
+			groupId,
+			isPartOfMultiSelection,
+			currentSelection,
+			isIsolatedFromGroup
+		});
+
 		// If clicking on an element that's part of a multi-selection, keep the selection
 		// and start dragging all selected elements. Otherwise, select element(s).
 		let elementsToDrag: Element[] = [];
-		if (!isPartOfMultiSelection) {
-			// If element belongs to a group, select all elements in that group
-			if (groupId && state.groups[groupId]) {
-				const groupElementIds = state.groups[groupId].elementIds;
-				selectElements(groupElementIds);
-				// Get group elements directly from state (store update is synchronous)
-				elementsToDrag = groupElementIds
-					.map(id => state.elements[id])
-					.filter(Boolean);
-			} else {
-				selectElement(element.id);
-				// For single element, just use the clicked element
-				elementsToDrag = [element];
-			}
-		} else {
-			// Already part of multi-selection, use current selection
+
+		// PRIORITY 1: Double-click on grouped element = ALWAYS isolate it
+		if (mightBeDoubleClick && groupId && state.groups[groupId]) {
+			console.log('[ISOLATING] Double-click on grouped element - isolating single element');
+			selectElement(element.id);
+			isIsolatedFromGroup = true;
+			isolateElementFromGroup(element.id); // Notify global state
+			elementsToDrag = [element];
+		}
+		// PRIORITY 2: Element is already isolated from group = keep it isolated
+		else if (isIsolatedFromGroup && currentSelection.includes(element.id)) {
+			console.log('[ISOLATED] Maintaining isolation for already-isolated element');
+			elementsToDrag = [element];
+		}
+		// PRIORITY 3: Element is part of multi-selection = drag all selected
+		else if (isPartOfMultiSelection) {
+			console.log('[MULTI] Element part of multi-selection - dragging all');
 			elementsToDrag = get(selectedElements);
+		}
+		// PRIORITY 4: First click on grouped element = select entire group
+		else if (groupId && state.groups[groupId]) {
+			console.log('[GROUP] First click on grouped element - selecting entire group');
+			const groupElementIds = state.groups[groupId].elementIds;
+			selectElements(groupElementIds);
+			isIsolatedFromGroup = false;
+			elementsToDrag = groupElementIds
+				.map(id => state.elements[id])
+				.filter(Boolean);
+		}
+		// PRIORITY 5: Non-grouped element or any other case = select this element only
+		else {
+			console.log('[SINGLE] Selecting single element');
+			selectElement(element.id);
+			elementsToDrag = [element];
 		}
 
 		// If scale tool, start scaling from any click (not just handles)
@@ -143,22 +207,6 @@ type DocumentWithCaret = Document & {
 	// Handle double-click - enter text editing mode for text elements
 	async function handleDoubleClick(e: MouseEvent) {
 		e.stopPropagation();
-
-		// Check if this element is part of a group
-		const state = get(designState);
-		const clickedElement = state.elements[element.id];
-		const groupId = clickedElement?.groupId;
-
-		// Check if currently selected elements include the whole group
-		const currentSelection = get(selectedElements).map(el => el.id);
-		const isGroupSelected = groupId && state.groups[groupId]?.elementIds.every(id => currentSelection.includes(id));
-
-		// If element is part of a group and the whole group is selected,
-		// isolate this element (select only this one from the group)
-		if (groupId && isGroupSelected && currentSelection.length > 1) {
-			selectElement(element.id);
-			return; // Don't proceed to text editing
-		}
 
 		// Only text-based elements can be edited
 		const textElements = ['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'span', 'a', 'button', 'label'];

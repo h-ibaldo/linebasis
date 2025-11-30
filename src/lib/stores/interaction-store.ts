@@ -21,6 +21,8 @@ export interface InteractionState {
 	editingElementId: string | null;
 	// Hide element during parent change transition to prevent flash
 	hiddenDuringTransition: string | null; // Element ID to hide
+	// Group isolation: when an element from a group is isolated (double-clicked)
+	isolatedElementId: string | null; // Element ID that has been isolated from its group
 }
 
 const initialState: InteractionState = {
@@ -33,7 +35,8 @@ const initialState: InteractionState = {
 	pendingCornerRadii: null,
 	groupTransforms: new Map(),
 	editingElementId: null,
-	hiddenDuringTransition: null
+	hiddenDuringTransition: null,
+	isolatedElementId: null
 };
 
 export const interactionState = writable<InteractionState>(initialState);
@@ -100,5 +103,26 @@ export function stopEditingText(): void {
 		...state,
 		mode: 'idle',
 		editingElementId: null
+	}));
+}
+
+/**
+ * Mark an element as isolated from its group
+ * This tells SelectionOverlay to treat it as a single element
+ */
+export function isolateElementFromGroup(elementId: string): void {
+	interactionState.update((state) => ({
+		...state,
+		isolatedElementId: elementId
+	}));
+}
+
+/**
+ * Clear element isolation (when clicking outside or selecting something else)
+ */
+export function clearElementIsolation(): void {
+	interactionState.update((state) => ({
+		...state,
+		isolatedElementId: null
 	}));
 }
