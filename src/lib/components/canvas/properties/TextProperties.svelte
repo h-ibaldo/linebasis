@@ -14,9 +14,26 @@
 		updateElementTypography,
 		updateElementStyles
 	} from '$lib/stores/design-store';
+	import { interactionState } from '$lib/stores/interaction-store';
 	import type { Element } from '$lib/types/events';
 
 	export let element: Element;
+
+	// Check if this element is being edited and has a text selection
+	function getActiveEditor(): HTMLElement | null {
+		if ($interactionState.editingElementId !== element.id) {
+			return null;
+		}
+		return document.querySelector(`[data-editor-for="${element.id}"]`) as HTMLElement;
+	}
+
+	function hasTextSelection(): boolean {
+		const selection = window.getSelection();
+		if (!selection || selection.rangeCount === 0) return false;
+
+		const range = selection.getRangeAt(0);
+		return !range.collapsed; // Returns true if there's a selection (not just a cursor)
+	}
 
 	// Font families (common web fonts + Google Fonts)
 	const fontFamilies = [
@@ -101,9 +118,117 @@
 
 	// Update typography property
 	function handleTypographyChange(property: string, value: any) {
-		updateElementTypography(element.id, {
-			[property]: value
+		const editor = getActiveEditor();
+
+		// If editing this element and has a text selection, apply to selection only
+		if (editor && hasTextSelection()) {
+			applyStyleToSelection(property, value);
+		} else {
+			// Otherwise apply to entire element
+			updateElementTypography(element.id, {
+				[property]: value
+			});
+		}
+	}
+
+	// Apply style to current text selection using execCommand or DOM manipulation
+	function applyStyleToSelection(property: string, value: any) {
+		const selection = window.getSelection();
+		if (!selection || selection.rangeCount === 0) return;
+
+		// Map typography properties to execCommand or CSS styling
+		switch (property) {
+			case 'fontWeight':
+				if (value === '700' || value === '800' || value === '900') {
+					document.execCommand('bold');
+				} else {
+					// For other weights, we need to wrap in a span
+					wrapSelectionInSpan({ fontWeight: value });
+				}
+				break;
+
+			case 'fontStyle':
+				if (value === 'italic' || value === 'oblique') {
+					document.execCommand('italic');
+				} else {
+					wrapSelectionInSpan({ fontStyle: value });
+				}
+				break;
+
+			case 'textDecoration':
+				if (value.includes('underline')) {
+					document.execCommand('underline');
+				} else if (value.includes('line-through')) {
+					document.execCommand('strikeThrough');
+				} else {
+					wrapSelectionInSpan({ textDecoration: value });
+				}
+				break;
+
+			case 'fontSize':
+				wrapSelectionInSpan({ fontSize: value });
+				break;
+
+			case 'fontFamily':
+				wrapSelectionInSpan({ fontFamily: value });
+				break;
+
+			case 'color':
+				document.execCommand('foreColor', false, value);
+				break;
+
+			case 'textTransform':
+			case 'letterSpacing':
+			case 'wordSpacing':
+			case 'lineHeight':
+				wrapSelectionInSpan({ [property]: value });
+				break;
+
+			default:
+				// For properties that don't apply to selections, apply to whole element
+				updateElementTypography(element.id, {
+					[property]: value
+				});
+		}
+	}
+
+	// Helper: Wrap current selection in a span with inline styles
+	function wrapSelectionInSpan(styles: Record<string, any>) {
+		const selection = window.getSelection();
+		if (!selection || selection.rangeCount === 0) return;
+
+		const range = selection.getRangeAt(0);
+		const selectedContent = range.extractContents();
+
+		// Create span with inline styles
+		const span = document.createElement('span');
+		Object.entries(styles).forEach(([key, value]) => {
+			// Convert camelCase to kebab-case for CSS
+			const cssKey = key.replace(/([A-Z])/g, '-$1').toLowerCase();
+			span.style.setProperty(cssKey, value);
 		});
+
+		span.appendChild(selectedContent);
+		range.insertNode(span);
+
+		// Restore selection
+		selection.removeAllRanges();
+		const newRange = document.createRange();
+		newRange.selectNodeContents(span);
+		selection.addRange(newRange);
+	}
+
+	// Handle color change (supports selection-based styling)
+	function handleColorChange(value: string) {
+		const editor = getActiveEditor();
+
+		// If editing this element and has a text selection, apply to selection only
+		if (editor && hasTextSelection()) {
+			applyStyleToSelection('color', value);
+		} else {
+			// Otherwise apply to entire element
+			updateElementStyles(element.id, { color: value });
+		}
 	}
 
 	// Toggle font style (italic)
@@ -399,12 +524,12 @@
 					type="color"
 					id="color"
 					value={element.styles.color || '#000000'}
-					on:input={(e) => updateElementStyles(element.id, { color: e.currentTarget.value })}
+					on:input={(e) => handleColorChange(e.currentTarget.value)}
 				/>
 				<input
 					type="text"
 					value={element.styles.color || '#000000'}
-					on:input={(e) => updateElementStyles(element.id, { color: e.currentTarget.value })}
+					on:input={(e) => handleColorChange(e.currentTarget.value)}
 					placeholder="#000000"
 				/>
 			</div>
