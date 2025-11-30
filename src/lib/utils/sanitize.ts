@@ -59,16 +59,17 @@ export function sanitizeHtml(
 /**
  * Sanitize HTML content with stricter rules for text editor content
  *
- * This variant allows only basic text formatting tags and removes
- * potentially dangerous attributes like inline styles and scripts.
+ * This variant allows only basic text formatting tags and inline styles
+ * for text formatting (font size, color, family, etc.) while removing
+ * potentially dangerous attributes and scripts.
  *
  * @param html - The HTML string to sanitize
  * @returns Sanitized HTML string with strict rules
  */
 export function sanitizeTextContent(html: string): string {
 	return sanitizeHtml(html, {
-		ALLOWED_TAGS: ['p', 'br', 'strong', 'em', 'u', 's', 'span', 'a'],
-		ALLOWED_ATTR: ['href', 'target', 'rel'],
+		ALLOWED_TAGS: ['p', 'br', 'strong', 'em', 'u', 's', 'span', 'a', 'b', 'i'],
+		ALLOWED_ATTR: ['href', 'target', 'rel', 'style'],
 		ALLOW_DATA_ATTR: false
 	});
 }

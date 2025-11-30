@@ -183,7 +183,7 @@ type DocumentWithCaret = Document & {
 			// Normalize the HTML to remove browser inconsistencies
 			// This helps with comparison and prevents unnecessary updates
 			newContent = newContent
-				.replace(/\s+/g, ' ') // Normalize whitespace
+				.replace(/>\s+</g, '><') // Remove whitespace between tags
 				.replace(/<br\s*\/?>/gi, '<br>') // Normalize br tags
 				.trim();
 
@@ -202,7 +202,7 @@ type DocumentWithCaret = Document & {
 
 			// Normalize the existing content for comparison
 			const normalizedExisting = (element.content || '')
-				.replace(/\s+/g, ' ')
+				.replace(/>\s+</g, '><')
 				.replace(/<br\s*\/?>/gi, '<br>')
 				.trim();
 
