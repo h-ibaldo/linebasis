@@ -12,7 +12,7 @@
 	import { onMount, onDestroy, tick } from 'svelte';
 	import { get } from 'svelte/store';
 	import type { Element, DesignState } from '$lib/types/events';
-	import { designState, moveElement, resizeElement, rotateElement, moveElementsGroup, resizeElementsGroup, rotateElementsGroup, selectElement, selectElements, clearSelection, addToSelection, removeFromSelection, updateElementStyles, reorderElement, duplicateElements } from '$lib/stores/design-store';
+	import { designState, moveElement, resizeElement, rotateElement, moveElementsGroup, resizeElementsGroup, rotateElementsGroup, selectElement, selectElements, clearSelection, addToSelection, removeFromSelection, updateElementStyles, reorderElement, duplicateElements, deleteElements } from '$lib/stores/design-store';
 	import { interactionState, updateInteractionStateThrottled, updateInteractionStateImmediate } from '$lib/stores/interaction-store';
 	import { currentTool } from '$lib/stores/tool-store';
 	import { CANVAS_INTERACTION } from '$lib/constants/canvas';
@@ -43,7 +43,10 @@
 	let resizeHandle: string | null = null;
 	let isGroupInteraction = false; // Track if interacting with multiple elements
 	let hoveredElementId: string | null = null; // Element currently being hovered (for hover border)
-	let isDuplicateDrag = false; // Track if this is an Alt+drag duplication
+	let isDuplicateDrag = false; // Track if Alt key is currently held during drag
+	let originalElementIds: string[] = []; // IDs of original elements before duplication
+	let duplicateElementIds: string[] = []; // IDs of duplicate elements created during Alt+drag
+	let hasDuplicated = false; // Track if duplication has occurred this drag session
 
 	// Pending transform during interaction (for live preview)
 	let pendingPosition: { x: number; y: number } | null = null;
@@ -1730,41 +1733,6 @@
 			}
 		} else {
 			// Drag mode
-
-			// Alt+drag duplication: if Alt key is held, duplicate the selected elements first
-			if (e.altKey) {
-				isDuplicateDrag = true;
-				await duplicateElements();
-				// Wait for the duplication to complete and UI to update
-				await tick();
-				// After duplication, the newly created elements are now selected
-				// Update elementsToUse to reference the new duplicates
-				const newSelectedElements = get(designState).selectedElementIds.map(id => get(designState).elements[id]).filter(Boolean);
-				// Find the new element corresponding to the clicked element
-				const clickedIndex = elementsToUse.findIndex(el => el.id === element.id);
-				if (clickedIndex !== -1 && newSelectedElements[clickedIndex]) {
-					activeElementId = newSelectedElements[clickedIndex].id;
-					element = newSelectedElements[clickedIndex];
-				}
-				// Update elementsToUse for the rest of the drag operation
-				elementsToUse = newSelectedElements;
-				// Recalculate isGroupInteraction for duplicates
-				isGroupInteraction = elementsToUse.length > 1;
-				// Recalculate position and size for the new element
-				const newPos = getDisplayPosition(element);
-				const newSize = getDisplaySize(element);
-				pos = newPos;
-				size = newSize;
-				elementStartCanvas = {
-					x: newPos.x,
-					y: newPos.y,
-					width: newSize.width,
-					height: newSize.height
-				};
-			} else {
-				isDuplicateDrag = false;
-			}
-
 			interactionMode = 'dragging';
 
 			if (isGroupInteraction) {
@@ -2129,6 +2097,61 @@
 		}
 	}
 
+	/**
+	 * Handle Alt key press/release during drag to enable/disable duplication mode
+	 */
+	async function handleAltKeyDuplication(altKeyPressed: boolean) {
+		// Alt key pressed and not yet duplicated
+		if (altKeyPressed && !hasDuplicated) {
+			// Store original element IDs
+			const state = get(designState);
+			originalElementIds = state.selectedElementIds;
+
+			// Duplicate the selected elements
+			await duplicateElements();
+			await tick();
+
+			// Get the newly created duplicate IDs
+			const newState = get(designState);
+			duplicateElementIds = newState.selectedElementIds;
+
+			// Mark as duplicated
+			hasDuplicated = true;
+			isDuplicateDrag = true;
+
+			// Update active element ID to the duplicate
+			if (activeElementId) {
+				const originalIndex = originalElementIds.indexOf(activeElementId);
+				if (originalIndex !== -1 && duplicateElementIds[originalIndex]) {
+					activeElementId = duplicateElementIds[originalIndex];
+				}
+			}
+		}
+		// Alt key released and we had duplicated - cancel duplication
+		else if (!altKeyPressed && hasDuplicated) {
+			// Delete the duplicates
+			await deleteElements(duplicateElementIds);
+			await tick();
+
+			// Re-select the original elements
+			selectElements(originalElementIds);
+			await tick();
+
+			// Update active element ID back to original
+			if (activeElementId && duplicateElementIds.includes(activeElementId)) {
+				const dupIndex = duplicateElementIds.indexOf(activeElementId);
+				if (dupIndex !== -1 && originalElementIds[dupIndex]) {
+					activeElementId = originalElementIds[dupIndex];
+				}
+			}
+
+			// Reset duplication state
+			hasDuplicated = false;
+			isDuplicateDrag = false;
+			duplicateElementIds = [];
+		}
+	}
+
 	// Mouse event handlers
 	function handleMouseDown(e: MouseEvent, element: Element, handle?: string) {
 		startDrag(e, element, handle);
@@ -2156,6 +2179,11 @@
 			if (movedX > CANVAS_INTERACTION.MOVEMENT_THRESHOLD || movedY > CANVAS_INTERACTION.MOVEMENT_THRESHOLD) {
 				hasMovedBeyondThreshold = true;
 			}
+		}
+
+		// Handle Alt+drag duplication during dragging
+		if (interactionMode === 'dragging' && hasMovedBeyondThreshold) {
+			handleAltKeyDuplication(e.altKey);
 		}
 
 		if (interactionMode === 'dragging') {
@@ -3301,6 +3329,9 @@
 		activeElementId = null;
 		isGroupInteraction = false;
 		isDuplicateDrag = false;
+		hasDuplicated = false;
+		originalElementIds = [];
+		duplicateElementIds = [];
 		resizeHandle = null;
 		pendingPosition = null;
 		pendingSize = null;
