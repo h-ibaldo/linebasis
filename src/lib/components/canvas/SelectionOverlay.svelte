@@ -1339,13 +1339,6 @@
 		const isIsolated = $interactionState.isolatedElementId === element.id;
 		isGroupInteraction = !isIsolated && elementsToUse.length > 1;
 
-		console.log('[SelectionOverlay] handleStartInteraction', {
-			elementId: element.id,
-			isIsolated,
-			elementsToUseLength: elementsToUse.length,
-			isGroupInteraction
-		});
-
 		dragStartScreen = { x: e.clientX, y: e.clientY };
 		hasMovedBeyondThreshold = false; // Reset movement threshold flag
 

@@ -13,6 +13,7 @@
 	 */
 
 	import { designState, selectElement, selectElements, toggleVisibility, toggleLock, renameElement, shiftElementLayer, reorderElement, toggleView } from '$lib/stores/design-store';
+	import { isolateElementFromGroup } from '$lib/stores/interaction-store';
 	import FloatingWindow from '$lib/components/ui/FloatingWindow.svelte';
 	import LayerTreeItem from './LayerTreeItem.svelte';
 	import ContextMenu from '$lib/components/ui/ContextMenu.svelte';
@@ -115,6 +116,13 @@
 	}
 
 	function handleSelectElement(elementId: string) {
+		const element = $designState.elements[elementId];
+
+		// If element belongs to a group, isolate it instead of selecting the whole group
+		if (element?.groupId) {
+			isolateElementFromGroup(elementId);
+		}
+
 		selectElement(elementId);
 	}
 

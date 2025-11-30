@@ -905,12 +905,6 @@ function expandSelectionWithGroups(elementIds: string[], state: DesignState): st
 	const isolatedId = get(interactionState).isolatedElementId;
 	const isIsolating = elementIds.length === 1 && isolatedId && elementIds.includes(isolatedId);
 
-	console.log('[expandSelectionWithGroups]', {
-		elementIds,
-		isolatedId,
-		isIsolating
-	});
-
 	for (const id of elementIds) {
 		const element = state.elements[id];
 

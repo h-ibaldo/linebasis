@@ -78,7 +78,6 @@ type DocumentWithCaret = Document & {
 		// Prevent duplicate mousedown processing (debounce rapid events)
 		const now = Date.now();
 		if (now - lastMousedownTime < 50) {
-			console.log('[mousedown] SKIPPING duplicate event within 50ms');
 			return;
 		}
 		lastMousedownTime = now;
@@ -143,23 +142,12 @@ type DocumentWithCaret = Document & {
 		// e.detail = 1 for first click, 2 for second click (double), 3 for triple, etc.
 		const mightBeDoubleClick = e.detail >= 2;
 
-		console.log('[mousedown]', {
-			elementId: element.id,
-			detail: e.detail,
-			mightBeDoubleClick,
-			groupId,
-			isPartOfMultiSelection,
-			currentSelection,
-			isIsolatedFromGroup
-		});
-
 		// If clicking on an element that's part of a multi-selection, keep the selection
 		// and start dragging all selected elements. Otherwise, select element(s).
 		let elementsToDrag: Element[] = [];
 
 		// PRIORITY 1: Double-click on grouped element = ALWAYS isolate it
 		if (mightBeDoubleClick && groupId && state.groups[groupId]) {
-			console.log('[ISOLATING] Double-click on grouped element - isolating single element');
 			selectElement(element.id);
 			isIsolatedFromGroup = true;
 			isolateElementFromGroup(element.id); // Notify global state
@@ -167,17 +155,14 @@ type DocumentWithCaret = Document & {
 		}
 		// PRIORITY 2: Element is already isolated from group = keep it isolated
 		else if (isIsolatedFromGroup && currentSelection.includes(element.id)) {
-			console.log('[ISOLATED] Maintaining isolation for already-isolated element');
 			elementsToDrag = [element];
 		}
 		// PRIORITY 3: Element is part of multi-selection = drag all selected
 		else if (isPartOfMultiSelection) {
-			console.log('[MULTI] Element part of multi-selection - dragging all');
 			elementsToDrag = get(selectedElements);
 		}
 		// PRIORITY 4: First click on grouped element = select entire group
 		else if (groupId && state.groups[groupId]) {
-			console.log('[GROUP] First click on grouped element - selecting entire group');
 			const groupElementIds = state.groups[groupId].elementIds;
 			selectElements(groupElementIds);
 			isIsolatedFromGroup = false;
@@ -187,7 +172,6 @@ type DocumentWithCaret = Document & {
 		}
 		// PRIORITY 5: Non-grouped element or any other case = select this element only
 		else {
-			console.log('[SINGLE] Selecting single element');
 			selectElement(element.id);
 			elementsToDrag = [element];
 		}
