@@ -12,7 +12,7 @@
 	import { onMount, onDestroy, tick } from 'svelte';
 	import { get } from 'svelte/store';
 	import type { Element, DesignState } from '$lib/types/events';
-	import { designState, moveElement, resizeElement, rotateElement, moveElementsGroup, resizeElementsGroup, rotateElementsGroup, selectElement, selectElements, clearSelection, addToSelection, removeFromSelection, updateElementStyles, reorderElement } from '$lib/stores/design-store';
+	import { designState, moveElement, resizeElement, rotateElement, moveElementsGroup, resizeElementsGroup, rotateElementsGroup, selectElement, selectElements, clearSelection, addToSelection, removeFromSelection, updateElementStyles, reorderElement, duplicateElements } from '$lib/stores/design-store';
 	import { interactionState, updateInteractionStateThrottled, updateInteractionStateImmediate } from '$lib/stores/interaction-store';
 	import { currentTool } from '$lib/stores/tool-store';
 	import { CANVAS_INTERACTION } from '$lib/constants/canvas';
@@ -43,6 +43,7 @@
 	let resizeHandle: string | null = null;
 	let isGroupInteraction = false; // Track if interacting with multiple elements
 	let hoveredElementId: string | null = null; // Element currently being hovered (for hover border)
+	let isDuplicateDrag = false; // Track if this is an Alt+drag duplication
 
 	// Pending transform during interaction (for live preview)
 	let pendingPosition: { x: number; y: number } | null = null;
@@ -1729,6 +1730,41 @@
 			}
 		} else {
 			// Drag mode
+
+			// Alt+drag duplication: if Alt key is held, duplicate the selected elements first
+			if (e.altKey) {
+				isDuplicateDrag = true;
+				await duplicateElements();
+				// Wait for the duplication to complete and UI to update
+				await tick();
+				// After duplication, the newly created elements are now selected
+				// Update elementsToUse to reference the new duplicates
+				const newSelectedElements = get(designState).selectedElementIds.map(id => get(designState).elements[id]).filter(Boolean);
+				// Find the new element corresponding to the clicked element
+				const clickedIndex = elementsToUse.findIndex(el => el.id === element.id);
+				if (clickedIndex !== -1 && newSelectedElements[clickedIndex]) {
+					activeElementId = newSelectedElements[clickedIndex].id;
+					element = newSelectedElements[clickedIndex];
+				}
+				// Update elementsToUse for the rest of the drag operation
+				elementsToUse = newSelectedElements;
+				// Recalculate isGroupInteraction for duplicates
+				isGroupInteraction = elementsToUse.length > 1;
+				// Recalculate position and size for the new element
+				const newPos = getDisplayPosition(element);
+				const newSize = getDisplaySize(element);
+				pos = newPos;
+				size = newSize;
+				elementStartCanvas = {
+					x: newPos.x,
+					y: newPos.y,
+					width: newSize.width,
+					height: newSize.height
+				};
+			} else {
+				isDuplicateDrag = false;
+			}
+
 			interactionMode = 'dragging';
 
 			if (isGroupInteraction) {
@@ -3264,6 +3300,7 @@
 		interactionMode = 'idle';
 		activeElementId = null;
 		isGroupInteraction = false;
+		isDuplicateDrag = false;
 		resizeHandle = null;
 		pendingPosition = null;
 		pendingSize = null;
