@@ -144,6 +144,22 @@ type DocumentWithCaret = Document & {
 	async function handleDoubleClick(e: MouseEvent) {
 		e.stopPropagation();
 
+		// Check if this element is part of a group
+		const state = get(designState);
+		const clickedElement = state.elements[element.id];
+		const groupId = clickedElement?.groupId;
+
+		// Check if currently selected elements include the whole group
+		const currentSelection = get(selectedElements).map(el => el.id);
+		const isGroupSelected = groupId && state.groups[groupId]?.elementIds.every(id => currentSelection.includes(id));
+
+		// If element is part of a group and the whole group is selected,
+		// isolate this element (select only this one from the group)
+		if (groupId && isGroupSelected && currentSelection.length > 1) {
+			selectElement(element.id);
+			return; // Don't proceed to text editing
+		}
+
 		// Only text-based elements can be edited
 		const textElements = ['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'span', 'a', 'button', 'label'];
 		if (textElements.includes(element.type)) {
