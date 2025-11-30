@@ -59,17 +59,21 @@ type DocumentWithCaret = Document & {
 	// Track last mousedown timestamp to prevent duplicate processing
 	let lastMousedownTime = 0;
 
-	// Reset isolation ONLY when this element is deselected
-	// Don't auto-set isolation to true - only the double-click logic should do that
+	// Sync local isolation flag with global isolation state
 	$: {
 		const selectedIds = Array.from($selectedIdsStore);
+		const globalIsolatedId = $interactionState.isolatedElementId;
+
 		if (!selectedIds.includes(element.id)) {
 			// This element is not selected at all - reset isolation
 			isIsolatedFromGroup = false;
 			// Clear global isolation state if this was the isolated element
-			if ($interactionState.isolatedElementId === element.id) {
+			if (globalIsolatedId === element.id) {
 				clearElementIsolation();
 			}
+		} else if (globalIsolatedId === element.id) {
+			// This element is isolated (either via double-click or layers panel)
+			isIsolatedFromGroup = true;
 		}
 	}
 
