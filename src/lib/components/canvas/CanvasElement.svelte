@@ -152,27 +152,47 @@ type DocumentWithCaret = Document & {
 
 		// PRIORITY 1: Double-click on grouped element = ALWAYS isolate it
 		if (mightBeDoubleClick && groupId && state.groups[groupId]) {
-			selectElement(element.id);
+			// Set isolation BEFORE selection to ensure SelectionOverlay sees it immediately
 			isIsolatedFromGroup = true;
-			isolateElementFromGroup(element.id); // Notify global state
+			isolateElementFromGroup(element.id);
+			selectElement(element.id);
 			elementsToDrag = [element];
 		}
 		// PRIORITY 2: Element is already isolated from group = keep it isolated
 		else if (isIsolatedFromGroup && currentSelection.includes(element.id)) {
 			elementsToDrag = [element];
 		}
+		// PRIORITY 2.5: Sticky isolation mode - clicking another element from the same group
+		// while an element is already isolated should isolate the clicked element
+		// This MUST come before multi-selection check to prevent group UI flash
+		else if (groupId && state.groups[groupId]) {
+			const currentlyIsolatedId = $interactionState.isolatedElementId;
+			const currentlyIsolatedElement = currentlyIsolatedId ? state.elements[currentlyIsolatedId] : null;
+
+			// Check if we're clicking a different element in the same group as the isolated one
+			if (currentlyIsolatedElement &&
+			    currentlyIsolatedElement.groupId === groupId &&
+			    currentlyIsolatedId !== element.id) {
+				// Sticky isolation: isolate the clicked element instead of selecting whole group
+				// CRITICAL: Set isolation BEFORE selection to ensure SelectionOverlay sees it immediately
+				isIsolatedFromGroup = true;
+				isolateElementFromGroup(element.id);
+				selectElement(element.id);
+				elementsToDrag = [element];
+			}
+			// PRIORITY 4: First click on grouped element = select entire group
+			else {
+				const groupElementIds = state.groups[groupId].elementIds;
+				selectElements(groupElementIds);
+				isIsolatedFromGroup = false;
+				elementsToDrag = groupElementIds
+					.map(id => state.elements[id])
+					.filter(Boolean);
+			}
+		}
 		// PRIORITY 3: Element is part of multi-selection = drag all selected
 		else if (isPartOfMultiSelection) {
 			elementsToDrag = get(selectedElements);
-		}
-		// PRIORITY 4: First click on grouped element = select entire group
-		else if (groupId && state.groups[groupId]) {
-			const groupElementIds = state.groups[groupId].elementIds;
-			selectElements(groupElementIds);
-			isIsolatedFromGroup = false;
-			elementsToDrag = groupElementIds
-				.map(id => state.elements[id])
-				.filter(Boolean);
 		}
 		// PRIORITY 5: Non-grouped element or any other case = select this element only
 		else {
