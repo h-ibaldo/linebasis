@@ -9,7 +9,7 @@
 	 * - Future: measurements, angles, distances, alignment guides
 	 */
 
-	import { onDestroy, tick } from 'svelte';
+	import { onMount, onDestroy, tick } from 'svelte';
 	import { get } from 'svelte/store';
 	import type { Element, DesignState } from '$lib/types/events';
 	import { designState, moveElement, resizeElement, rotateElement, moveElementsGroup, resizeElementsGroup, rotateElementsGroup, selectElement, selectElements, clearSelection, addToSelection, removeFromSelection, updateElementStyles, reorderElement } from '$lib/stores/design-store';
@@ -42,6 +42,7 @@
 	let interactionMode: 'idle' | 'dragging' | 'resizing' | 'rotating' | 'radius' = 'idle';
 	let resizeHandle: string | null = null;
 	let isGroupInteraction = false; // Track if interacting with multiple elements
+	let hoveredElementId: string | null = null; // Element currently being hovered (for hover border)
 
 	// Pending transform during interaction (for live preview)
 	let pendingPosition: { x: number; y: number } | null = null;
@@ -1067,7 +1068,7 @@
 		
 		let currentElement: Element | null = element;
 		while (currentElement?.parentId) {
-			const parent = state.elements[currentElement.parentId];
+			const parent: Element | undefined = state.elements[currentElement.parentId];
 			if (!parent) break;
 			ancestors.push(parent);
 			currentElement = parent;
@@ -1187,6 +1188,7 @@
 				};
 
 				interactionMode = 'dragging';
+				hoveredElementId = null; // Clear hover when starting drag
 				pendingPosition = { x: elementStartCanvas.x, y: elementStartCanvas.y };
 
 				document.addEventListener('mousemove', handleMouseMove);
@@ -1303,6 +1305,8 @@
 
 	// Expose handleMouseDown for CanvasElement
 	export async function startDrag(e: MouseEvent, element: Element, handle?: string, passedSelectedElements?: Element[]) {
+		// Clear hover when starting interaction
+		hoveredElementId = null;
 		const tool = get(currentTool);
 
 		// Don't handle if hand tool or space panning is active - let canvas handle it
@@ -3305,6 +3309,34 @@
 		document.removeEventListener('mousemove', handleMouseMove);
 		document.removeEventListener('mouseup', handleMouseUp);
 	});
+
+	// Set up persistent mouse move listener for hover tracking
+	onMount(() => {
+		function handleHoverMouseMove(e: MouseEvent) {
+			// Only track hover when idle
+			if (interactionMode === 'idle') {
+				const element = document.elementFromPoint(e.clientX, e.clientY);
+				const canvasElement = element?.closest('[data-element-id]') as HTMLElement | null;
+				const elementId = canvasElement?.getAttribute('data-element-id') || null;
+				
+				// Only update if changed to avoid unnecessary reactivity
+				if (hoveredElementId !== elementId) {
+					hoveredElementId = elementId;
+				}
+			} else {
+				// Clear hover when not idle
+				if (hoveredElementId !== null) {
+					hoveredElementId = null;
+				}
+			}
+		}
+
+		document.addEventListener('mousemove', handleHoverMouseMove);
+		
+		return () => {
+			document.removeEventListener('mousemove', handleHoverMouseMove);
+		};
+	});
 </script>
 
 <!-- Render selection UI (hide during rotation, during auto layout reordering, or during parent change transition) -->
@@ -3475,6 +3507,142 @@
 			rotation={0}
 			onMouseDown={(e, handle) => startGroupInteraction(e, handle)}
 		/>
+	{/if}
+
+<!-- Hover border - show border on hover (like Figma/Framer) -->
+{#if hoveredElementId && interactionMode === 'idle' && !$interactionState.hiddenDuringTransition}
+	{@const hoveredElement = $designState.elements[hoveredElementId]}
+	{@const isHoveredSelected = selectedElements.some(el => el.id === hoveredElementId)}
+	{#if hoveredElement && !isHoveredSelected && $interactionState.mode !== 'editing-text'}
+		{@const parent = hoveredElement.parentId ? $designState.elements[hoveredElement.parentId] : null}
+		{@const parentTransform = parent ? (() => {
+			const absPos = getAbsolutePosition(parent);
+			const ancestorRot = getCumulativeRotation(parent);
+			const totalRot = ancestorRot + (parent.rotation || 0);
+			
+			let parentPos = absPos;
+			if (parent.parentId) {
+				const angleRad = ancestorRot * (Math.PI / 180);
+				const cos = Math.cos(angleRad);
+				const sin = Math.sin(angleRad);
+				const halfW = parent.size.width / 2;
+				const halfH = parent.size.height / 2;
+				
+				const rotatedHalfW = halfW * cos - halfH * sin;
+				const rotatedHalfH = halfW * sin + halfH * cos;
+				
+				parentPos = {
+					x: absPos.x - halfW + rotatedHalfW,
+					y: absPos.y - halfH + rotatedHalfH
+				};
+			}
+
+			return {
+				position: parentPos,
+				rotation: totalRot,
+				size: parent.size
+			};
+		})() : null}
+		{@const parentHasAutoLayout = parent?.autoLayout?.enabled || false}
+		{@const childIgnoresAutoLayout = hoveredElement.autoLayout?.ignoreAutoLayout || false}
+		{@const isInAutoLayout = parentHasAutoLayout && !childIgnoresAutoLayout}
+		{@const absPos = getAbsolutePosition(hoveredElement)}
+		{@const pos = isInAutoLayout ? absPos : hoveredElement.position}
+		{@const size = hoveredElement.size}
+		{@const elementRotation = getDisplayRotation(hoveredElement)}
+		{@const cumulativeRotation = isInAutoLayout ? getCumulativeRotation(hoveredElement) : 0}
+		{@const totalRotation = elementRotation + cumulativeRotation}
+		{@const rotation = totalRotation}
+		{@const hasParent = parent !== null && !isInAutoLayout}
+		{@const canvasElement = document.querySelector('.canvas')}
+		{#if canvasElement}
+			{@const canvasRect = canvasElement.getBoundingClientRect()}
+			{@const parentWrapperScreenPos = hasParent && parentTransform ? {
+				x: canvasRect.left + viewport.x + parentTransform.position.x * viewport.scale,
+				y: canvasRect.top + viewport.y + parentTransform.position.y * viewport.scale
+			} : null}
+			{@const screenWidth = size.width * viewport.scale}
+			{@const screenHeight = size.height * viewport.scale}
+			{@const centerX = screenWidth / 2}
+			{@const centerY = screenHeight / 2}
+			{@const parentCenterX = hasParent && parentTransform ? parentTransform.size.width / 2 * viewport.scale : 0}
+			{@const parentCenterY = hasParent && parentTransform ? parentTransform.size.height / 2 * viewport.scale : 0}
+			{@const childScreenPos = hasParent ? {
+				x: pos.x * viewport.scale,
+				y: pos.y * viewport.scale
+			} : {
+				x: canvasRect.left + viewport.x + pos.x * viewport.scale,
+				y: canvasRect.top + viewport.y + pos.y * viewport.scale
+			}}
+
+			{#if hasParent && parentTransform && parentWrapperScreenPos}
+				<!-- Parent wrapper: applies parent's transform -->
+				<div
+					style="
+						position: fixed;
+						left: {parentWrapperScreenPos.x}px;
+						top: {parentWrapperScreenPos.y}px;
+						{parentTransform.rotation ? `transform: rotate(${parentTransform.rotation}deg); transform-origin: ${parentCenterX}px ${parentCenterY}px;` : ''}
+						pointer-events: none;
+					"
+				>
+					<!-- Selection container: positioned relative to parent, rotated by element's own rotation -->
+					<div
+						style="
+							position: absolute;
+							left: {childScreenPos.x}px;
+							top: {childScreenPos.y}px;
+							width: {screenWidth}px;
+							height: {screenHeight}px;
+							{rotation ? `transform: rotate(${rotation}deg); transform-origin: ${centerX}px ${centerY}px;` : ''}
+							pointer-events: none;
+						"
+					>
+						<!-- Hover border -->
+						<div
+							style="
+								position: absolute;
+								left: 0;
+								top: 0;
+								width: 100%;
+								height: 100%;
+								border: 2px solid #3b82f6;
+								pointer-events: none;
+								box-sizing: border-box;
+							"
+						/>
+					</div>
+				</div>
+			{:else}
+				<!-- No parent: positioned absolutely in canvas space -->
+				<div
+					style="
+						position: fixed;
+						left: {childScreenPos.x}px;
+						top: {childScreenPos.y}px;
+						width: {screenWidth}px;
+						height: {screenHeight}px;
+						{rotation ? `transform: rotate(${rotation}deg); transform-origin: ${centerX}px ${centerY}px;` : ''}
+						pointer-events: none;
+					"
+				>
+					<!-- Hover border -->
+					<div
+						style="
+							position: absolute;
+							left: 0;
+							top: 0;
+							width: 100%;
+							height: 100%;
+							border: 2px solid #3b82f6;
+							pointer-events: none;
+							box-sizing: border-box;
+						"
+					/>
+				</div>
+			{/if}
+			{/if}
+		{/if}
 	{/if}
 
 <!-- Rotation angle display - follows cursor -->

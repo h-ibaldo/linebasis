@@ -1032,9 +1032,9 @@
 				on:mousedown={(e) => onMouseDown(e, 'rotate')}
 				role="button"
 				tabindex="0"
-				aria-label="Rotate element"
-			/>
-		{/if}
+			aria-label="Rotate element"
+		/>
+	{/if}
 	</div>
 {/if}
 

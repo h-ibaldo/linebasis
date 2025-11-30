@@ -846,6 +846,8 @@ function handleContextMenu(e: MouseEvent) {
 	class="canvas-element"
 	class:editing-text={isEditing && isTextElement && element.children.length === 0}
 	class:text-element={isTextElement && element.children.length === 0}
+	class:selected={isSelected}
+	class:being-dragged={isBeingDragged}
 	data-element-id={element.id}
 	style={elementStyles}
 	on:mousedown={handleMouseDown}
@@ -854,15 +856,6 @@ function handleContextMenu(e: MouseEvent) {
 	role="button"
 	tabindex={isEditing ? -1 : 0}
 >
-		<!-- Selection indicator - blue outline overlay (Figma/Illustrator style) -->
-		{#if isSelected && !isEditing && !isAutoLayoutChildDragging}
-			<div
-				class="selection-indicator"
-				style="border-radius: inherit;"
-				aria-hidden="true"
-			></div>
-		{/if}
-
 		<!-- Key block forces re-render when editing state changes -->
 		{#key `${element.id}-${isEditing}`}
 			{#if isEditing && isTextElement && element.children.length === 0}
@@ -921,6 +914,7 @@ function handleContextMenu(e: MouseEvent) {
 		pointer-events: auto; /* Allow clicks for selection */
 	}
 
+
 	/* Allow text selection when in editing mode */
 .canvas-element.editing-text {
 	cursor: text;
@@ -959,17 +953,4 @@ function handleContextMenu(e: MouseEvent) {
 	outline: 2px solid #3b82f6;
 	outline-offset: 2px;
 }
-
-	/* Selection indicator - blue outline overlay (Figma/Illustrator style) */
-	.selection-indicator {
-		position: absolute;
-		top: 0;
-		left: 0;
-		width: 100%;
-		height: 100%;
-		border: 2px solid #3b82f6;
-		pointer-events: none;
-		box-sizing: border-box;
-		z-index: 9999; /* Ensure it's on top of element content */
-	}
 </style>
