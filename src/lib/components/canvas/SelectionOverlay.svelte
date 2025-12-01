@@ -2103,52 +2103,75 @@
 	async function handleAltKeyDuplication(altKeyPressed: boolean) {
 		// Alt key pressed and not yet duplicated
 		if (altKeyPressed && !hasDuplicated) {
-			// Store original element IDs
 			const state = get(designState);
+
+			// Store original element IDs (these are what we're currently dragging)
 			originalElementIds = state.selectedElementIds;
 
-			// Duplicate the selected elements
+			// Duplicate the selected elements (creates copies with +20px offset)
 			await duplicateElements();
 			await tick();
 
-			// Get the newly created duplicate IDs
+			// Get the newly created duplicate IDs (these are now selected with +20px offset)
 			const newState = get(designState);
 			duplicateElementIds = newState.selectedElementIds;
+
+			// CRITICAL FIX: Move duplicates to their ORIGINAL starting positions
+			// For single element: use elementStartCanvas
+			// For group: use groupStartElements
+			if (isGroupInteraction && groupStartElements.length > 0) {
+				// Group interaction: move each duplicate to its corresponding original start position
+				for (let i = 0; i < duplicateElementIds.length; i++) {
+					const dupId = duplicateElementIds[i];
+					const origId = originalElementIds[i];
+					const startElement = groupStartElements.find(el => el.id === origId);
+
+					if (startElement) {
+						// Move duplicate to where the original started
+						await moveElement(dupId, {
+							x: startElement.x,
+							y: startElement.y
+						});
+					}
+				}
+			} else {
+				// Single element: move duplicate to elementStartCanvas
+				for (const dupId of duplicateElementIds) {
+					await moveElement(dupId, {
+						x: elementStartCanvas.x,
+						y: elementStartCanvas.y
+					});
+				}
+			}
+
+			await tick();
+
+			// Re-select the ORIGINAL elements (we continue dragging the originals)
+			selectElements(originalElementIds);
+			await tick();
+
+			// Keep activeElementId pointing to the original (don't switch to duplicate)
+			// activeElementId remains unchanged
 
 			// Mark as duplicated
 			hasDuplicated = true;
 			isDuplicateDrag = true;
-
-			// Update active element ID to the duplicate
-			if (activeElementId) {
-				const originalIndex = originalElementIds.indexOf(activeElementId);
-				if (originalIndex !== -1 && duplicateElementIds[originalIndex]) {
-					activeElementId = duplicateElementIds[originalIndex];
-				}
-			}
 		}
 		// Alt key released and we had duplicated - cancel duplication
 		else if (!altKeyPressed && hasDuplicated) {
-			// Delete the duplicates
+			// Delete the duplicates (which are at the starting position)
 			await deleteElements(duplicateElementIds);
 			await tick();
 
-			// Re-select the original elements
+			// Re-select the original elements (they're still being dragged)
 			selectElements(originalElementIds);
 			await tick();
-
-			// Update active element ID back to original
-			if (activeElementId && duplicateElementIds.includes(activeElementId)) {
-				const dupIndex = duplicateElementIds.indexOf(activeElementId);
-				if (dupIndex !== -1 && originalElementIds[dupIndex]) {
-					activeElementId = originalElementIds[dupIndex];
-				}
-			}
 
 			// Reset duplication state
 			hasDuplicated = false;
 			isDuplicateDrag = false;
 			duplicateElementIds = [];
+			originalElementIds = [];
 		}
 	}
 
