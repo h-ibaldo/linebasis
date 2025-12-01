@@ -1760,7 +1760,7 @@ export async function cutElements(): Promise<void> {
 /**
  * Paste elements from clipboard
  */
-export async function pasteElements(): Promise<void> {
+export async function pasteElements(customOffset?: { x: number; y: number } | null): Promise<void> {
 	if (clipboard.length === 0) return;
 
 	const state = get(designState);
@@ -1812,7 +1812,17 @@ export async function pasteElements(): Promise<void> {
 	let offsetX = 0;
 	let offsetY = 0;
 
-	if (isClipboardFromCut) {
+	// Use custom offset if provided (takes precedence)
+	if (customOffset !== undefined) {
+		if (customOffset === null) {
+			// null means no offset (paste in place)
+			offsetX = 0;
+			offsetY = 0;
+		} else {
+			offsetX = customOffset.x;
+			offsetY = customOffset.y;
+		}
+	} else if (isClipboardFromCut) {
 		// For cut elements, paste at the center of the visible screen
 		// Get current viewport state
 		const currentViewport = get(viewport);
@@ -2216,9 +2226,9 @@ export async function pasteElementsInside(): Promise<void> {
 /**
  * Duplicate selected elements
  */
-export async function duplicateElements(): Promise<void> {
+export async function duplicateElements(customOffset?: { x: number; y: number } | null): Promise<void> {
 	copyElements();
-	await pasteElements();
+	await pasteElements(customOffset);
 }
 
 /**

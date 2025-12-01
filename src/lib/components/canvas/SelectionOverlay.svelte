@@ -2103,59 +2103,26 @@
 	async function handleAltKeyDuplication(altKeyPressed: boolean) {
 		// Alt key pressed and not yet duplicated
 		if (altKeyPressed && !hasDuplicated) {
+			// CRITICAL: Set flags IMMEDIATELY to prevent race condition
+			hasDuplicated = true;
+			isDuplicateDrag = true;
+
 			const state = get(designState);
 
 			// Store original element IDs (these are what we're currently dragging)
 			originalElementIds = state.selectedElementIds;
 
-			// Duplicate the selected elements (creates copies with +20px offset)
-			await duplicateElements();
+			// Duplicate the selected elements IN PLACE (no offset - prevents visual flash)
+			await duplicateElements(null);
 			await tick();
 
-			// Get the newly created duplicate IDs (these are now selected with +20px offset)
+			// Get the newly created duplicate IDs (these are now selected at same position as originals)
 			const newState = get(designState);
 			duplicateElementIds = newState.selectedElementIds;
-
-			// CRITICAL FIX: Move duplicates to their ORIGINAL starting positions
-			// For single element: use elementStartCanvas
-			// For group: use groupStartElements
-			if (isGroupInteraction && groupStartElements.length > 0) {
-				// Group interaction: move each duplicate to its corresponding original start position
-				for (let i = 0; i < duplicateElementIds.length; i++) {
-					const dupId = duplicateElementIds[i];
-					const origId = originalElementIds[i];
-					const startElement = groupStartElements.find(el => el.id === origId);
-
-					if (startElement) {
-						// Move duplicate to where the original started
-						await moveElement(dupId, {
-							x: startElement.x,
-							y: startElement.y
-						});
-					}
-				}
-			} else {
-				// Single element: move duplicate to elementStartCanvas
-				for (const dupId of duplicateElementIds) {
-					await moveElement(dupId, {
-						x: elementStartCanvas.x,
-						y: elementStartCanvas.y
-					});
-				}
-			}
-
-			await tick();
 
 			// Re-select the ORIGINAL elements (we continue dragging the originals)
 			selectElements(originalElementIds);
 			await tick();
-
-			// Keep activeElementId pointing to the original (don't switch to duplicate)
-			// activeElementId remains unchanged
-
-			// Mark as duplicated
-			hasDuplicated = true;
-			isDuplicateDrag = true;
 		}
 		// Alt key released and we had duplicated - cancel duplication
 		else if (!altKeyPressed && hasDuplicated) {
