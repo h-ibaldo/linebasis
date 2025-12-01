@@ -2197,7 +2197,8 @@
 
 				// Only check for parent changes and calculate reorder index if we've moved beyond threshold
 				// This prevents unwanted reordering on small mouse movements (clicks)
-				if (hasMovedBeyondThreshold) {
+				// IMPORTANT: Skip parent detection during Alt+drag duplication to keep both elements in same parent
+				if (hasMovedBeyondThreshold && !isDuplicateDrag) {
 					// Check if dragging into a different auto layout parent
 					const state = get(designState);
 					const draggedElement = state.elements[activeElementId];
@@ -2285,7 +2286,8 @@
 				}
 				// Detect potential drop parent for single element drags (not groups, not in auto layout mode)
 				// Only check after moving beyond threshold to avoid unwanted reordering on clicks
-				if (!isGroupInteraction && activeElementId && tempPendingPosition && hasMovedBeyondThreshold) {
+				// IMPORTANT: Skip parent detection during Alt+drag duplication to keep both elements in same parent
+				if (!isGroupInteraction && activeElementId && tempPendingPosition && hasMovedBeyondThreshold && !isDuplicateDrag) {
 					// Get the dragged element's size to check for overlap with potential parents
 					const draggedElement = state.elements[activeElementId];
 					if (draggedElement) {
@@ -3097,7 +3099,8 @@
 						// This applies to both auto layout and non-auto layout drags
 						// IMPORTANT: Only process parent changes if we actually moved beyond threshold
 						// and detected a parent (hasMovedBeyondThreshold ensures potentialDropParentId was calculated)
-						if (hasMovedBeyondThreshold && potentialDropParentId !== originalParentId) {
+						// IMPORTANT: Prevent parent changes during Alt+drag duplication - both original and duplicate must stay in same parent
+						if (hasMovedBeyondThreshold && potentialDropParentId !== originalParentId && !isDuplicateDrag) {
 							// Parent changed - need to update parent and position
 							const state_for_drop = get(designState);
 							const newParent = potentialDropParentId ? state_for_drop.elements[potentialDropParentId] : null;
