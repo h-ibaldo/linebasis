@@ -20,7 +20,7 @@ import {
 } from './event-store';
 import { reduceEvents, applyEventsIncremental, getInitialState } from './event-reducer';
 import { currentTool } from './tool-store';
-import { interactionState, startEditingText } from './interaction-store';
+import { interactionState, startEditingText, clearElementIsolation, isolateElementFromGroup } from './interaction-store';
 import { viewport, screenToCanvas } from './viewport-store';
 
 // ============================================================================
@@ -903,13 +903,31 @@ function expandSelectionWithGroups(elementIds: string[], state: DesignState): st
 
 	// Check if any of the elements being selected is currently isolated
 	const isolatedId = get(interactionState).isolatedElementId;
-	const isIsolating = elementIds.length === 1 && isolatedId && elementIds.includes(isolatedId);
+
+	// If an element is isolated, check if we're in "sticky isolation mode"
+	// This happens when:
+	// 1. An element from a group is isolated (isolatedId exists)
+	// 2. We're adding more elements from the same group
+	const isolatedElement = isolatedId ? state.elements[isolatedId] : null;
+	const isolatedGroupId = isolatedElement?.groupId;
+
+	// Check if ANY element being added is from the same group as the isolated element
+	const isAddingFromIsolatedGroup = isolatedGroupId && elementIds.some(id => {
+		const el = state.elements[id];
+		return el?.groupId === isolatedGroupId;
+	});
 
 	for (const id of elementIds) {
 		const element = state.elements[id];
 
-		// Skip group expansion if this element is isolated
-		if (element?.groupId && !isIsolating) {
+		// Skip group expansion if:
+		// 1. This element is the isolated one, OR
+		// 2. We're adding elements from the same group as the isolated element (sticky isolation)
+		const shouldSkipGroupExpansion =
+			(element?.groupId && isolatedId && element.groupId === isolatedGroupId) ||
+			(element?.groupId && isAddingFromIsolatedGroup && element.groupId === isolatedGroupId);
+
+		if (element?.groupId && !shouldSkipGroupExpansion) {
 			const group = state.groups[element.groupId];
 			if (group) {
 				for (const memberId of group.elementIds) {
@@ -976,18 +994,57 @@ export function addToSelection(elementId: string): void {
 export function removeFromSelection(elementId: string): void {
 	storeState.update((state) => {
 		const element = state.designState.elements[elementId];
+		const isolatedId = get(interactionState).isolatedElementId;
+		const isolatedElement = isolatedId ? state.designState.elements[isolatedId] : null;
+		const isolatedGroupId = isolatedElement?.groupId;
+
+		// Check if we're in sticky isolation mode (removing an element from an isolated group)
+		const isRemovingFromIsolatedGroup =
+			element?.groupId &&
+			isolatedGroupId === element.groupId;
+
+		// If in sticky isolation mode, only remove this specific element
+		// Otherwise, remove all group members
 		const groupMemberIds =
-			element?.groupId && state.designState.groups[element.groupId]
+			element?.groupId && state.designState.groups[element.groupId] && !isRemovingFromIsolatedGroup
 				? new Set(state.designState.groups[element.groupId].elementIds)
 				: new Set([elementId]);
+
+		const newSelectedIds = state.designState.selectedElementIds.filter(
+			(id) => !groupMemberIds.has(id)
+		);
+
+		// Smart isolation state management:
+		// - If selection becomes empty, clear isolation
+		// - If removing the isolated element but others from same group remain, update isolatedElementId to one of them
+		// - If no elements from the isolated group remain, clear isolation
+		if (isolatedId && isolatedGroupId) {
+			if (newSelectedIds.length === 0) {
+				// Selection is empty, clear isolation
+				clearElementIsolation();
+			} else if (groupMemberIds.has(isolatedId)) {
+				// We're removing the currently isolated element
+				// Check if any other elements from the same group are still selected
+				const remainingFromGroup = newSelectedIds.filter(id => {
+					const el = state.designState.elements[id];
+					return el?.groupId === isolatedGroupId;
+				});
+
+				if (remainingFromGroup.length > 0) {
+					// Update isolation to point to one of the remaining elements
+					isolateElementFromGroup(remainingFromGroup[0]);
+				} else {
+					// No elements from the isolated group remain, clear isolation
+					clearElementIsolation();
+				}
+			}
+		}
 
 		return {
 			...state,
 			designState: {
 				...state.designState,
-				selectedElementIds: state.designState.selectedElementIds.filter(
-					(id) => !groupMemberIds.has(id)
-				)
+				selectedElementIds: newSelectedIds
 			}
 		};
 	});

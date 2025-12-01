@@ -1339,9 +1339,25 @@
 		const elementsToUse = passedSelectedElements || selectedElements;
 
 		// Check if we're working with a multi-selection
-		// EXCEPTION: If this element has been isolated from its group, treat as single element
-		const isIsolated = $interactionState.isolatedElementId === element.id;
-		isGroupInteraction = !isIsolated && elementsToUse.length > 1;
+		// EXCEPTION: If this is a single isolated element (not part of multi-isolated-element selection)
+		// In "sticky isolation mode", multiple elements from the same group can be isolated together
+		const state = get(designState);
+		const clickedElement = state.elements[element.id];
+		const isolatedId = $interactionState.isolatedElementId;
+		const isolatedElement = isolatedId ? state.elements[isolatedId] : null;
+
+		// Check if we're in sticky isolation mode (multiple elements from same group are isolated)
+		const isStickyIsolationMode =
+			clickedElement?.groupId &&
+			isolatedElement?.groupId === clickedElement.groupId &&
+			elementsToUse.length > 1 &&
+			elementsToUse.every(el => el.groupId === clickedElement.groupId);
+
+		// Enable group interaction if:
+		// 1. Multiple elements are selected AND
+		// 2. Either we're NOT in isolation mode OR we're in sticky isolation mode
+		const isSingleIsolated = isolatedId === element.id && elementsToUse.length === 1;
+		isGroupInteraction = !isSingleIsolated && elementsToUse.length > 1;
 
 		dragStartScreen = { x: e.clientX, y: e.clientY };
 		hasMovedBeyondThreshold = false; // Reset movement threshold flag
