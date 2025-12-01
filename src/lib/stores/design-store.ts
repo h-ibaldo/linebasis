@@ -1778,6 +1778,7 @@ export async function pasteElements(customOffset?: { x: number; y: number } | nu
 		const selectedElement = selected[0];
 		const clipboardIds = new Set(clipboard.map(el => el.id));
 
+
 		// Check if selected element is one of the copied elements
 		if (clipboardIds.has(selectedElement.id)) {
 			// Paste as sibling of selected element
@@ -1999,6 +2000,18 @@ export async function pasteElements(customOffset?: { x: number; y: number } | nu
 				}
 			});
 		}
+		// Preserve groupId if element belongs to a group
+		if (element.groupId) {
+			dispatch({
+				id: uuidv4(),
+				type: 'GROUP_ELEMENTS',
+				timestamp: Date.now(),
+				payload: {
+					groupId: element.groupId,
+					elementIds: [newElementId]
+				}
+			});
+		}
 
 		// Recursively paste children (synchronous)
 		const children = clipboard.filter(el => el.parentId === element.id);
@@ -2199,6 +2212,18 @@ export async function pasteElementsInside(): Promise<void> {
 							href: element.href,
 							src: element.src
 						}
+					}
+				});
+			}
+			// Preserve groupId if element belongs to a group
+			if (element.groupId) {
+				dispatch({
+					id: uuidv4(),
+					type: 'GROUP_ELEMENTS',
+					timestamp: Date.now(),
+					payload: {
+						groupId: element.groupId,
+						elementIds: [newElementId]
 					}
 				});
 			}
