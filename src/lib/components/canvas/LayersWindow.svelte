@@ -19,8 +19,43 @@
 	import ContextMenu from '$lib/components/ui/ContextMenu.svelte';
 	import type { Element, Group } from '$lib/types/events';
 	import type { MenuItem } from '$lib/components/ui/ContextMenu.svelte';
+	import { onMount, tick } from 'svelte';
 
 	$: selectedIds = $designState.selectedElementIds;
+
+	// Auto-scroll to selected element
+	let layersPanelElement: HTMLElement;
+	let previousSelectedIds: string[] = [];
+
+	// Watch for selection changes and scroll to newly selected element
+	$: if (selectedIds.length > 0 && !arraysEqual(selectedIds, previousSelectedIds)) {
+		scrollToSelectedElement(selectedIds[0]); // Scroll to first selected element
+		previousSelectedIds = [...selectedIds];
+	}
+
+	function arraysEqual(a: string[], b: string[]): boolean {
+		if (a.length !== b.length) return false;
+		return a.every((val, index) => val === b[index]);
+	}
+
+	async function scrollToSelectedElement(elementId: string) {
+		// Wait for DOM to update
+		await tick();
+
+		if (!layersPanelElement) return;
+
+		// Find the layer item in the DOM
+		const layerItem = layersPanelElement.querySelector(`[data-layer-id="${elementId}"]`);
+
+		if (layerItem) {
+			// Scroll the item into view with smooth behavior
+			layerItem.scrollIntoView({
+				behavior: 'smooth',
+				block: 'nearest',
+				inline: 'nearest'
+			});
+		}
+	}
 
 	// Drag and drop state
 	let draggedElementId: string | null = null;
@@ -389,7 +424,7 @@
 	minWidth={200}
 	maxWidth={300}
 >
-	<div class="layers-panel">
+	<div class="layers-panel" bind:this={layersPanelElement}>
 		{#if !hasElements}
 			<div class="no-elements">
 				<p>No elements</p>

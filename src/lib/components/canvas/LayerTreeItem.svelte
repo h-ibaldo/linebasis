@@ -238,7 +238,7 @@
 	}
 </script>
 
-<div class="layer-item" style="padding-left: {depth * 16}px">
+<div class="layer-item" style="padding-left: {depth * 16}px" data-layer-id={element.id}>
 	<!-- Drop indicator before -->
 	{#if dropPosition === 'before'}
 		<div class="drop-indicator drop-before"></div>
