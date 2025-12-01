@@ -1893,10 +1893,20 @@ export async function pasteElements(customOffset?: { x: number; y: number } | nu
 				// Position doesn't matter, auto layout will handle it
 				position = { x: 0, y: 0 };
 			} else if (parentElement) {
-				// Parent doesn't have auto layout -> paste at center of parent
-				const centerX = parentElement.size.width / 2 - element.size.width / 2;
-				const centerY = parentElement.size.height / 2 - element.size.height / 2;
-				position = { x: centerX, y: centerY };
+				// Parent doesn't have auto layout
+				// Check if pasting as sibling (element's original parent matches new parent)
+				if (element.parentId === newParentId) {
+					// Pasting as sibling in same parent -> maintain position with offset
+					position = {
+						x: element.position.x + offsetX,
+						y: element.position.y + offsetY
+					};
+				} else {
+					// Pasting into different parent -> paste at center of parent
+					const centerX = parentElement.size.width / 2 - element.size.width / 2;
+					const centerY = parentElement.size.height / 2 - element.size.height / 2;
+					position = { x: centerX, y: centerY };
+				}
 			} else {
 				// Fallback if parent not found
 				position = { x: element.position.x, y: element.position.y };
