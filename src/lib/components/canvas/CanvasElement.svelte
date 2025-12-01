@@ -122,6 +122,24 @@ type DocumentWithCaret = Document & {
 
 		// Handle selection based on Shift key
 		if (e.shiftKey) {
+			// Check if this element belongs to a group and if another member is already isolated
+			const state = get(designState);
+			const clickedElement = state.elements[element.id];
+			const groupId = clickedElement?.groupId;
+			const currentlyIsolatedId = $interactionState.isolatedElementId;
+			const currentlyIsolatedElement = currentlyIsolatedId ? state.elements[currentlyIsolatedId] : null;
+
+			// If clicking a group element while another element from the same group is isolated,
+			// isolate this element too (sticky isolation for multi-selection)
+			if (groupId && state.groups[groupId] &&
+			    currentlyIsolatedElement &&
+			    currentlyIsolatedElement.groupId === groupId &&
+			    currentlyIsolatedId !== element.id) {
+				// Isolate this element for multi-selection within the group
+				isIsolatedFromGroup = true;
+				isolateElementFromGroup(element.id);
+			}
+
 			// Shift+click: toggle element in selection
 			const currentSelection = get(selectedElements).map(el => el.id);
 			if (currentSelection.includes(element.id)) {
@@ -158,9 +176,24 @@ type DocumentWithCaret = Document & {
 			selectElement(element.id);
 			elementsToDrag = [element];
 		}
-		// PRIORITY 2: Element is already isolated from group = keep it isolated
+		// PRIORITY 2: Element is already isolated from group
+		// Check if this is part of a multi-selection of isolated elements from the same group
 		else if (isIsolatedFromGroup && currentSelection.includes(element.id)) {
-			elementsToDrag = [element];
+			// If multiple elements are selected and they're all from the same group,
+			// drag all of them together (sticky isolation mode)
+			if (isPartOfMultiSelection && groupId && state.groups[groupId]) {
+				const allFromSameGroup = currentSelection.every(id => {
+					const el = state.elements[id];
+					return el?.groupId === groupId;
+				});
+				if (allFromSameGroup) {
+					elementsToDrag = get(selectedElements);
+				} else {
+					elementsToDrag = [element];
+				}
+			} else {
+				elementsToDrag = [element];
+			}
 		}
 		// PRIORITY 2.5: Sticky isolation mode - clicking another element from the same group
 		// while an element is already isolated should isolate the clicked element
@@ -178,6 +211,7 @@ type DocumentWithCaret = Document & {
 				isIsolatedFromGroup = true;
 				isolateElementFromGroup(element.id);
 				selectElement(element.id);
+				// If this creates a multi-selection, drag all selected elements
 				elementsToDrag = [element];
 			}
 			// PRIORITY 4: First click on grouped element = select entire group
