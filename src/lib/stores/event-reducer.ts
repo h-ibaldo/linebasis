@@ -708,11 +708,17 @@ function handleGroupUpdateStyles(state: DesignState, event: GroupUpdateStylesEve
 function handleGroupElements(state: DesignState, event: GroupElementsEvent): DesignState {
 	const { groupId, elementIds } = event.payload;
 
-	// Create the group
-	const group: Group = {
-		id: groupId,
-		elementIds
-	};
+	// Check if group already exists - if so, add elements to it instead of replacing
+	const existingGroup = state.groups[groupId];
+	const group: Group = existingGroup
+		? {
+				id: groupId,
+				elementIds: [...existingGroup.elementIds, ...elementIds]
+		  }
+		: {
+				id: groupId,
+				elementIds
+		  };
 
 	const elementsToGroup = elementIds
 		.map(id => state.elements[id])
