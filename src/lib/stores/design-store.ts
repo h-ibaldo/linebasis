@@ -2016,21 +2016,19 @@ export async function pasteElements(customOffset?: { x: number; y: number } | nu
 					};
 				} else {
 					// Pasting into different parent -> paste at center of parent
-				if (element.groupId && groupOffsets.has(element.groupId)) {
-					// Apply group offset while maintaining relative position
-					const offset = groupOffsets.get(element.groupId)!;
-					position = {
-						x: element.position.x + offset.x,
-						y: element.position.y + offset.y
-					};
-				} else {
-					// Ungrouped element -> center it
-					const centerX = parentElement.size.width / 2 - element.size.width / 2;
-					const centerY = parentElement.size.height / 2 - element.size.height / 2;
-					position = { x: centerX, y: centerY };
-				}
-					const centerY = parentElement.size.height / 2 - element.size.height / 2;
-					position = { x: centerX, y: centerY };
+					if (element.groupId && groupOffsets.has(element.groupId)) {
+						// Apply group offset while maintaining relative position
+						const offset = groupOffsets.get(element.groupId)!;
+						position = {
+							x: element.position.x + offset.x,
+							y: element.position.y + offset.y
+						};
+					} else {
+						// Ungrouped element -> center it
+						const centerX = parentElement.size.width / 2 - element.size.width / 2;
+						const centerY = parentElement.size.height / 2 - element.size.height / 2;
+						position = { x: centerX, y: centerY };
+					}
 				}
 			} else {
 				// Fallback if parent not found
