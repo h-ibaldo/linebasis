@@ -1861,6 +1861,17 @@ export async function pasteElements(customOffset?: { x: number; y: number } | nu
 	try {
 		// Create a map from old IDs to new IDs
 		const oldToNewIdMap = new Map<string, string>();
+		const oldToNewGroupIdMap = new Map<string, string>(); // Map old group IDs to new group IDs
+
+		// Generate new group IDs for all groups in clipboard
+		// This prevents pasted elements from being linked to original groups
+		const clipboardGroupIds = new Set<string>();
+		for (const element of clipboard) {
+			if (element.groupId && !clipboardGroupIds.has(element.groupId)) {
+				clipboardGroupIds.add(element.groupId);
+				oldToNewGroupIdMap.set(element.groupId, uuidv4());
+			}
+		}
 
 		// Identify root elements (elements whose parent is not in clipboard or is null)
 		const clipboardIds = new Set(clipboard.map(el => el.id));
@@ -2057,14 +2068,15 @@ export async function pasteElements(customOffset?: { x: number; y: number } | nu
 				}
 			});
 		}
-		// Preserve groupId if element belongs to a group
+		// Preserve groupId if element belongs to a group (use new group ID)
 		if (element.groupId) {
+			const newGroupId = oldToNewGroupIdMap.get(element.groupId) || element.groupId;
 			dispatch({
 				id: uuidv4(),
 				type: 'GROUP_ELEMENTS',
 				timestamp: Date.now(),
 				payload: {
-					groupId: element.groupId,
+					groupId: newGroupId,
 					elementIds: [newElementId]
 				}
 			});
@@ -2148,12 +2160,23 @@ export async function pasteElementsInside(): Promise<void> {
 
 	try {
 		const oldToNewIdMap = new Map<string, string>();
+		const oldToNewGroupIdMap = new Map<string, string>(); // Map old group IDs to new group IDs
 		const clipboardIds = new Set(clipboard.map(el => el.id));
 		const rootElements = clipboard.filter(el => !el.parentId || !clipboardIds.has(el.parentId));
 
 		// Calculate group offsets for root elements before pasting
 		// This ensures groups maintain their internal positioning when centered in parent
 		const groupOffsets = new Map<string, { x: number; y: number }>();
+
+		// Generate new group IDs for all groups in clipboard
+		// This prevents pasted elements from being linked to original groups
+		const clipboardGroupIds = new Set<string>();
+		for (const element of clipboard) {
+			if (element.groupId && !clipboardGroupIds.has(element.groupId)) {
+				clipboardGroupIds.add(element.groupId);
+				oldToNewGroupIdMap.set(element.groupId, uuidv4());
+			}
+		}
 
 		// Group root elements by groupId
 		const groupedRoots = new Map<string, Element[]>();
