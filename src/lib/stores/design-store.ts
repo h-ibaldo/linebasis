@@ -2151,6 +2151,59 @@ export async function pasteElementsInside(): Promise<void> {
 		const clipboardIds = new Set(clipboard.map(el => el.id));
 		const rootElements = clipboard.filter(el => !el.parentId || !clipboardIds.has(el.parentId));
 
+		// Calculate group offsets for root elements before pasting
+		// This ensures groups maintain their internal positioning when centered in parent
+		const groupOffsets = new Map<string, { x: number; y: number }>();
+
+		// Group root elements by groupId
+		const groupedRoots = new Map<string, Element[]>();
+		const ungroupedRoots: Element[] = [];
+
+		for (const element of rootElements) {
+			if (element.groupId) {
+				const group = groupedRoots.get(element.groupId) || [];
+				group.push(element);
+				groupedRoots.set(element.groupId, group);
+			} else {
+				ungroupedRoots.push(element);
+			}
+		}
+
+		// Calculate offsets for each group
+		const currentState = get(designState);
+		const parentElement = currentState.elements[targetParentId];
+
+		if (parentElement && !parentElement.autoLayout?.enabled) {
+			// Calculate group bounding boxes and center offsets
+			for (const [groupId, elements] of groupedRoots) {
+				// Calculate bounding box of the group
+				let minX = Infinity, minY = Infinity;
+				let maxX = -Infinity, maxY = -Infinity;
+
+				for (const el of elements) {
+					minX = Math.min(minX, el.position.x);
+					minY = Math.min(minY, el.position.y);
+					maxX = Math.max(maxX, el.position.x + el.size.width);
+					maxY = Math.max(maxY, el.position.y + el.size.height);
+				}
+
+				const groupWidth = maxX - minX;
+				const groupHeight = maxY - minY;
+				const groupCenterX = minX + groupWidth / 2;
+				const groupCenterY = minY + groupHeight / 2;
+
+				// Calculate where the group center should be (parent center)
+				const targetCenterX = parentElement.size.width / 2;
+				const targetCenterY = parentElement.size.height / 2;
+
+				// Calculate offset to apply to all elements in group
+				const offsetX = targetCenterX - groupCenterX;
+				const offsetY = targetCenterY - groupCenterY;
+
+				groupOffsets.set(groupId, { x: offsetX, y: offsetY });
+			}
+		}
+
 		// Recursive function to paste an element and its descendants
 		// NOTE: Synchronous to avoid await overhead - transaction batches all events
 		function pasteElementTreeInside(element: Element, isRoot: boolean): string {
@@ -2176,8 +2229,15 @@ export async function pasteElementsInside(): Promise<void> {
 				if (parentElement?.autoLayout?.enabled) {
 					// Parent has auto layout -> paste as last child
 					position = { x: 0, y: 0 };
+				} else if (parentElement && element.groupId && groupOffsets.has(element.groupId)) {
+					// Element belongs to a group -> apply group offset while maintaining relative position
+					const offset = groupOffsets.get(element.groupId)!;
+					position = {
+						x: element.position.x + offset.x,
+						y: element.position.y + offset.y
+					};
 				} else if (parentElement) {
-					// Parent doesn't have auto layout -> paste at center of parent
+					// Ungrouped element or no group offset -> paste at center of parent
 					const centerX = parentElement.size.width / 2 - element.size.width / 2;
 					const centerY = parentElement.size.height / 2 - element.size.height / 2;
 					position = { x: centerX, y: centerY };
