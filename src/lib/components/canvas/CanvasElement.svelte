@@ -541,9 +541,33 @@ type DocumentWithCaret = Document & {
 
 	// Get display position/size (pending during interaction, or actual)
 	$: displayPosition = (() => {
-		// Group transforms are already in the correct coordinate space
+		// Group transforms store absolute positions - convert to parent-relative for nested elements
 		if ($interactionState.groupTransforms.has(element.id)) {
-			return $interactionState.groupTransforms.get(element.id)!.position;
+			const groupTransform = $interactionState.groupTransforms.get(element.id)!;
+			const absolutePos = groupTransform.position;
+
+			// If element has a parent, convert absolute to parent-relative
+			if (element.parentId) {
+				const currentSize = groupTransform.size || element.size;
+
+				// 1. Calculate center in world space (absolute)
+				const centerWorld = {
+					x: absolutePos.x + currentSize.width / 2,
+					y: absolutePos.y + currentSize.height / 2
+				};
+
+				// 2. Transform center to local space (parent-relative)
+				const centerLocal = absoluteToRelativePosition(centerWorld);
+
+				// 3. Convert back to top-left in local space
+				return {
+					x: centerLocal.x - currentSize.width / 2,
+					y: centerLocal.y - currentSize.height / 2
+				};
+			} else {
+				// Root element: use absolute position directly
+				return absolutePos;
+			}
 		}
 
 		// Pending position from SelectionOverlay during drag is in absolute coordinates
