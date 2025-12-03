@@ -218,7 +218,7 @@
 	});
 
 	function setupEventListeners() {
-		if (typeof window === 'undefined') return;
+		if (typeof window === 'undefined' || !canvasElement) return;
 
 		// Mouse wheel for zoom
 		canvasElement.addEventListener('wheel', handleWheel, { passive: false });
