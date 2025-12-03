@@ -515,7 +515,7 @@
 	let elementStartCanvas = { x: 0, y: 0, width: 0, height: 0 };
 	let dragOffsetCanvas = { x: 0, y: 0 }; // Offset from cursor to element's top-left at drag start
 	let rotationStartCenter: { x: number; y: number; screenX: number; screenY: number } | null = null; // Fixed center at rotation start (for child elements)
-	let groupStartElements: Array<{ id: string; x: number; y: number; width: number; height: number; rotation: number }> = [];
+	let groupStartElements: Array<{ id: string; x: number; y: number; width: number; height: number; rotation: number; parentId: string | null }> = [];
 	let hasMovedPastThreshold = false; // Track if we've moved past the initial dead zone
 	let initialHandlePosition: Point | null = null; // The ideal position of the handle being dragged at start
 	let mouseToHandleOffset: Point = { x: 0, y: 0 }; // Offset from mouse click to ideal handle position
@@ -1178,7 +1178,8 @@
 						y: absPos.y,
 						width: el.size.width,
 						height: el.size.height,
-						rotation: el.rotation || 0
+						rotation: el.rotation || 0,
+					parentId: el.parentId
 					};
 				});
 
@@ -1224,7 +1225,8 @@
 				y: absPos.y,
 				width: el.size.width,
 				height: el.size.height,
-				rotation: el.rotation || 0
+				rotation: el.rotation || 0,
+				parentId: el.parentId // Store parent info for coordinate conversion on drop
 			};
 		});
 
@@ -1756,11 +1758,12 @@
 				// Store initial bounds for all selected elements (including rotation)
 				groupStartElements = elementsToUse.map(el => ({
 					id: el.id,
-					x: el.position.x,
-					y: el.position.y,
+					x: getAbsolutePosition(el).x,
+					y: getAbsolutePosition(el).y,
 					width: el.size.width,
 					height: el.size.height,
-					rotation: el.rotation || 0
+					rotation: el.rotation || 0,
+					parentId: el.parentId
 				}));
 
 				// Store group bounds (use unrotated bounds for consistent coordinate system)
@@ -3019,13 +3022,43 @@
 				if (movedX > CANVAS_INTERACTION.MOVEMENT_THRESHOLD || movedY > CANVAS_INTERACTION.MOVEMENT_THRESHOLD) {
 					const deltaX = pendingPosition.x - elementStartCanvas.x;
 					const deltaY = pendingPosition.y - elementStartCanvas.y;
+					const state = get(designState);
 
 					// Move all elements by the same delta as a single batch operation
+					// Convert absolute positions to parent-relative for nested elements
 					await moveElementsGroup(
-						groupStartElements.map(el => ({
-							elementId: el.id,
-							position: { x: el.x + deltaX, y: el.y + deltaY }
-						}))
+						groupStartElements.map(el => {
+							// Calculate new absolute position after drag
+							const newAbsX = el.x + deltaX;
+							const newAbsY = el.y + deltaY;
+
+							// If element has a parent, convert absolute to parent-relative
+							// using the stored parentId from drag start
+							if (el.parentId) {
+								const element = state.elements[el.id];
+								if (element) {
+									// Use center-based transformation to handle rotated parents
+									const centerWorld = {
+										x: newAbsX + el.width / 2,
+										y: newAbsY + el.height / 2
+									};
+									const centerLocal = absoluteToRelativePosition(element, centerWorld);
+									return {
+										elementId: el.id,
+										position: {
+											x: centerLocal.x - el.width / 2,
+											y: centerLocal.y - el.height / 2
+										}
+									};
+								}
+							}
+
+							// No parent or element not found - use absolute position
+							return {
+								elementId: el.id,
+								position: { x: newAbsX, y: newAbsY }
+							};
+						})
 					);
 				}
 			} else if (interactionMode === 'resizing' && pendingSize && pendingPosition) {
