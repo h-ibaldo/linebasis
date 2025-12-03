@@ -2253,14 +2253,19 @@ export async function pasteElementsInside(): Promise<void> {
 					// Parent has auto layout -> paste as last child
 					position = { x: 0, y: 0 };
 				} else if (parentElement && element.groupId && groupOffsets.has(element.groupId)) {
-					// Element belongs to a group -> apply group offset while maintaining relative position
+					// Element belongs to a group WITH calculated offset -> apply offset
 					const offset = groupOffsets.get(element.groupId)!;
 					position = {
 						x: element.position.x + offset.x,
 						y: element.position.y + offset.y
 					};
+				} else if (parentElement && element.groupId) {
+					// Element belongs to a group but NO offset calculated (shouldn't happen)
+					// Keep original relative position as fallback
+					console.warn(`Group ${element.groupId} has no calculated offset, using original position`);
+					position = { x: element.position.x, y: element.position.y };
 				} else if (parentElement) {
-					// Ungrouped element or no group offset -> paste at center of parent
+					// Ungrouped element -> paste at center of parent
 					const centerX = parentElement.size.width / 2 - element.size.width / 2;
 					const centerY = parentElement.size.height / 2 - element.size.height / 2;
 					position = { x: centerX, y: centerY };
