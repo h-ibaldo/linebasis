@@ -560,10 +560,19 @@ type DocumentWithCaret = Document & {
 				const centerLocal = absoluteToRelativePosition(centerWorld);
 
 				// 3. Convert back to top-left in local space
-				return {
+				const displayPos = {
 					x: centerLocal.x - currentSize.width / 2,
 					y: centerLocal.y - currentSize.height / 2
 				};
+				console.log(`[DISPLAY] Element ${element.id}:`, {
+					absolutePos,
+					currentSize,
+					centerWorld,
+					centerLocal,
+					displayPos,
+					parentId: element.parentId
+				});
+				return displayPos;
 			} else {
 				// Root element: use absolute position directly
 				return absolutePos;

@@ -3043,12 +3043,22 @@
 										y: newAbsY + el.height / 2
 									};
 									const centerLocal = absoluteToRelativePosition(element, centerWorld);
+									const finalPos = {
+										x: centerLocal.x - el.width / 2,
+										y: centerLocal.y - el.height / 2
+									};
+									console.log(`[DROP] Element ${el.id}:`, {
+										dragStart: { x: el.x, y: el.y },
+										delta: { deltaX, deltaY },
+										newAbs: { x: newAbsX, y: newAbsY },
+										centerWorld,
+										centerLocal,
+										finalPos,
+										element: { position: element.position, parentId: element.parentId }
+									});
 									return {
 										elementId: el.id,
-										position: {
-											x: centerLocal.x - el.width / 2,
-											y: centerLocal.y - el.height / 2
-										}
+										position: finalPos
 									};
 								}
 							}
