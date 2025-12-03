@@ -2196,6 +2196,9 @@ export async function pasteElementsInside(): Promise<void> {
 		const currentState = get(designState);
 		const parentElement = currentState.elements[targetParentId];
 
+		console.log('[PASTE DEBUG] Parent element:', parentElement?.id, 'size:', parentElement?.size);
+		console.log('[PASTE DEBUG] Grouped roots:', Array.from(groupedRoots.keys()));
+
 		if (parentElement && !parentElement.autoLayout?.enabled) {
 			// For each group, calculate how to center it while preserving internal structure
 			for (const [groupId, rootElementsInGroup] of groupedRoots) {
@@ -2205,6 +2208,7 @@ export async function pasteElementsInside(): Promise<void> {
 				let maxX = -Infinity, maxY = -Infinity;
 
 				for (const el of rootElementsInGroup) {
+					console.log('[PASTE DEBUG] Element:', el.id, 'position:', el.position, 'size:', el.size);
 					minX = Math.min(minX, el.position.x);
 					minY = Math.min(minY, el.position.y);
 					maxX = Math.max(maxX, el.position.x + el.size.width);
@@ -2223,6 +2227,7 @@ export async function pasteElementsInside(): Promise<void> {
 				const offsetX = targetX - minX;
 				const offsetY = targetY - minY;
 
+				console.log('[PASTE DEBUG] Calculated offset for group', groupId, ':', offsetX, ',', offsetY);
 				groupOffsets.set(groupId, { x: offsetX, y: offsetY });
 			}
 		}
