@@ -2192,36 +2192,36 @@ export async function pasteElementsInside(): Promise<void> {
 			}
 		}
 
-		// Calculate offsets for each group
+		// Calculate offsets for each group to center the group as a whole
 		const currentState = get(designState);
 		const parentElement = currentState.elements[targetParentId];
 
 		if (parentElement && !parentElement.autoLayout?.enabled) {
-			// Calculate group bounding boxes and center offsets
-			for (const [groupId, elements] of groupedRoots) {
-				// Calculate bounding box of the group
+			// For each group, calculate how to center it while preserving internal structure
+			for (const [groupId, rootElementsInGroup] of groupedRoots) {
+				// Find the min position (top-left corner of group's bounding box)
+				// This represents the group's "origin" in its original coordinate space
 				let minX = Infinity, minY = Infinity;
 				let maxX = -Infinity, maxY = -Infinity;
 
-				for (const el of elements) {
+				for (const el of rootElementsInGroup) {
 					minX = Math.min(minX, el.position.x);
 					minY = Math.min(minY, el.position.y);
 					maxX = Math.max(maxX, el.position.x + el.size.width);
 					maxY = Math.max(maxY, el.position.y + el.size.height);
 				}
 
+				// Calculate group dimensions
 				const groupWidth = maxX - minX;
 				const groupHeight = maxY - minY;
-				const groupCenterX = minX + groupWidth / 2;
-				const groupCenterY = minY + groupHeight / 2;
 
-				// Calculate where the group center should be (parent center)
-				const targetCenterX = parentElement.size.width / 2;
-				const targetCenterY = parentElement.size.height / 2;
+				// Calculate where the group should be positioned to be centered in parent
+				const targetX = (parentElement.size.width - groupWidth) / 2;
+				const targetY = (parentElement.size.height - groupHeight) / 2;
 
-				// Calculate offset to apply to all elements in group
-				const offsetX = targetCenterX - groupCenterX;
-				const offsetY = targetCenterY - groupCenterY;
+				// The offset is: where we want the group's origin - where it currently is
+				const offsetX = targetX - minX;
+				const offsetY = targetY - minY;
 
 				groupOffsets.set(groupId, { x: offsetX, y: offsetY });
 			}
