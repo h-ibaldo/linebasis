@@ -3020,41 +3020,12 @@
 					const deltaX = pendingPosition.x - elementStartCanvas.x;
 					const deltaY = pendingPosition.y - elementStartCanvas.y;
 
-					// Get current state to access element data
-					const state = get(designState);
-
 					// Move all elements by the same delta as a single batch operation
-					// FIX: Convert absolute positions to parent-relative for nested elements
 					await moveElementsGroup(
-						groupStartElements.map(el => {
-							const newAbsolutePos = { x: el.x + deltaX, y: el.y + deltaY };
-							const element = state.elements[el.id];
-
-							// If element has no parent, use absolute position directly
-							if (!element || !element.parentId) {
-								return {
-									elementId: el.id,
-									position: newAbsolutePos
-								};
-							}
-
-							// For nested elements, convert using center-based transformation
-							// to prevent position jump for rotated parents
-							const centerWorld = {
-								x: newAbsolutePos.x + el.width / 2,
-								y: newAbsolutePos.y + el.height / 2
-							};
-							const centerLocal = absoluteToRelativePosition(element, centerWorld);
-							const relativePos = {
-								x: centerLocal.x - el.width / 2,
-								y: centerLocal.y - el.height / 2
-							};
-
-							return {
-								elementId: el.id,
-								position: relativePos
-							};
-						})
+						groupStartElements.map(el => ({
+							elementId: el.id,
+							position: { x: el.x + deltaX, y: el.y + deltaY }
+						}))
 					);
 				}
 			} else if (interactionMode === 'resizing' && pendingSize && pendingPosition) {
