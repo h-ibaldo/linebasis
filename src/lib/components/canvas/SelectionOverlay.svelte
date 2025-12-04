@@ -1906,13 +1906,35 @@
 				}
 			}
 
-			// If group interaction, initialize groupPendingTransforms with current positions
-			// so elements display correctly immediately (before first mousemove)
+			// If group interaction, initialize groupPendingTransforms with current DOM positions
+			// Use DOM-measured positions to handle rotated parents correctly (same as single element drag)
 			if (isGroupInteraction) {
 				groupPendingTransforms = new Map();
+				const canvasElement = document.querySelector('.canvas') as HTMLElement | null;
+				const canvasRect = canvasElement?.getBoundingClientRect();
+
 				groupStartElements.forEach(el => {
+					// Get element's actual rendered position from DOM
+					const elementDom = document.querySelector(`[data-element-id="${el.id}"]`) as HTMLElement | null;
+					let initialPosition = { x: el.x, y: el.y };
+
+					if (canvasRect && elementDom) {
+						// Measure actual rendered center from DOM
+						const elementRect = elementDom.getBoundingClientRect();
+						const elementCenterScreenX = elementRect.left + elementRect.width / 2;
+						const elementCenterScreenY = elementRect.top + elementRect.height / 2;
+						const elementCenterCanvasX = (elementCenterScreenX - canvasRect.left - viewport.x) / viewport.scale;
+						const elementCenterCanvasY = (elementCenterScreenY - canvasRect.top - viewport.y) / viewport.scale;
+
+						// Calculate position from center (consistent with drag logic)
+						initialPosition = {
+							x: elementCenterCanvasX - el.width / 2,
+							y: elementCenterCanvasY - el.height / 2
+						};
+					}
+
 					groupPendingTransforms.set(el.id, {
-						position: { x: el.x, y: el.y },
+						position: initialPosition,
 						size: { width: el.width, height: el.height },
 						rotation: el.rotation
 					});
