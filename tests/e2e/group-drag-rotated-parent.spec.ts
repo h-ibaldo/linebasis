@@ -809,4 +809,128 @@ test.describe('Group Drag in Rotated Parents', () => {
 		expect(child1Movement).toBeLessThan(maxExpectedMovement);
 		expect(child2Movement).toBeLessThan(maxExpectedMovement);
 	});
+
+	test('group resize should not jump on drag start for nested groups in rotated parent', async ({ page }) => {
+		// Setup scene with rotated parent
+		const ids = await setupScene(page, 'rotated-45');
+		const [parentId, child1Id, child2Id] = ids;
+
+		// Select both children to create a group
+		await selectMultiple(page, [child1Id, child2Id]);
+		await page.waitForTimeout(300);
+
+		// Get initial positions
+		const initialChild1 = await getElementScreenBox(page, child1Id);
+		const initialChild2 = await getElementScreenBox(page, child2Id);
+		expect(initialChild1).not.toBeNull();
+		expect(initialChild2).not.toBeNull();
+
+		// Get selection UI to find resize handle
+		const selectionUI = await page.evaluate(() => {
+			const selectionBox = document.querySelector('.selection-container') as HTMLElement;
+			if (!selectionBox) return null;
+			const rect = selectionBox.getBoundingClientRect();
+			return {
+				right: rect.right,
+				bottom: rect.bottom
+			};
+		});
+
+		expect(selectionUI).not.toBeNull();
+
+		// Click on bottom-right resize handle (se handle)
+		const handleX = selectionUI!.right - 5;
+		const handleY = selectionUI!.bottom - 5;
+
+		await page.mouse.move(handleX, handleY);
+		await page.mouse.down();
+		await page.waitForTimeout(50); // Wait for mousedown to process
+
+		// Check positions after mousedown (should NOT jump)
+		const afterMouseDown1 = await getElementScreenBox(page, child1Id);
+		const afterMouseDown2 = await getElementScreenBox(page, child2Id);
+
+		const jump1X = Math.abs(afterMouseDown1!.centerX - initialChild1!.centerX);
+		const jump1Y = Math.abs(afterMouseDown1!.centerY - initialChild1!.centerY);
+		const jump2X = Math.abs(afterMouseDown2!.centerX - initialChild2!.centerX);
+		const jump2Y = Math.abs(afterMouseDown2!.centerY - initialChild2!.centerY);
+
+		console.log('Child1 jump on mousedown:', jump1X, jump1Y);
+		console.log('Child2 jump on mousedown:', jump2X, jump2Y);
+
+		// Screenshot to verify
+		await page.screenshot({ path: 'test-results/rotated-parent-resize-mousedown.png', fullPage: true });
+
+		// Elements should not jump more than a few pixels on mousedown
+		const maxJump = 5; // Allow small tolerance for rounding
+		expect(jump1X).toBeLessThan(maxJump);
+		expect(jump1Y).toBeLessThan(maxJump);
+		expect(jump2X).toBeLessThan(maxJump);
+		expect(jump2Y).toBeLessThan(maxJump);
+
+		await page.mouse.up();
+		await page.waitForTimeout(100);
+	});
+
+	test('group rotate should not jump on drag start for nested groups in rotated parent', async ({ page }) => {
+		// Setup scene with rotated parent
+		const ids = await setupScene(page, 'rotated-45');
+		const [parentId, child1Id, child2Id] = ids;
+
+		// Select both children to create a group
+		await selectMultiple(page, [child1Id, child2Id]);
+		await page.waitForTimeout(300);
+
+		// Get initial positions
+		const initialChild1 = await getElementScreenBox(page, child1Id);
+		const initialChild2 = await getElementScreenBox(page, child2Id);
+		expect(initialChild1).not.toBeNull();
+		expect(initialChild2).not.toBeNull();
+
+		// Get selection UI to find rotation handle
+		const selectionUI = await page.evaluate(() => {
+			const selectionBox = document.querySelector('.selection-container') as HTMLElement;
+			if (!selectionBox) return null;
+			const rect = selectionBox.getBoundingClientRect();
+			return {
+				centerX: rect.left + rect.width / 2,
+				top: rect.top
+			};
+		});
+
+		expect(selectionUI).not.toBeNull();
+
+		// Click on rotation handle (above the selection box)
+		const rotationHandleX = selectionUI!.centerX;
+		const rotationHandleY = selectionUI!.top - 30;
+
+		await page.mouse.move(rotationHandleX, rotationHandleY);
+		await page.mouse.down();
+		await page.waitForTimeout(50); // Wait for mousedown to process
+
+		// Check positions after mousedown (should NOT jump)
+		const afterMouseDown1 = await getElementScreenBox(page, child1Id);
+		const afterMouseDown2 = await getElementScreenBox(page, child2Id);
+
+		const jump1X = Math.abs(afterMouseDown1!.centerX - initialChild1!.centerX);
+		const jump1Y = Math.abs(afterMouseDown1!.centerY - initialChild1!.centerY);
+		const jump2X = Math.abs(afterMouseDown2!.centerX - initialChild2!.centerX);
+		const jump2Y = Math.abs(afterMouseDown2!.centerY - initialChild2!.centerY);
+
+		console.log('Child1 jump on mousedown:', jump1X, jump1Y);
+		console.log('Child2 jump on mousedown:', jump2X, jump2Y);
+
+		// Screenshot to verify
+		await page.screenshot({ path: 'test-results/rotated-parent-rotate-mousedown.png', fullPage: true });
+
+		// Elements should not jump more than a few pixels on mousedown
+		const maxJump = 5; // Allow small tolerance for rounding
+		expect(jump1X).toBeLessThan(maxJump);
+		expect(jump1Y).toBeLessThan(maxJump);
+		expect(jump2X).toBeLessThan(maxJump);
+		expect(jump2Y).toBeLessThan(maxJump);
+
+		await page.mouse.up();
+		await page.waitForTimeout(100);
+	});
 });

@@ -1304,6 +1304,21 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 			height: unrotatedBounds.height
 		};
 
+		// Initialize groupPendingTransforms for resize/rotate operations
+		// This prevents elements from jumping on drag start for nested groups in rotated parents
+		if (isGroupInteraction) {
+			groupPendingTransforms = new Map(
+				groupStartElements.map(el => [
+					el.id,
+					{
+						position: { x: el.x, y: el.y },
+						size: { width: el.width, height: el.height },
+						rotation: el.rotation
+					}
+				])
+			);
+		}
+
 		if (handle?.startsWith('rotate')) {
 			// Rotation mode
 			interactionMode = 'rotating';
