@@ -1280,13 +1280,36 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 		isGroupInteraction = true;
 		dragStartScreen = { x: e.clientX, y: e.clientY };
 
-		// Store initial bounds using getAbsolutePosition
+		// For resize/rotate operations, use DOM-measured positions to match exactly what's displayed
+		// This prevents elements from moving when starting transforms for nested groups in rotated parents
+		const canvasElement = document.querySelector('.canvas') as HTMLElement | null;
+		const canvasRect = canvasElement?.getBoundingClientRect();
+
+		// Store initial bounds using DOM-measured positions for resize/rotate
 		groupStartElements = selectedElements.map(el => {
-			const absPos = getAbsolutePosition(el);
+			// Get element's actual rendered position from DOM to match displayed position exactly
+			const elementDom = document.querySelector(`[data-element-id="${el.id}"]`) as HTMLElement | null;
+			let initialPosition = getAbsolutePosition(el);
+
+			if (canvasRect && elementDom) {
+				// Measure actual rendered position from DOM
+				const elementRect = elementDom.getBoundingClientRect();
+				const elementCenterScreenX = elementRect.left + elementRect.width / 2;
+				const elementCenterScreenY = elementRect.top + elementRect.height / 2;
+				const elementCenterCanvasX = (elementCenterScreenX - canvasRect.left - viewport.x) / viewport.scale;
+				const elementCenterCanvasY = (elementCenterScreenY - canvasRect.top - viewport.y) / viewport.scale;
+
+				// Calculate position from center
+				initialPosition = {
+					x: elementCenterCanvasX - el.size.width / 2,
+					y: elementCenterCanvasY - el.size.height / 2
+				};
+			}
+
 			return {
 				id: el.id,
-				x: absPos.x,
-				y: absPos.y,
+				x: initialPosition.x,
+				y: initialPosition.y,
 				width: el.size.width,
 				height: el.size.height,
 				rotation: el.rotation || 0,
@@ -1304,43 +1327,18 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 			height: unrotatedBounds.height
 		};
 
-		// Initialize groupPendingTransforms for resize/rotate operations
-		// This prevents elements from jumping on drag start for nested groups in rotated parents
-		// Use DOM-measured positions to match exactly what's displayed (avoids rounding errors)
+		// Initialize groupPendingTransforms with the same DOM-measured positions
+		// This ensures consistency between groupStartElements and groupPendingTransforms
 		if (isGroupInteraction) {
-			const canvasElement = document.querySelector('.canvas') as HTMLElement | null;
-			const canvasRect = canvasElement?.getBoundingClientRect();
-
 			groupPendingTransforms = new Map(
-				groupStartElements.map(el => {
-					// Get element's actual rendered position from DOM to match displayed position exactly
-					const elementDom = document.querySelector(`[data-element-id="${el.id}"]`) as HTMLElement | null;
-					let initialPosition = { x: el.x, y: el.y };
-
-					if (canvasRect && elementDom) {
-						// Measure actual rendered position from DOM
-						const elementRect = elementDom.getBoundingClientRect();
-						const elementCenterScreenX = elementRect.left + elementRect.width / 2;
-						const elementCenterScreenY = elementRect.top + elementRect.height / 2;
-						const elementCenterCanvasX = (elementCenterScreenX - canvasRect.left - viewport.x) / viewport.scale;
-						const elementCenterCanvasY = (elementCenterScreenY - canvasRect.top - viewport.y) / viewport.scale;
-
-						// Calculate position from center
-						initialPosition = {
-							x: elementCenterCanvasX - el.width / 2,
-							y: elementCenterCanvasY - el.height / 2
-						};
+				groupStartElements.map(el => [
+					el.id,
+					{
+						position: { x: el.x, y: el.y },
+						size: { width: el.width, height: el.height },
+						rotation: el.rotation
 					}
-
-					return [
-						el.id,
-						{
-							position: initialPosition,
-							size: { width: el.width, height: el.height },
-							rotation: el.rotation
-						}
-					];
-				})
+				])
 			);
 		}
 
