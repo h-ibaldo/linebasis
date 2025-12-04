@@ -3637,53 +3637,90 @@
 				size: commonParent.size
 			};
 		})() : null}
-		{@const groupPosition = (() => {
-			// groupBounds are in absolute coordinates
-			// If we have a parent, convert to parent-relative coordinates
+		{@const localGroupBounds = (() => {
+			// When elements share a common parent, calculate bounds in parent-relative space
+			// This is critical for rotated parents - we need bounds in local space, not absolute
 			if (!commonParent) {
-				return { x: groupBounds.x, y: groupBounds.y };
+				return groupBounds; // Use absolute bounds as-is
 			}
 
-			// Convert absolute position to parent-relative using center-based transformation
-			const groupCenterAbs = {
-				x: groupBounds.x + groupBounds.width / 2,
-				y: groupBounds.y + groupBounds.height / 2
-			};
-
-			// Get parent's absolute position
+			// Calculate bounds from element positions in parent-relative space
+			let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
 			const parentAbsPos = getAbsolutePosition(commonParent);
-
-			// Calculate group center relative to parent (without rotation)
-			let relX = groupCenterAbs.x - parentAbsPos.x;
-			let relY = groupCenterAbs.y - parentAbsPos.y;
-
-			// If parent is rotated, apply inverse rotation
 			const parentRotation = commonParent.rotation || 0;
-			if (parentRotation !== 0) {
-				const angleRad = -parentRotation * (Math.PI / 180); // Negative for inverse
-				const cos = Math.cos(angleRad);
-				const sin = Math.sin(angleRad);
 
-				// Translate to parent center
-				const centerX = commonParent.size.width / 2;
-				const centerY = commonParent.size.height / 2;
-				const fromCenterX = relX - centerX;
-				const fromCenterY = relY - centerY;
+			for (const el of selectedElements) {
+			const hasPending = isGroupInteraction && groupPendingTransforms.has(el.id);
+			const pending = hasPending ? groupPendingTransforms.get(el.id) : null;
 
-				// Rotate
-				const rotatedX = fromCenterX * cos - fromCenterY * sin;
-				const rotatedY = fromCenterX * sin + fromCenterY * cos;
+			const absPos = pending ? pending.position : getDisplayPosition(el);
+			const size = pending ? pending.size : getDisplaySize(el);
+			const rotation = pending ? (pending.rotation || 0) : getDisplayRotation(el);
 
-				// Translate back
-				relX = rotatedX + centerX;
-				relY = rotatedY + centerY;
+
+
+
+
+
+
+
+
+
+				// Convert element's absolute center to parent-relative
+				const centerAbs = {
+					x: absPos.x + size.width / 2,
+					y: absPos.y + size.height / 2
+				};
+
+				// Translate relative to parent
+				let relX = centerAbs.x - parentAbsPos.x;
+				let relY = centerAbs.y - parentAbsPos.y;
+
+				// Apply inverse parent rotation if needed
+				if (parentRotation !== 0) {
+					const angleRad = -parentRotation * (Math.PI / 180);
+					const cos = Math.cos(angleRad);
+					const sin = Math.sin(angleRad);
+					const centerX = commonParent.size.width / 2;
+					const centerY = commonParent.size.height / 2;
+					const fromCenterX = relX - centerX;
+					const fromCenterY = relY - centerY;
+					const rotatedX = fromCenterX * cos - fromCenterY * sin;
+					const rotatedY = fromCenterX * sin + fromCenterY * cos;
+					relX = rotatedX + centerX;
+					relY = rotatedY + centerY;
+				}
+
+				// Convert back to top-left
+				const localPos = {
+					x: relX - size.width / 2,
+					y: relY - size.height / 2
+				};
+
+				// Calculate bounds (accounting for element's own rotation)
+				if (rotation !== 0) {
+					const corners = getRotatedCorners({
+						x: localPos.x,
+						y: localPos.y,
+						width: size.width,
+						height: size.height,
+						rotation
+					});
+					for (const corner of corners) {
+						minX = Math.min(minX, corner.x);
+						minY = Math.min(minY, corner.y);
+						maxX = Math.max(maxX, corner.x);
+						maxY = Math.max(maxY, corner.y);
+					}
+				} else {
+					minX = Math.min(minX, localPos.x);
+					minY = Math.min(minY, localPos.y);
+					maxX = Math.max(maxX, localPos.x + size.width);
+					maxY = Math.max(maxY, localPos.y + size.height);
+				}
 			}
 
-			// Convert back from center to top-left
-			return {
-				x: relX - groupBounds.width / 2,
-				y: relY - groupBounds.height / 2
-			};
+			return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
 		})()}
 		<SelectionUI
 			element={{
@@ -3691,8 +3728,8 @@
 				type: 'div',
 				parentId: commonParentId,
 				pageId: '',
-				position: groupPosition,
-				size: { width: groupBounds.width, height: groupBounds.height },
+				position: { x: localGroupBounds.x, y: localGroupBounds.y },
+				size: { width: localGroupBounds.width, height: localGroupBounds.height },
 				styles: {},
 				typography: {},
 				spacing: {},
