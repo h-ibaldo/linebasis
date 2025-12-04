@@ -38,6 +38,17 @@
 	let isRenaming = false;
 	let nameInput: HTMLInputElement;
 	let editingName = '';
+	
+	// Group expand/collapse state for nested groups
+	let expandedNestedGroups = new Set<string>();
+	function toggleNestedGroupExpanded(groupId: string) {
+		if (expandedNestedGroups.has(groupId)) {
+			expandedNestedGroups.delete(groupId);
+		} else {
+			expandedNestedGroups.add(groupId);
+		}
+		expandedNestedGroups = expandedNestedGroups; // Trigger reactivity
+	}
 
 	$: isSelected = selectedIds.includes(element.id);
 	$: hasChildren = element.children && element.children.length > 0;
@@ -390,13 +401,18 @@
 						class:selected={item.groupElements.some(el => selectedIds.includes(el.id))}
 						on:click={() => onSelectGroup?.(item.id)}
 					>
-						<button class="expand-btn" on:click|stopPropagation={() => {}} aria-label="Expand">
-							<span class="arrow expanded">▸</span>
+						<button 
+							class="expand-btn" 
+							on:click|stopPropagation={() => toggleNestedGroupExpanded(item.id)} 
+							aria-label={expandedNestedGroups.has(item.id) ? 'Collapse' : 'Expand'}
+						>
+							<span class="arrow" class:expanded={expandedNestedGroups.has(item.id)}>▸</span>
 						</button>
 						<span class="group-icon">⊞</span>
 						<span class="group-name">Group</span>
 					</div>
-					<!-- Group members -->
+					<!-- Group members (collapsible) -->
+					{#if expandedNestedGroups.has(item.id)}
 					<div class="group-children">
 						{#each item.groupElements as groupElement (groupElement.id)}
 							<svelte:self
@@ -419,6 +435,7 @@
 							/>
 						{/each}
 					</div>
+					{/if}
 				</div>
 			{:else if item.element}
 				<!-- Regular element -->
