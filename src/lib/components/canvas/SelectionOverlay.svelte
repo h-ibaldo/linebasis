@@ -1169,19 +1169,43 @@
 				isGroupInteraction = true;
 				dragStartScreen = { x: startX, y: startY };
 
-				// Store initial bounds for all elements (use absolute positions)
-				groupStartElements = selectedElements.map(el => {
+			// Store initial bounds for all elements using DOM-measured positions
+			// This ensures correct positioning for elements inside rotated parents
+			const canvasElement = document.querySelector('.canvas') as HTMLElement | null;
+			const canvasRect = canvasElement?.getBoundingClientRect();
+
+			groupStartElements = selectedElements.map(el => {
+				const elementDom = document.querySelector(`[data-element-id="${el.id}"]`) as HTMLElement | null;
+				let startX, startY;
+
+				if (canvasRect && elementDom) {
+					// Measure actual rendered center from DOM
+					const elementRect = elementDom.getBoundingClientRect();
+					const elementCenterScreenX = elementRect.left + elementRect.width / 2;
+					const elementCenterScreenY = elementRect.top + elementRect.height / 2;
+					const elementCenterCanvasX = (elementCenterScreenX - canvasRect.left - viewport.x) / viewport.scale;
+					const elementCenterCanvasY = (elementCenterScreenY - canvasRect.top - viewport.y) / viewport.scale;
+
+					// Calculate position from center
+					startX = elementCenterCanvasX - el.size.width / 2;
+					startY = elementCenterCanvasY - el.size.height / 2;
+				} else {
+					// Fallback to absolute position if DOM query fails
 					const absPos = getAbsolutePosition(el);
-					return {
-						id: el.id,
-						x: absPos.x,
-						y: absPos.y,
-						width: el.size.width,
-						height: el.size.height,
-						rotation: el.rotation || 0,
+					startX = absPos.x;
+					startY = absPos.y;
+				}
+
+				return {
+					id: el.id,
+					x: startX,
+					y: startY,
+					width: el.size.width,
+					height: el.size.height,
+					rotation: el.rotation || 0,
 					parentId: el.parentId
-					};
-				});
+				};
+			});
 
 				// Store group bounds (use unrotated bounds for consistent coordinate system)
 				const unrotatedBounds = getUnrotatedGroupBounds(selectedElements);
@@ -1216,17 +1240,37 @@
 		isGroupInteraction = true;
 		dragStartScreen = { x: e.clientX, y: e.clientY };
 
-		// Store initial bounds for all elements (use absolute positions)
+		// Store initial bounds for all elements using DOM-measured positions
+		const canvasElement2 = document.querySelector('.canvas') as HTMLElement | null;
+		const canvasRect2 = canvasElement2?.getBoundingClientRect();
+
 		groupStartElements = selectedElements.map(el => {
-			const absPos = getAbsolutePosition(el);
+			const elementDom = document.querySelector(`[data-element-id="${el.id}"]`) as HTMLElement | null;
+			let startX, startY;
+
+			if (canvasRect2 && elementDom) {
+				const elementRect = elementDom.getBoundingClientRect();
+				const elementCenterScreenX = elementRect.left + elementRect.width / 2;
+				const elementCenterScreenY = elementRect.top + elementRect.height / 2;
+				const elementCenterCanvasX = (elementCenterScreenX - canvasRect2.left - viewport.x) / viewport.scale;
+				const elementCenterCanvasY = (elementCenterScreenY - canvasRect2.top - viewport.y) / viewport.scale;
+
+				startX = elementCenterCanvasX - el.size.width / 2;
+				startY = elementCenterCanvasY - el.size.height / 2;
+			} else {
+				const absPos = getAbsolutePosition(el);
+				startX = absPos.x;
+				startY = absPos.y;
+			}
+
 			return {
 				id: el.id,
-				x: absPos.x,
-				y: absPos.y,
+				x: startX,
+				y: startY,
 				width: el.size.width,
 				height: el.size.height,
 				rotation: el.rotation || 0,
-				parentId: el.parentId // Store parent info for coordinate conversion on drop
+				parentId: el.parentId
 			};
 		});
 
@@ -1755,16 +1799,39 @@
 
 			if (isGroupInteraction) {
 				// Initialize group dragging
-				// Store initial bounds for all selected elements (including rotation)
-				groupStartElements = elementsToUse.map(el => ({
+			// Store initial bounds for all selected elements using DOM-measured positions
+			const canvasElement3 = document.querySelector('.canvas') as HTMLElement | null;
+			const canvasRect3 = canvasElement3?.getBoundingClientRect();
+
+			groupStartElements = elementsToUse.map(el => {
+				const elementDom = document.querySelector(`[data-element-id="${el.id}"]`) as HTMLElement | null;
+				let startX, startY;
+
+				if (canvasRect3 && elementDom) {
+					const elementRect = elementDom.getBoundingClientRect();
+					const elementCenterScreenX = elementRect.left + elementRect.width / 2;
+					const elementCenterScreenY = elementRect.top + elementRect.height / 2;
+					const elementCenterCanvasX = (elementCenterScreenX - canvasRect3.left - viewport.x) / viewport.scale;
+					const elementCenterCanvasY = (elementCenterScreenY - canvasRect3.top - viewport.y) / viewport.scale;
+
+					startX = elementCenterCanvasX - el.size.width / 2;
+					startY = elementCenterCanvasY - el.size.height / 2;
+				} else {
+					const absPos = getAbsolutePosition(el);
+					startX = absPos.x;
+					startY = absPos.y;
+				}
+
+				return {
 					id: el.id,
-					x: getAbsolutePosition(el).x,
-					y: getAbsolutePosition(el).y,
+					x: startX,
+					y: startY,
 					width: el.size.width,
 					height: el.size.height,
 					rotation: el.rotation || 0,
 					parentId: el.parentId
-				}));
+				};
+			});
 
 				// Store group bounds (use unrotated bounds for consistent coordinate system)
 				const unrotatedBounds = getUnrotatedGroupBounds(elementsToUse);
