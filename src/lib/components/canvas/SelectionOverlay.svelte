@@ -3047,7 +3047,7 @@
 							// Use center-based transformation to handle rotated parents
 							const centerWorld = {
 								x: finalAbsPos.x + el.width / 2,
-								y: finalAbsPos.y + el.width / 2
+								y: finalAbsPos.y + el.height / 2
 							};
 							const centerLocal = absoluteToRelativePosition(element, centerWorld);
 							const finalPos = {
