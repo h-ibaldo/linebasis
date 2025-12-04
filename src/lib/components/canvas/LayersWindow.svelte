@@ -83,12 +83,13 @@
 	);
 	
 	function toggleGroupExpanded(groupId: string) {
-		if (collapsedGroups.has(groupId)) {
-			collapsedGroups.delete(groupId);
+		const newSet = new Set(collapsedGroups);
+		if (newSet.has(groupId)) {
+			newSet.delete(groupId);
 		} else {
-			collapsedGroups.add(groupId);
+			newSet.add(groupId);
 		}
-		collapsedGroups = collapsedGroups; // Trigger reactivity
+		collapsedGroups = newSet; // Create new Set to trigger reactivity
 	}
 	
 	function isGroupExpanded(groupId: string): boolean {

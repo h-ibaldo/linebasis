@@ -44,12 +44,13 @@
 	let collapsedNestedGroups = new Set<string>();
 	
 	function toggleNestedGroupExpanded(groupId: string) {
-		if (collapsedNestedGroups.has(groupId)) {
-			collapsedNestedGroups.delete(groupId);
+		const newSet = new Set(collapsedNestedGroups);
+		if (newSet.has(groupId)) {
+			newSet.delete(groupId);
 		} else {
-			collapsedNestedGroups.add(groupId);
+			newSet.add(groupId);
 		}
-		collapsedNestedGroups = collapsedNestedGroups; // Trigger reactivity
+		collapsedNestedGroups = newSet; // Create new Set to trigger reactivity
 	}
 	
 	function isNestedGroupExpanded(groupId: string): boolean {
