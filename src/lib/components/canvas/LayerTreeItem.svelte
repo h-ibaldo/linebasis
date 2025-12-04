@@ -43,18 +43,16 @@
 	// Track which groups are collapsed - if a group is not in this set, it's expanded
 	let collapsedNestedGroups = new Set<string>();
 	
-	function toggleNestedGroupExpanded(groupId: string) {
+	function toggleNestedGroupExpanded(groupId: string, e: MouseEvent) {
+		e.stopPropagation();
+		// Create a completely new Set to ensure Svelte detects the change
 		const newSet = new Set(collapsedNestedGroups);
 		if (newSet.has(groupId)) {
 			newSet.delete(groupId);
 		} else {
 			newSet.add(groupId);
 		}
-		collapsedNestedGroups = newSet; // Create new Set to trigger reactivity
-	}
-	
-	function isNestedGroupExpanded(groupId: string): boolean {
-		return !collapsedNestedGroups.has(groupId);
+		collapsedNestedGroups = newSet; // Assign new Set to trigger reactivity
 	}
 
 	$: isSelected = selectedIds.includes(element.id);
@@ -410,16 +408,16 @@
 					>
 						<button 
 							class="expand-btn" 
-							on:click|stopPropagation={() => toggleNestedGroupExpanded(item.id)} 
-							aria-label={isNestedGroupExpanded(item.id) ? 'Collapse' : 'Expand'}
+							on:click={(e) => toggleNestedGroupExpanded(item.id, e)}
+							aria-label={!collapsedNestedGroups.has(item.id) ? 'Collapse' : 'Expand'}
 						>
-							<span class="arrow" class:expanded={isNestedGroupExpanded(item.id)}>▸</span>
+							<span class="arrow" class:expanded={!collapsedNestedGroups.has(item.id)}>▸</span>
 						</button>
 						<span class="group-icon">⊞</span>
 						<span class="group-name">Group</span>
 					</div>
 					<!-- Group members (collapsible) -->
-					{#if isNestedGroupExpanded(item.id)}
+					{#if !collapsedNestedGroups.has(item.id)}
 					<div class="group-children">
 						{#each item.groupElements as groupElement (groupElement.id)}
 							<svelte:self

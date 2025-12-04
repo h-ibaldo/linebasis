@@ -78,18 +78,12 @@
 	// Track collapsed groups (empty set means all groups are expanded by default)
 	let collapsedGroups = new Set<string>();
 	
-	function toggleGroupExpanded(groupId: string) {
-		const newSet = new Set(collapsedGroups);
-		if (newSet.has(groupId)) {
-			newSet.delete(groupId);
-		} else {
-			newSet.add(groupId);
-		}
-		collapsedGroups = newSet; // Create new Set to trigger reactivity
-	}
-	
-	function isGroupExpanded(groupId: string): boolean {
-		return !collapsedGroups.has(groupId);
+	function toggleGroupExpanded(groupId: string, e: MouseEvent) {
+		e.stopPropagation();
+		// Create a completely new Set to ensure Svelte detects the change
+		collapsedGroups = new Set(collapsedGroups).has(groupId)
+			? new Set([...collapsedGroups].filter(id => id !== groupId))
+			: new Set([...collapsedGroups, groupId]);
 	}
 
 	// Count existing views to auto-name
@@ -470,16 +464,16 @@
 							>
 								<button 
 									class="expand-btn" 
-									on:click|stopPropagation={() => toggleGroupExpanded(item.id)} 
-									aria-label={isGroupExpanded(item.id) ? 'Collapse' : 'Expand'}
+									on:click={(e) => toggleGroupExpanded(item.id, e)}
+									aria-label={!collapsedGroups.has(item.id) ? 'Collapse' : 'Expand'}
 								>
-									<span class="arrow" class:expanded={isGroupExpanded(item.id)}>▸</span>
+									<span class="arrow" class:expanded={!collapsedGroups.has(item.id)}>▸</span>
 								</button>
 								<span class="group-icon">⊞</span>
 								<span class="group-name">Group</span>
 							</div>
 							<!-- Group members (collapsible) -->
-							{#if isGroupExpanded(item.id)}
+							{#if !collapsedGroups.has(item.id)}
 							<div class="group-children">
 								{#each item.groupElements as element (element.id)}
 									<LayerTreeItem
