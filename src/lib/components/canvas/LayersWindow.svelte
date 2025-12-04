@@ -78,10 +78,6 @@
 	// Track collapsed groups (empty set means all groups are expanded by default)
 	let collapsedGroups = new Set<string>();
 	
-	$: expandedGroups = new Set(
-		Object.keys($designState.groups).filter(groupId => !collapsedGroups.has(groupId))
-	);
-	
 	function toggleGroupExpanded(groupId: string) {
 		const newSet = new Set(collapsedGroups);
 		if (newSet.has(groupId)) {
