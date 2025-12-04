@@ -12,7 +12,8 @@
 	 * - Rename on double-click
 	 */
 
-	import type { Element } from '$lib/types/events';
+	import type { Element, Group } from '$lib/types/events';
+	import { designState } from '$lib/stores/design-store';
 	import { onMount, createEventDispatcher } from 'svelte';
 
 	export let element: Element;
@@ -29,6 +30,7 @@
 	export let draggedElementId: string | null = null;
 	export let dropTarget: { elementId: string; position: 'before' | 'after' | 'inside' } | null = null;
 	export let depth: number = 0;
+	export let onSelectGroup: ((groupId: string) => void) | undefined = undefined;
 
 	const dispatch = createEventDispatcher<{ contextmenu: { elementId: string; x: number; y: number } }>();
 
@@ -45,6 +47,60 @@
 		: [];
 	$: visible = element.visible !== false; // Default to visible if not specified
 	$: locked = element.locked === true; // Default to not locked
+
+	// Build layer items from children to handle groups at nested levels
+	interface LayerItem {
+		type: 'element' | 'group';
+		id: string;
+		element?: Element;
+		group?: Group;
+		groupElements?: Element[];
+	}
+
+	function buildLayerItems(elements: Element[], groups: Record<string, Group>): LayerItem[] {
+		const items: LayerItem[] = [];
+		const processedElementIds = new Set<string>();
+
+		for (const element of elements) {
+			// Skip if already processed as part of a group
+			if (processedElementIds.has(element.id)) continue;
+
+			// Check if element belongs to a group
+			if (element.groupId && groups[element.groupId]) {
+				// Skip if we already added this group
+				if (processedElementIds.has(element.groupId)) continue;
+
+				const group = groups[element.groupId];
+				const groupElements = group.elementIds
+					.map(id => $designState.elements[id])
+					.filter(Boolean);
+
+				// Mark all group elements as processed
+				group.elementIds.forEach(id => processedElementIds.add(id));
+				processedElementIds.add(element.groupId);
+
+				items.push({
+					type: 'group',
+					id: element.groupId,
+					group,
+					groupElements
+				});
+			} else {
+				// Regular element (not in a group)
+				processedElementIds.add(element.id);
+				items.push({
+					type: 'element',
+					id: element.id,
+					element
+				});
+			}
+		}
+
+		return items;
+	}
+
+	// Build layer items from children to handle groups
+	$: childLayerItems = hasChildren ? buildLayerItems(children, $designState.groups) : [];
 
 	// Get element display name
 	$: displayName = element.name || getDefaultName(element);
@@ -325,24 +381,66 @@
 
 	<!-- Children -->
 	{#if hasChildren && isExpanded}
-		{#each children as child (child.id)}
-			<svelte:self
-				element={child}
-				{elements}
-				{selectedIds}
-				{onSelect}
-				{onToggleVisibility}
-				{onToggleLock}
-				{onRename}
-				{onDragStart}
-				{onDragEnd}
-				{onDragOver}
-				{onDrop}
-				{draggedElementId}
-				{dropTarget}
-				depth={depth + 1}
-				on:contextmenu
-			/>
+		{#each childLayerItems as item (item.id)}
+			{#if item.type === 'group' && item.groupElements}
+				<!-- Group item -->
+				<div class="group-item" style="padding-left: {(depth + 1) * 16}px">
+					<div
+						class="group-header"
+						class:selected={item.groupElements.some(el => selectedIds.includes(el.id))}
+						on:click={() => onSelectGroup?.(item.id)}
+					>
+						<button class="expand-btn" on:click|stopPropagation={() => {}} aria-label="Expand">
+							<span class="arrow expanded">▸</span>
+						</button>
+						<span class="group-icon">⊞</span>
+						<span class="group-name">Group</span>
+					</div>
+					<!-- Group members -->
+					<div class="group-children">
+						{#each item.groupElements as groupElement (groupElement.id)}
+							<svelte:self
+								element={groupElement}
+								{elements}
+								{selectedIds}
+								{onSelect}
+								{onToggleVisibility}
+								{onToggleLock}
+								{onRename}
+								{onDragStart}
+								{onDragEnd}
+								{onDragOver}
+								{onDrop}
+								{draggedElementId}
+								{dropTarget}
+								depth={depth + 2}
+								{onSelectGroup}
+								on:contextmenu
+							/>
+						{/each}
+					</div>
+				</div>
+			{:else if item.element}
+				<!-- Regular element -->
+				<svelte:self
+					element={item.element}
+					{elements}
+					{selectedIds}
+					{onSelect}
+					{onToggleVisibility}
+					{onToggleLock}
+					{onRename}
+					{onDragStart}
+					{onDragEnd}
+					{onDragOver}
+					{onDrop}
+					{draggedElementId}
+					{dropTarget}
+					depth={depth + 1}
+					{onSelectGroup}
+					on:contextmenu
+				/>
+			{/if}
 		{/each}
 	{/if}
 </div>
@@ -509,5 +607,51 @@
 
 	.drop-after {
 		margin-bottom: -2px;
+	}
+
+	/* Group styles (for nested groups) */
+	.group-item {
+		width: 100%;
+	}
+
+	.group-header {
+		display: flex;
+		align-items: center;
+		padding: 4px 8px;
+		cursor: pointer;
+		user-select: none;
+		border-radius: 4px;
+		transition: background-color 0.1s;
+	}
+
+	.group-header:hover {
+		background-color: #f5f5f5;
+	}
+
+	.group-header.selected {
+		background-color: #007aff;
+		color: white;
+	}
+
+	.group-header.selected:hover {
+		background-color: #0051d5;
+	}
+
+	.group-icon {
+		margin: 0 6px;
+		font-size: 14px;
+		width: 16px;
+		text-align: center;
+		flex-shrink: 0;
+	}
+
+	.group-name {
+		flex: 1;
+		font-size: 13px;
+		font-weight: 500;
+	}
+
+	.group-children {
+		width: 100%;
 	}
 </style>

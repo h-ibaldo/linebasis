@@ -18,8 +18,16 @@
 	import LayerTreeItem from './LayerTreeItem.svelte';
 	import ContextMenu from '$lib/components/ui/ContextMenu.svelte';
 	import type { Element, Group } from '$lib/types/events';
-	import type { MenuItem } from '$lib/components/ui/ContextMenu.svelte';
 	import { onMount, tick } from 'svelte';
+
+	interface MenuItem {
+		id: string;
+		label: string;
+		shortcut?: string;
+		disabled?: boolean;
+		separator?: boolean;
+		submenu?: MenuItem[];
+	}
 
 	$: selectedIds = $designState.selectedElementIds;
 
@@ -142,6 +150,7 @@
 		// No sorting needed - elements are already in correct order from view.elements (reversed)
 		return items;
 	}
+
 
 	function handleSelectGroup(groupId: string) {
 		const group = $designState.groups[groupId];
@@ -477,6 +486,7 @@
 							elements={$designState.elements}
 							{selectedIds}
 							onSelect={handleSelectElement}
+							onSelectGroup={handleSelectGroup}
 							onToggleVisibility={handleToggleVisibility}
 							onToggleLock={handleToggleLock}
 							onRename={handleRename}
