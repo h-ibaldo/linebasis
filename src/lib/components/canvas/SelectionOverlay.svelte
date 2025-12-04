@@ -3602,11 +3602,46 @@
 		<!-- Multi-element selection - single bounding box -->
 		<!-- Note: groupBounds already accounts for rotated elements by calculating their corners -->
 		<!-- groupBounds is reactive to groupPendingTransforms, so it updates in real-time during interactions -->
+		{@const commonParentId = (() => {
+			// Check if all selected elements share the same parent
+			const firstParent = selectedElements[0]?.parentId;
+			if (firstParent === undefined) return null;
+			return selectedElements.every(el => el.parentId === firstParent) ? firstParent : null;
+		})()}
+		{@const commonParent = commonParentId ? $designState.elements[commonParentId] : null}
+		{@const groupParentTransform = commonParent ? (() => {
+			const absPos = getAbsolutePosition(commonParent);
+			const ancestorRot = getCumulativeRotation(commonParent);
+			const totalRot = ancestorRot + (commonParent.rotation || 0);
+
+			let pos = absPos;
+			if (commonParent.parentId) {
+				const angleRad = ancestorRot * (Math.PI / 180);
+				const cos = Math.cos(angleRad);
+				const sin = Math.sin(angleRad);
+				const halfW = commonParent.size.width / 2;
+				const halfH = commonParent.size.height / 2;
+
+				const rotatedHalfW = halfW * cos - halfH * sin;
+				const rotatedHalfH = halfW * sin + halfH * cos;
+
+				pos = {
+					x: absPos.x - halfW + rotatedHalfW,
+					y: absPos.y - halfH + rotatedHalfH
+				};
+			}
+
+			return {
+				position: pos,
+				rotation: totalRot,
+				size: commonParent.size
+			};
+		})() : null}
 		<SelectionUI
 			element={{
 				id: 'group',
 				type: 'div',
-				parentId: null,
+				parentId: commonParentId,
 				pageId: '',
 				position: { x: groupBounds.x, y: groupBounds.y },
 				size: { width: groupBounds.width, height: groupBounds.height },
@@ -3622,6 +3657,7 @@
 			pendingSize={null}
 			pendingRadius={null}
 			rotation={0}
+			parentTransform={groupParentTransform}
 			onMouseDown={(e, handle) => startGroupInteraction(e, handle)}
 		/>
 	{/if}
