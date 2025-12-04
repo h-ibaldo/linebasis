@@ -77,6 +77,7 @@
 	// Group expand/collapse state
 	// Track expanded state as a Map for reliable reactivity (default: true = expanded)
 	let groupExpandedState = new Map<string, boolean>();
+	let groupExpandedStateKey = 0; // Increment on change to force reactivity
 	
 	function toggleGroupExpanded(groupId: string, e: MouseEvent) {
 		e.stopPropagation();
@@ -84,10 +85,13 @@
 		const newMap = new Map(groupExpandedState);
 		const currentState = newMap.get(groupId) !== false; // Default to true (expanded)
 		newMap.set(groupId, !currentState);
-		groupExpandedState = newMap; // Assign new Map to trigger reactivity
+		groupExpandedState = newMap;
+		groupExpandedStateKey = groupExpandedStateKey + 1; // Force reactivity
 	}
 	
 	function isGroupExpanded(groupId: string): boolean {
+		// Reference the key to make this reactive
+		groupExpandedStateKey; // Read to establish dependency
 		return groupExpandedState.get(groupId) !== false; // Default to true (expanded)
 	}
 
@@ -461,6 +465,7 @@
 				{#each layerItems as item (item.id)}
 					{#if item.type === 'group' && item.groupElements}
 						<!-- Group item -->
+						{@const isExpanded = groupExpandedState.get(item.id) !== false}
 						<div class="group-item">
 							<div
 								class="group-header"
@@ -470,15 +475,15 @@
 								<button 
 									class="expand-btn" 
 									on:click={(e) => toggleGroupExpanded(item.id, e)}
-									aria-label={isGroupExpanded(item.id) ? 'Collapse' : 'Expand'}
+									aria-label={isExpanded ? 'Collapse' : 'Expand'}
 								>
-									<span class="arrow" class:expanded={isGroupExpanded(item.id)}>▸</span>
+									<span class="arrow" class:expanded={isExpanded}>▸</span>
 								</button>
 								<span class="group-icon">⊞</span>
 								<span class="group-name">Group</span>
 							</div>
 							<!-- Group members (collapsible) -->
-							{#if isGroupExpanded(item.id)}
+							{#if isExpanded}
 							<div class="group-children">
 								{#each item.groupElements as element (element.id)}
 									<LayerTreeItem

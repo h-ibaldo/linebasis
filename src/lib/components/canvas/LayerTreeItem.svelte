@@ -42,6 +42,7 @@
 	// Group expand/collapse state for nested groups
 	// Track expanded state as a Map for reliable reactivity (default: true = expanded)
 	let nestedGroupExpandedState = new Map<string, boolean>();
+	let nestedGroupExpandedStateKey = 0; // Increment on change to force reactivity
 	
 	function toggleNestedGroupExpanded(groupId: string, e: MouseEvent) {
 		e.stopPropagation();
@@ -49,10 +50,13 @@
 		const newMap = new Map(nestedGroupExpandedState);
 		const currentState = newMap.get(groupId) !== false; // Default to true (expanded)
 		newMap.set(groupId, !currentState);
-		nestedGroupExpandedState = newMap; // Assign new Map to trigger reactivity
+		nestedGroupExpandedState = newMap;
+		nestedGroupExpandedStateKey = nestedGroupExpandedStateKey + 1; // Force reactivity
 	}
 	
 	function isNestedGroupExpanded(groupId: string): boolean {
+		// Reference the key to make this reactive
+		nestedGroupExpandedStateKey; // Read to establish dependency
 		return nestedGroupExpandedState.get(groupId) !== false; // Default to true (expanded)
 	}
 
@@ -401,6 +405,7 @@
 		{#each childLayerItems as item (item.id)}
 			{#if item.type === 'group' && item.groupElements}
 				<!-- Group item -->
+				{@const isExpanded = nestedGroupExpandedState.get(item.id) !== false}
 				<div class="group-item" style="padding-left: {(depth + 1) * 16}px">
 					<div
 						class="group-header"
@@ -410,15 +415,15 @@
 						<button 
 							class="expand-btn" 
 							on:click={(e) => toggleNestedGroupExpanded(item.id, e)}
-							aria-label={isNestedGroupExpanded(item.id) ? 'Collapse' : 'Expand'}
+							aria-label={isExpanded ? 'Collapse' : 'Expand'}
 						>
-							<span class="arrow" class:expanded={isNestedGroupExpanded(item.id)}>▸</span>
+							<span class="arrow" class:expanded={isExpanded}>▸</span>
 						</button>
 						<span class="group-icon">⊞</span>
 						<span class="group-name">Group</span>
 					</div>
 					<!-- Group members (collapsible) -->
-					{#if isNestedGroupExpanded(item.id)}
+					{#if isExpanded}
 					<div class="group-children">
 						{#each item.groupElements as groupElement (groupElement.id)}
 							<svelte:self
