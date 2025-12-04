@@ -3637,13 +3637,61 @@
 				size: commonParent.size
 			};
 		})() : null}
+		{@const groupPosition = (() => {
+			// groupBounds are in absolute coordinates
+			// If we have a parent, convert to parent-relative coordinates
+			if (!commonParent) {
+				return { x: groupBounds.x, y: groupBounds.y };
+			}
+
+			// Convert absolute position to parent-relative using center-based transformation
+			const groupCenterAbs = {
+				x: groupBounds.x + groupBounds.width / 2,
+				y: groupBounds.y + groupBounds.height / 2
+			};
+
+			// Get parent's absolute position
+			const parentAbsPos = getAbsolutePosition(commonParent);
+
+			// Calculate group center relative to parent (without rotation)
+			let relX = groupCenterAbs.x - parentAbsPos.x;
+			let relY = groupCenterAbs.y - parentAbsPos.y;
+
+			// If parent is rotated, apply inverse rotation
+			const parentRotation = commonParent.rotation || 0;
+			if (parentRotation !== 0) {
+				const angleRad = -parentRotation * (Math.PI / 180); // Negative for inverse
+				const cos = Math.cos(angleRad);
+				const sin = Math.sin(angleRad);
+
+				// Translate to parent center
+				const centerX = commonParent.size.width / 2;
+				const centerY = commonParent.size.height / 2;
+				const fromCenterX = relX - centerX;
+				const fromCenterY = relY - centerY;
+
+				// Rotate
+				const rotatedX = fromCenterX * cos - fromCenterY * sin;
+				const rotatedY = fromCenterX * sin + fromCenterY * cos;
+
+				// Translate back
+				relX = rotatedX + centerX;
+				relY = rotatedY + centerY;
+			}
+
+			// Convert back from center to top-left
+			return {
+				x: relX - groupBounds.width / 2,
+				y: relY - groupBounds.height / 2
+			};
+		})()}
 		<SelectionUI
 			element={{
 				id: 'group',
 				type: 'div',
 				parentId: commonParentId,
 				pageId: '',
-				position: { x: groupBounds.x, y: groupBounds.y },
+				position: groupPosition,
 				size: { width: groupBounds.width, height: groupBounds.height },
 				styles: {},
 				typography: {},
