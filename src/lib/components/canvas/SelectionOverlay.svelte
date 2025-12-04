@@ -2390,18 +2390,33 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 					pendingPosition = tempPendingPosition;
 				}
 
-				// Update pending transforms for all group elements
-				if (isGroupInteraction) {
-					const deltaX = deltaCanvas.x;
-					const deltaY = deltaCanvas.y;
+			// Update pending transforms for all group elements using cursor-based calculation
+			// This matches single element drag logic for nested rotated parents
+			if (isGroupInteraction) {
+				const canvasElement = document.querySelector('.canvas') as HTMLElement | null;
+				const canvasRect = canvasElement?.getBoundingClientRect();
+
+				if (canvasRect) {
+					const cursorCanvasX = (e.clientX - canvasRect.left - viewport.x) / viewport.scale;
+					const cursorCanvasY = (e.clientY - canvasRect.top - viewport.y) / viewport.scale;
 
 					groupPendingTransforms = new Map(
 						groupStartElements.map(el => {
-							// Use rotation stored at drag start (preserves it throughout drag)
+							// Calculate element center from cursor minus the stored offset
+							const offset = groupDragOffsets.get(el.id) || { x: 0, y: 0 };
+							const elementCenterX = cursorCanvasX - offset.x;
+							const elementCenterY = cursorCanvasY - offset.y;
+
+							// Calculate top-left position from center
+							const position = {
+								x: elementCenterX - el.width / 2,
+								y: elementCenterY - el.height / 2
+							};
+
 							return [
 								el.id,
 								{
-									position: { x: el.x + deltaX, y: el.y + deltaY },
+									position,
 									size: { width: el.width, height: el.height },
 									rotation: el.rotation
 								}
@@ -2409,6 +2424,7 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 						})
 					);
 				}
+			}
 			}
 		} else if (interactionMode === 'resizing' && resizeHandle) {
 			// Check if scale tool is active OR shift key is held - if so, maintain aspect ratio
