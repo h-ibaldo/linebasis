@@ -75,24 +75,17 @@
 	let contextMenu: { x: number; y: number; elementId: string } | null = null;
 
 	// Group expand/collapse state
-	// Track expanded state as a Map for reliable reactivity (default: true = expanded)
-	let groupExpandedState = new Map<string, boolean>();
-	let groupExpandedStateKey = 0; // Increment on change to force reactivity
+	// Track collapsed groups as a simple object for reliable reactivity
+	// If a groupId is in this object with value true, it's collapsed (default: expanded)
+	let collapsedGroups: Record<string, boolean> = {};
 	
 	function toggleGroupExpanded(groupId: string, e: MouseEvent) {
 		e.stopPropagation();
-		// Toggle expanded state - create new Map to trigger reactivity
-		const newMap = new Map(groupExpandedState);
-		const currentState = newMap.get(groupId) !== false; // Default to true (expanded)
-		newMap.set(groupId, !currentState);
-		groupExpandedState = newMap;
-		groupExpandedStateKey = groupExpandedStateKey + 1; // Force reactivity
-	}
-	
-	function isGroupExpanded(groupId: string): boolean {
-		// Reference the key to make this reactive
-		groupExpandedStateKey; // Read to establish dependency
-		return groupExpandedState.get(groupId) !== false; // Default to true (expanded)
+		// Toggle collapsed state - create new object to trigger reactivity
+		collapsedGroups = {
+			...collapsedGroups,
+			[groupId]: !collapsedGroups[groupId] // Toggle: true = collapsed, undefined/false = expanded
+		};
 	}
 
 	// Count existing views to auto-name
@@ -465,7 +458,6 @@
 				{#each layerItems as item (item.id)}
 					{#if item.type === 'group' && item.groupElements}
 						<!-- Group item -->
-						{@const isExpanded = groupExpandedState.get(item.id) !== false}
 						<div class="group-item">
 							<div
 								class="group-header"
@@ -475,15 +467,15 @@
 								<button 
 									class="expand-btn" 
 									on:click={(e) => toggleGroupExpanded(item.id, e)}
-									aria-label={isExpanded ? 'Collapse' : 'Expand'}
+									aria-label={!collapsedGroups[item.id] ? 'Collapse' : 'Expand'}
 								>
-									<span class="arrow" class:expanded={isExpanded}>▸</span>
+									<span class="arrow" class:expanded={!collapsedGroups[item.id]}>▸</span>
 								</button>
 								<span class="group-icon">⊞</span>
 								<span class="group-name">Group</span>
 							</div>
 							<!-- Group members (collapsible) -->
-							{#if isExpanded}
+							{#if !collapsedGroups[item.id]}
 							<div class="group-children">
 								{#each item.groupElements as element (element.id)}
 									<LayerTreeItem

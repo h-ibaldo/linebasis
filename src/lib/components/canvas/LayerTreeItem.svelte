@@ -40,24 +40,17 @@
 	let editingName = '';
 	
 	// Group expand/collapse state for nested groups
-	// Track expanded state as a Map for reliable reactivity (default: true = expanded)
-	let nestedGroupExpandedState = new Map<string, boolean>();
-	let nestedGroupExpandedStateKey = 0; // Increment on change to force reactivity
+	// Track collapsed groups as a simple object for reliable reactivity
+	// If a groupId is in this object with value true, it's collapsed (default: expanded)
+	let collapsedNestedGroups: Record<string, boolean> = {};
 	
 	function toggleNestedGroupExpanded(groupId: string, e: MouseEvent) {
 		e.stopPropagation();
-		// Toggle expanded state - create new Map to trigger reactivity
-		const newMap = new Map(nestedGroupExpandedState);
-		const currentState = newMap.get(groupId) !== false; // Default to true (expanded)
-		newMap.set(groupId, !currentState);
-		nestedGroupExpandedState = newMap;
-		nestedGroupExpandedStateKey = nestedGroupExpandedStateKey + 1; // Force reactivity
-	}
-	
-	function isNestedGroupExpanded(groupId: string): boolean {
-		// Reference the key to make this reactive
-		nestedGroupExpandedStateKey; // Read to establish dependency
-		return nestedGroupExpandedState.get(groupId) !== false; // Default to true (expanded)
+		// Toggle collapsed state - create new object to trigger reactivity
+		collapsedNestedGroups = {
+			...collapsedNestedGroups,
+			[groupId]: !collapsedNestedGroups[groupId] // Toggle: true = collapsed, undefined/false = expanded
+		};
 	}
 
 	$: isSelected = selectedIds.includes(element.id);
@@ -415,15 +408,15 @@
 						<button 
 							class="expand-btn" 
 							on:click={(e) => toggleNestedGroupExpanded(item.id, e)}
-							aria-label={isExpanded ? 'Collapse' : 'Expand'}
+							aria-label={!collapsedNestedGroups[item.id] ? 'Collapse' : 'Expand'}
 						>
-							<span class="arrow" class:expanded={isExpanded}>▸</span>
+							<span class="arrow" class:expanded={!collapsedNestedGroups[item.id]}>▸</span>
 						</button>
 						<span class="group-icon">⊞</span>
 						<span class="group-name">Group</span>
 					</div>
 					<!-- Group members (collapsible) -->
-					{#if isExpanded}
+					{#if !collapsedNestedGroups[item.id]}
 					<div class="group-children">
 						{#each item.groupElements as groupElement (groupElement.id)}
 							<svelte:self
