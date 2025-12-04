@@ -1029,6 +1029,68 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 		return { x, y };
 	}
 
+	// Helper: Convert absolute position to a specific parent's relative space
+	// This properly handles all ancestor rotations up to the target parent
+	function absoluteToParentSpace(absolutePos: { x: number; y: number }, targetParent: Element): { x: number; y: number } {
+		const state = get(designState);
+		
+		// Build ancestor chain from root to target parent
+		const ancestors: Array<{
+			position: { x: number; y: number };
+			size: { width: number; height: number };
+			rotation: number;
+		}> = [];
+		let currentParent = targetParent;
+
+		while (currentParent) {
+			ancestors.unshift({
+				position: currentParent.position,
+				size: currentParent.size,
+				rotation: currentParent.rotation || 0
+			});
+
+			if (!currentParent.parentId) break;
+			const nextParent = state.elements[currentParent.parentId];
+			if (!nextParent) break;
+			currentParent = nextParent;
+		}
+
+		// Start with absolute position
+		let x = absolutePos.x;
+		let y = absolutePos.y;
+
+		// Apply inverse transform for each ancestor (from root to target parent)
+		for (const ancestor of ancestors) {
+			// Subtract the ancestor's position (in its parent's coordinate space)
+			x -= ancestor.position.x;
+			y -= ancestor.position.y;
+
+			// If ancestor is rotated, apply inverse rotation around its center
+			if (ancestor.rotation !== 0) {
+				const centerX = ancestor.size.width / 2;
+				const centerY = ancestor.size.height / 2;
+
+				// Translate to origin (relative to ancestor's center)
+				const relX = x - centerX;
+				const relY = y - centerY;
+
+				// Apply inverse rotation
+				const angleRad = -ancestor.rotation * (Math.PI / 180);
+				const cos = Math.cos(angleRad);
+				const sin = Math.sin(angleRad);
+
+				const rotatedX = relX * cos - relY * sin;
+				const rotatedY = relX * sin + relY * cos;
+
+				// Translate back from origin
+				x = rotatedX + centerX;
+				y = rotatedY + centerY;
+			}
+		}
+
+		return { x, y };
+	}
+
 	// Helper: Get display position (pending or actual, in absolute coordinates)
 	function getDisplayPosition(element: Element): { x: number; y: number } {
 		if (isGroupInteraction && groupPendingTransforms.has(element.id)) {
@@ -3703,10 +3765,8 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 
 			// Calculate bounds from element positions in parent-relative space
 			let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-			const parentAbsPos = getAbsolutePosition(commonParent);
-			const parentRotation = commonParent.rotation || 0;
 
-		for (const el of selectedElements) {
+			for (const el of selectedElements) {
 				const hasPending = isGroupInteraction && groupPendingTransforms.has(el.id);
 				const pending = hasPending ? groupPendingTransforms.get(el.id) : null;
 				const size = pending ? pending.size : getDisplaySize(el);
@@ -3714,43 +3774,40 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 
 				// For nested elements: use parent-relative position directly when not dragging
 				// For pending transforms during drag: convert absolute to parent-relative
-				let localPos;
-
-				if (pending) {
-					// Pending transforms store absolute positions - convert to parent-relative
-					const absPos = pending.position;
-					const centerAbs = {
-						x: absPos.x + size.width / 2,
-						y: absPos.y + size.height / 2
-					};
-
-					// Translate relative to parent
-					let relX = centerAbs.x - parentAbsPos.x;
-					let relY = centerAbs.y - parentAbsPos.y;
-
-					// Apply inverse parent rotation if needed
-					if (parentRotation !== 0) {
-						const angleRad = -parentRotation * (Math.PI / 180);
-						const cos = Math.cos(angleRad);
-						const sin = Math.sin(angleRad);
-						const centerX = commonParent.size.width / 2;
-						const centerY = commonParent.size.height / 2;
-						const fromCenterX = relX - centerX;
-						const fromCenterY = relY - centerY;
-						const rotatedX = fromCenterX * cos - fromCenterY * sin;
-						const rotatedY = fromCenterX * sin + fromCenterY * cos;
-						relX = rotatedX + centerX;
-						relY = rotatedY + centerY;
+				const localPos = (() => {
+					if (pending) {
+						// Pending transforms store absolute positions - convert to common parent's relative space
+						const absPos = pending.position;
+						// Use center-based transformation to properly handle rotations
+						const centerAbs = {
+							x: absPos.x + size.width / 2,
+							y: absPos.y + size.height / 2
+						};
+						const centerLocal = absoluteToParentSpace(centerAbs, commonParent);
+						return {
+							x: centerLocal.x - size.width / 2,
+							y: centerLocal.y - size.height / 2
+						};
+					} else {
+						// No pending - need to check if element's immediate parent is the common parent
+						if (el.parentId === commonParent.id) {
+							// Element is direct child of common parent - position is already in correct space
+							return el.position;
+						} else {
+							// Element is nested deeper - convert from absolute to common parent's space
+							const absPos = getDisplayPosition(el);
+							const centerAbs = {
+								x: absPos.x + size.width / 2,
+								y: absPos.y + size.height / 2
+							};
+							const centerLocal = absoluteToParentSpace(centerAbs, commonParent);
+							return {
+								x: centerLocal.x - size.width / 2,
+								y: centerLocal.y - size.height / 2
+							};
+						}
 					}
-
-					localPos = {
-						x: relX - size.width / 2,
-						y: relY - size.height / 2
-					};
-				} else {
-					// No pending - element.position is already parent-relative
-					localPos = el.position;
-				}
+				})();
 
 				// Calculate bounds (accounting for element's own rotation)
 				if (rotation !== 0) {
