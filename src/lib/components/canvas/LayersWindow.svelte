@@ -75,14 +75,20 @@
 	let contextMenu: { x: number; y: number; elementId: string } | null = null;
 
 	// Group expand/collapse state
-	let expandedGroups = new Set<string>();
+	// Track collapsed groups (empty set means all groups are expanded by default)
+	let collapsedGroups = new Set<string>();
+	
+	$: expandedGroups = new Set(
+		Object.keys($designState.groups).filter(groupId => !collapsedGroups.has(groupId))
+	);
+	
 	function toggleGroupExpanded(groupId: string) {
-		if (expandedGroups.has(groupId)) {
-			expandedGroups.delete(groupId);
+		if (collapsedGroups.has(groupId)) {
+			collapsedGroups.delete(groupId);
 		} else {
-			expandedGroups.add(groupId);
+			collapsedGroups.add(groupId);
 		}
-		expandedGroups = expandedGroups; // Trigger reactivity
+		collapsedGroups = collapsedGroups; // Trigger reactivity
 	}
 
 	// Count existing views to auto-name
@@ -464,15 +470,15 @@
 								<button 
 									class="expand-btn" 
 									on:click|stopPropagation={() => toggleGroupExpanded(item.id)} 
-									aria-label={expandedGroups.has(item.id) ? 'Collapse' : 'Expand'}
+									aria-label={isGroupExpanded(item.id) ? 'Collapse' : 'Expand'}
 								>
-									<span class="arrow" class:expanded={expandedGroups.has(item.id)}>▸</span>
+									<span class="arrow" class:expanded={isGroupExpanded(item.id)}>▸</span>
 								</button>
 								<span class="group-icon">⊞</span>
 								<span class="group-name">Group</span>
 							</div>
 							<!-- Group members (collapsible) -->
-							{#if expandedGroups.has(item.id)}
+							{#if isGroupExpanded(item.id)}
 							<div class="group-children">
 								{#each item.groupElements as element (element.id)}
 									<LayerTreeItem
