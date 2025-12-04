@@ -516,6 +516,7 @@
 	let dragOffsetCanvas = { x: 0, y: 0 }; // Offset from cursor to element's top-left at drag start
 	let rotationStartCenter: { x: number; y: number; screenX: number; screenY: number } | null = null; // Fixed center at rotation start (for child elements)
 	let groupStartElements: Array<{ id: string; x: number; y: number; width: number; height: number; rotation: number; parentId: string | null }> = [];
+let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offset from cursor to each element's center
 	let hasMovedPastThreshold = false; // Track if we've moved past the initial dead zone
 	let initialHandlePosition: Point | null = null; // The ideal position of the handle being dragged at start
 	let mouseToHandleOffset: Point = { x: 0, y: 0 }; // Offset from mouse click to ideal handle position
@@ -1973,32 +1974,45 @@
 				}
 			}
 
-			// If group interaction, initialize groupPendingTransforms with current DOM positions
-			// Use DOM-measured positions to handle rotated parents correctly (same as single element drag)
+			// If group interaction, initialize groupPendingTransforms and calculate drag offsets
+			// Use cursor-based approach (same as single element drag) for rotated parents
 			if (isGroupInteraction) {
 				groupPendingTransforms = new Map();
+				groupDragOffsets = new Map();
 				const canvasElement = document.querySelector('.canvas') as HTMLElement | null;
 				const canvasRect = canvasElement?.getBoundingClientRect();
+
+				// Calculate cursor position in canvas space at drag start
+				const cursorCanvasX = canvasRect ? (e.clientX - canvasRect.left - viewport.x) / viewport.scale : 0;
+				const cursorCanvasY = canvasRect ? (e.clientY - canvasRect.top - viewport.y) / viewport.scale : 0;
 
 				groupStartElements.forEach(el => {
 					// Get element's actual rendered position from DOM
 					const elementDom = document.querySelector(`[data-element-id="${el.id}"]`) as HTMLElement | null;
 					let initialPosition = { x: el.x, y: el.y };
+					let elementCenterCanvasX = el.x + el.width / 2;
+					let elementCenterCanvasY = el.y + el.height / 2;
 
 					if (canvasRect && elementDom) {
 						// Measure actual rendered center from DOM
 						const elementRect = elementDom.getBoundingClientRect();
 						const elementCenterScreenX = elementRect.left + elementRect.width / 2;
 						const elementCenterScreenY = elementRect.top + elementRect.height / 2;
-						const elementCenterCanvasX = (elementCenterScreenX - canvasRect.left - viewport.x) / viewport.scale;
-						const elementCenterCanvasY = (elementCenterScreenY - canvasRect.top - viewport.y) / viewport.scale;
+						elementCenterCanvasX = (elementCenterScreenX - canvasRect.left - viewport.x) / viewport.scale;
+						elementCenterCanvasY = (elementCenterScreenY - canvasRect.top - viewport.y) / viewport.scale;
 
-						// Calculate position from center (consistent with drag logic)
+						// Calculate position from center
 						initialPosition = {
 							x: elementCenterCanvasX - el.width / 2,
 							y: elementCenterCanvasY - el.height / 2
 						};
 					}
+
+					// Calculate offset from cursor to element center (for cursor-based drag)
+					groupDragOffsets.set(el.id, {
+						x: cursorCanvasX - elementCenterCanvasX,
+						y: cursorCanvasY - elementCenterCanvasY
+					});
 
 					groupPendingTransforms.set(el.id, {
 						position: initialPosition,
@@ -3484,6 +3498,7 @@
 		radiusValuesWhenToggled = null;
 		groupStartElements = [];
 		groupPendingTransforms = new Map();
+		groupDragOffsets = new Map();
 		hasMovedPastThreshold = false;
 		initialHandlePosition = null;
 		mouseToHandleOffset = { x: 0, y: 0 };
