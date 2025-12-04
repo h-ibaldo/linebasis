@@ -77,13 +77,19 @@
 	// Group expand/collapse state
 	// Track collapsed groups (empty set means all groups are expanded by default)
 	let collapsedGroups = new Set<string>();
+	let collapsedGroupsSize = 0; // Track size for reactivity
 	
 	function toggleGroupExpanded(groupId: string, e: MouseEvent) {
 		e.stopPropagation();
 		// Create a completely new Set to ensure Svelte detects the change
-		collapsedGroups = new Set(collapsedGroups).has(groupId)
-			? new Set([...collapsedGroups].filter(id => id !== groupId))
-			: new Set([...collapsedGroups, groupId]);
+		const newSet = new Set(collapsedGroups);
+		if (newSet.has(groupId)) {
+			newSet.delete(groupId);
+		} else {
+			newSet.add(groupId);
+		}
+		collapsedGroups = newSet;
+		collapsedGroupsSize = newSet.size; // Update size to trigger reactivity
 	}
 
 	// Count existing views to auto-name

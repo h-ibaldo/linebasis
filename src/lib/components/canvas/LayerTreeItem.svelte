@@ -42,6 +42,7 @@
 	// Group expand/collapse state for nested groups (default to all groups expanded)
 	// Track which groups are collapsed - if a group is not in this set, it's expanded
 	let collapsedNestedGroups = new Set<string>();
+	let collapsedNestedGroupsSize = 0; // Track size for reactivity
 	
 	function toggleNestedGroupExpanded(groupId: string, e: MouseEvent) {
 		e.stopPropagation();
@@ -52,7 +53,8 @@
 		} else {
 			newSet.add(groupId);
 		}
-		collapsedNestedGroups = newSet; // Assign new Set to trigger reactivity
+		collapsedNestedGroups = newSet;
+		collapsedNestedGroupsSize = newSet.size; // Update size to trigger reactivity
 	}
 
 	$: isSelected = selectedIds.includes(element.id);
