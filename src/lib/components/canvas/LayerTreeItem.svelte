@@ -398,7 +398,6 @@
 		{#each childLayerItems as item (item.id)}
 			{#if item.type === 'group' && item.groupElements}
 				<!-- Group item -->
-				{@const isExpanded = nestedGroupExpandedState.get(item.id) !== false}
 				<div class="group-item" style="padding-left: {(depth + 1) * 16}px">
 					<div
 						class="group-header"
