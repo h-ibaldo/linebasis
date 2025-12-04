@@ -90,6 +90,10 @@
 		}
 		collapsedGroups = collapsedGroups; // Trigger reactivity
 	}
+	
+	function isGroupExpanded(groupId: string): boolean {
+		return !collapsedGroups.has(groupId);
+	}
 
 	// Count existing views to auto-name
 	$: viewCount = Object.values($designState.elements).filter(el => el.isView).length;
