@@ -3024,53 +3024,49 @@
 					const deltaY = pendingPosition.y - elementStartCanvas.y;
 					const state = get(designState);
 
-					// Move all elements by the same delta as a single batch operation
-					// Convert absolute positions to parent-relative for nested elements
-					await moveElementsGroup(
-						groupStartElements.map(el => {
-							// Calculate new absolute position after drag
-							const newAbsX = el.x + deltaX;
-							const newAbsY = el.y + deltaY;
+				// Move all elements by the same delta as a single batch operation
+				// Use the final positions from groupPendingTransforms (already calculated during last mousemove)
+				// Convert absolute positions to parent-relative for nested elements
+				await moveElementsGroup(
+					groupStartElements.map(el => {
+						const element = state.elements[el.id];
+						if (!element) {
+							return { elementId: el.id, position: { x: el.x, y: el.y } };
+						}
 
-							// If element has a parent, convert absolute to parent-relative
-							// using the stored parentId from drag start
-							if (el.parentId) {
-								const element = state.elements[el.id];
-								if (element) {
-									// Use center-based transformation to handle rotated parents
-									const centerWorld = {
-										x: newAbsX + el.width / 2,
-										y: newAbsY + el.height / 2
-									};
-									const centerLocal = absoluteToRelativePosition(element, centerWorld);
-									const finalPos = {
-										x: centerLocal.x - el.width / 2,
-										y: centerLocal.y - el.height / 2
-									};
-									console.log(`[DROP] Element ${el.id}:`, {
-										dragStart: { x: el.x, y: el.y },
-										delta: { deltaX, deltaY },
-										newAbs: { x: newAbsX, y: newAbsY },
-										centerWorld,
-										centerLocal,
-										finalPos,
-										element: { position: element.position, parentId: element.parentId }
-									});
-									return {
-										elementId: el.id,
-										position: finalPos
-									};
-								}
-							}
+						// Get the final absolute position from groupPendingTransforms
+						const pendingTransform = groupPendingTransforms.get(el.id);
+						if (!pendingTransform) {
+							return { elementId: el.id, position: element.position };
+						}
 
-							// No parent or element not found - use absolute position
+						const finalAbsPos = pendingTransform.position;
+
+						// If element has a parent, convert absolute to parent-relative
+						if (el.parentId) {
+							// Use center-based transformation to handle rotated parents
+							const centerWorld = {
+								x: finalAbsPos.x + el.width / 2,
+								y: finalAbsPos.y + el.width / 2
+							};
+							const centerLocal = absoluteToRelativePosition(element, centerWorld);
+							const finalPos = {
+								x: centerLocal.x - el.width / 2,
+								y: centerLocal.y - el.height / 2
+							};
 							return {
 								elementId: el.id,
-								position: { x: newAbsX, y: newAbsY }
+								position: finalPos
 							};
-						})
-					);
-				}
+						}
+
+						// No parent - use absolute position directly
+						return {
+							elementId: el.id,
+							position: finalAbsPos
+						};
+					})
+				);				}
 			} else if (interactionMode === 'resizing' && pendingSize && pendingPosition) {
 				const sizeChanged = sizeChangedW > CANVAS_INTERACTION.MOVEMENT_THRESHOLD || sizeChangedH > CANVAS_INTERACTION.MOVEMENT_THRESHOLD;
 
