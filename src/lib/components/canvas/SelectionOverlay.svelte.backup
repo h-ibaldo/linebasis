@@ -3649,51 +3649,52 @@
 			const parentAbsPos = getAbsolutePosition(commonParent);
 			const parentRotation = commonParent.rotation || 0;
 
-		for (const el of selectedElements) {
-				const hasPending = isGroupInteraction && groupPendingTransforms.has(el.id);
-				const pending = hasPending ? groupPendingTransforms.get(el.id) : null;
-				const size = pending ? pending.size : getDisplaySize(el);
-				const rotation = pending ? (pending.rotation || 0) : getDisplayRotation(el);
+			for (const el of selectedElements) {
+			const hasPending = isGroupInteraction && groupPendingTransforms.has(el.id);
+			const pending = hasPending ? groupPendingTransforms.get(el.id) : null;
 
-				// For nested elements: use parent-relative position directly when not dragging
-				// For pending transforms during drag: convert absolute to parent-relative
-				let localPos;
+			const size = hasPending ? pending!.size : getDisplaySize(el);
+			const rotation = hasPending ? (pending!.rotation || 0) : getDisplayRotation(el);
 
-				if (pending) {
-					// Pending transforms store absolute positions - convert to parent-relative
-					const absPos = pending.position;
-					const centerAbs = {
-						x: absPos.x + size.width / 2,
-						y: absPos.y + size.height / 2
-					};
 
-					// Translate relative to parent
-					let relX = centerAbs.x - parentAbsPos.x;
-					let relY = centerAbs.y - parentAbsPos.y;
 
-					// Apply inverse parent rotation if needed
-					if (parentRotation !== 0) {
-						const angleRad = -parentRotation * (Math.PI / 180);
-						const cos = Math.cos(angleRad);
-						const sin = Math.sin(angleRad);
-						const centerX = commonParent.size.width / 2;
-						const centerY = commonParent.size.height / 2;
-						const fromCenterX = relX - centerX;
-						const fromCenterY = relY - centerY;
-						const rotatedX = fromCenterX * cos - fromCenterY * sin;
-						const rotatedY = fromCenterX * sin + fromCenterY * cos;
-						relX = rotatedX + centerX;
-						relY = rotatedY + centerY;
-					}
 
-					localPos = {
-						x: relX - size.width / 2,
-						y: relY - size.height / 2
-					};
-				} else {
-					// No pending - element.position is already parent-relative
-					localPos = el.position;
+
+
+
+
+
+
+				// Convert element's absolute center to parent-relative
+				const centerAbs = {
+					x: pending!.position.x + size.width / 2,
+					y: pending!.position.y + size.height / 2
+				};
+
+				// Translate relative to parent
+				let relX = centerAbs.x - parentAbsPos.x;
+				let relY = centerAbs.y - parentAbsPos.y;
+
+				// Apply inverse parent rotation if needed
+				if (parentRotation !== 0) {
+					const angleRad = -parentRotation * (Math.PI / 180);
+					const cos = Math.cos(angleRad);
+					const sin = Math.sin(angleRad);
+					const centerX = commonParent.size.width / 2;
+					const centerY = commonParent.size.height / 2;
+					const fromCenterX = relX - centerX;
+					const fromCenterY = relY - centerY;
+					const rotatedX = fromCenterX * cos - fromCenterY * sin;
+					const rotatedY = fromCenterX * sin + fromCenterY * cos;
+					relX = rotatedX + centerX;
+					relY = rotatedY + centerY;
 				}
+
+				// Convert back to top-left
+				const localPos = {
+					x: relX - size.width / 2,
+					y: relY - size.height / 2
+				};
 
 				// Calculate bounds (accounting for element's own rotation)
 				if (rotation !== 0) {

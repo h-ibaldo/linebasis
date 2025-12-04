@@ -3657,7 +3657,7 @@
 
 				// For nested elements: use parent-relative position directly when not dragging
 				// For pending transforms during drag: convert absolute to parent-relative
-				let localPos;
+				let localPos: { x: number; y: number };
 
 				if (pending) {
 					// Pending transforms store absolute positions - convert to parent-relative
