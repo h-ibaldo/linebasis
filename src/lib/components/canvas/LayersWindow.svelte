@@ -75,21 +75,20 @@
 	let contextMenu: { x: number; y: number; elementId: string } | null = null;
 
 	// Group expand/collapse state
-	// Track collapsed groups (empty set means all groups are expanded by default)
-	let collapsedGroups = new Set<string>();
-	let collapsedGroupsSize = 0; // Track size for reactivity
+	// Track expanded state as a Map for reliable reactivity (default: true = expanded)
+	let groupExpandedState = new Map<string, boolean>();
 	
 	function toggleGroupExpanded(groupId: string, e: MouseEvent) {
 		e.stopPropagation();
-		// Create a completely new Set to ensure Svelte detects the change
-		const newSet = new Set(collapsedGroups);
-		if (newSet.has(groupId)) {
-			newSet.delete(groupId);
-		} else {
-			newSet.add(groupId);
-		}
-		collapsedGroups = newSet;
-		collapsedGroupsSize = newSet.size; // Update size to trigger reactivity
+		// Toggle expanded state - create new Map to trigger reactivity
+		const newMap = new Map(groupExpandedState);
+		const currentState = newMap.get(groupId) !== false; // Default to true (expanded)
+		newMap.set(groupId, !currentState);
+		groupExpandedState = newMap; // Assign new Map to trigger reactivity
+	}
+	
+	function isGroupExpanded(groupId: string): boolean {
+		return groupExpandedState.get(groupId) !== false; // Default to true (expanded)
 	}
 
 	// Count existing views to auto-name
@@ -471,15 +470,15 @@
 								<button 
 									class="expand-btn" 
 									on:click={(e) => toggleGroupExpanded(item.id, e)}
-									aria-label={!collapsedGroups.has(item.id) ? 'Collapse' : 'Expand'}
+									aria-label={isGroupExpanded(item.id) ? 'Collapse' : 'Expand'}
 								>
-									<span class="arrow" class:expanded={!collapsedGroups.has(item.id)}>▸</span>
+									<span class="arrow" class:expanded={isGroupExpanded(item.id)}>▸</span>
 								</button>
 								<span class="group-icon">⊞</span>
 								<span class="group-name">Group</span>
 							</div>
 							<!-- Group members (collapsible) -->
-							{#if !collapsedGroups.has(item.id)}
+							{#if isGroupExpanded(item.id)}
 							<div class="group-children">
 								{#each item.groupElements as element (element.id)}
 									<LayerTreeItem
