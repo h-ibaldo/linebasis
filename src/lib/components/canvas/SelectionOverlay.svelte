@@ -3202,13 +3202,38 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 							const relY = el.y - elementStartCanvas.y;
 							const newWidth = el.width * scaleX;
 							const newHeight = el.height * scaleY;
-							const newX = elementStartCanvas.x + deltaX + relX * scaleX;
-							const newY = elementStartCanvas.y + deltaY + relY * scaleY;
+							const newAbsX = elementStartCanvas.x + deltaX + relX * scaleX;
+							const newAbsY = elementStartCanvas.y + deltaY + relY * scaleY;
+
+							// Convert absolute position to parent-relative if element has a parent
+							let finalPosition: { x: number; y: number };
+							if (el.parentId) {
+								// Element is nested - convert absolute to parent-relative
+								const currentElement = selectedElements.find(e => e.id === el.id);
+								if (currentElement) {
+									// Use center-based transformation to properly handle rotations
+									const centerAbs = {
+										x: newAbsX + newWidth / 2,
+										y: newAbsY + newHeight / 2
+									};
+									const centerLocal = absoluteToRelativePosition(currentElement, centerAbs);
+									finalPosition = {
+										x: centerLocal.x - newWidth / 2,
+										y: centerLocal.y - newHeight / 2
+									};
+								} else {
+									// Fallback if element not found
+									finalPosition = { x: newAbsX, y: newAbsY };
+								}
+							} else {
+								// Root element - use absolute position directly
+								finalPosition = { x: newAbsX, y: newAbsY };
+							}
 
 							return {
 								elementId: el.id,
 								size: { width: newWidth, height: newHeight },
-								position: { x: newX, y: newY }
+								position: finalPosition
 							};
 						})
 					);
@@ -3241,11 +3266,30 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 						const newRelX = relX * cos - relY * sin;
 						const newRelY = relX * sin + relY * cos;
 
-						// Calculate new element position (top-left corner)
+						// Calculate new element position (top-left corner) in absolute coordinates
 						const newElCenterX = groupCenterX + newRelX;
 						const newElCenterY = groupCenterY + newRelY;
-						const newElX = newElCenterX - el.width / 2;
-						const newElY = newElCenterY - el.height / 2;
+						const newAbsX = newElCenterX - el.width / 2;
+						const newAbsY = newElCenterY - el.height / 2;
+
+						// Convert absolute position to parent-relative if element has a parent
+						let finalPosition: { x: number; y: number };
+						if (el.parentId && originalElement) {
+							// Element is nested - convert absolute to parent-relative
+							// Use center-based transformation to properly handle rotations
+							const centerAbs = {
+								x: newElCenterX,
+								y: newElCenterY
+							};
+							const centerLocal = absoluteToRelativePosition(originalElement, centerAbs);
+							finalPosition = {
+								x: centerLocal.x - el.width / 2,
+								y: centerLocal.y - el.height / 2
+							};
+						} else {
+							// Root element - use absolute position directly
+							finalPosition = { x: newAbsX, y: newAbsY };
+						}
 
 						// Apply rotation delta to element's original rotation
 						const newRotation = normalizeRotation(originalRotation + rotationDeltaDegrees);
@@ -3253,7 +3297,7 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 						return {
 							elementId: el.id,
 							rotation: newRotation,
-							position: { x: newElX, y: newElY }
+							position: finalPosition
 						};
 					})
 				);

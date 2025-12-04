@@ -661,4 +661,152 @@ test.describe('Group Drag in Rotated Parents', () => {
 		await page.mouse.up();
 		await page.waitForTimeout(100);
 	});
+
+	test('group resize should not misplace nested grouped elements', async ({ page }) => {
+		// Setup scene with nested grouped elements
+		const ids = await setupScene(page, 'non-rotated');
+		const [parentId, child1Id, child2Id] = ids;
+
+		// Select both children to create a group
+		await selectMultiple(page, [child1Id, child2Id]);
+		await page.waitForTimeout(300);
+
+		// Get initial positions
+		const initialChild1 = await getElementScreenBox(page, child1Id);
+		const initialChild2 = await getElementScreenBox(page, child2Id);
+		expect(initialChild1).not.toBeNull();
+		expect(initialChild2).not.toBeNull();
+
+		// Get selection UI to find resize handle
+		const selectionUI = await page.evaluate(() => {
+			const selectionBox = document.querySelector('.selection-container') as HTMLElement;
+			if (!selectionBox) return null;
+			const rect = selectionBox.getBoundingClientRect();
+			return {
+				x: rect.left,
+				y: rect.top,
+				width: rect.width,
+				height: rect.height,
+				right: rect.right,
+				bottom: rect.bottom
+			};
+		});
+
+		expect(selectionUI).not.toBeNull();
+
+		// Click on bottom-right resize handle (se handle)
+		const handleX = selectionUI!.right - 5;
+		const handleY = selectionUI!.bottom - 5;
+
+		await page.mouse.move(handleX, handleY);
+		await page.mouse.down();
+		await page.waitForTimeout(50);
+
+		// Resize by dragging
+		await page.mouse.move(handleX + 50, handleY + 50, { steps: 5 });
+		await page.waitForTimeout(100);
+
+		await page.mouse.up();
+		await page.waitForTimeout(200);
+
+		// Get final positions
+		const finalChild1 = await getElementScreenBox(page, child1Id);
+		const finalChild2 = await getElementScreenBox(page, child2Id);
+
+		// Elements should still be visible and reasonably positioned (not thousands of pixels away)
+		// Check that elements are still within a reasonable distance from their initial positions
+		const maxExpectedMovement = 200; // Allow for resize movement
+		const child1Movement = Math.sqrt(
+			Math.pow(finalChild1!.centerX - initialChild1!.centerX, 2) +
+			Math.pow(finalChild1!.centerY - initialChild1!.centerY, 2)
+		);
+		const child2Movement = Math.sqrt(
+			Math.pow(finalChild2!.centerX - initialChild2!.centerX, 2) +
+			Math.pow(finalChild2!.centerY - initialChild2!.centerY, 2)
+		);
+
+		console.log('Child1 movement:', child1Movement);
+		console.log('Child2 movement:', child2Movement);
+
+		// Screenshot to verify
+		await page.screenshot({ path: 'test-results/nested-group-resize-final.png', fullPage: true });
+
+		// Elements should not have moved thousands of pixels
+		expect(child1Movement).toBeLessThan(maxExpectedMovement);
+		expect(child2Movement).toBeLessThan(maxExpectedMovement);
+	});
+
+	test('group rotate should not misplace nested grouped elements', async ({ page }) => {
+		// Setup scene with nested grouped elements
+		const ids = await setupScene(page, 'non-rotated');
+		const [parentId, child1Id, child2Id] = ids;
+
+		// Select both children to create a group
+		await selectMultiple(page, [child1Id, child2Id]);
+		await page.waitForTimeout(300);
+
+		// Get initial positions
+		const initialChild1 = await getElementScreenBox(page, child1Id);
+		const initialChild2 = await getElementScreenBox(page, child2Id);
+		expect(initialChild1).not.toBeNull();
+		expect(initialChild2).not.toBeNull();
+
+		// Get selection UI to find rotation handle
+		const selectionUI = await page.evaluate(() => {
+			const selectionBox = document.querySelector('.selection-container') as HTMLElement;
+			if (!selectionBox) return null;
+			const rect = selectionBox.getBoundingClientRect();
+			return {
+				x: rect.left,
+				y: rect.top,
+				width: rect.width,
+				height: rect.height,
+				centerX: rect.left + rect.width / 2,
+				centerY: rect.top + rect.height / 2
+			};
+		});
+
+		expect(selectionUI).not.toBeNull();
+
+		// Click on rotation handle (above the selection box)
+		const rotationHandleX = selectionUI!.centerX;
+		const rotationHandleY = selectionUI!.y - 30; // Rotation handle is above the selection
+
+		await page.mouse.move(rotationHandleX, rotationHandleY);
+		await page.mouse.down();
+		await page.waitForTimeout(50);
+
+		// Rotate by dragging
+		await page.mouse.move(rotationHandleX + 50, rotationHandleY - 50, { steps: 5 });
+		await page.waitForTimeout(100);
+
+		await page.mouse.up();
+		await page.waitForTimeout(200);
+
+		// Get final positions
+		const finalChild1 = await getElementScreenBox(page, child1Id);
+		const finalChild2 = await getElementScreenBox(page, child2Id);
+
+		// Elements should still be visible and reasonably positioned (not thousands of pixels away)
+		// Check that elements are still within a reasonable distance from their initial positions
+		const maxExpectedMovement = 300; // Allow for rotation movement
+		const child1Movement = Math.sqrt(
+			Math.pow(finalChild1!.centerX - initialChild1!.centerX, 2) +
+			Math.pow(finalChild1!.centerY - initialChild1!.centerY, 2)
+		);
+		const child2Movement = Math.sqrt(
+			Math.pow(finalChild2!.centerX - initialChild2!.centerX, 2) +
+			Math.pow(finalChild2!.centerY - initialChild2!.centerY, 2)
+		);
+
+		console.log('Child1 movement:', child1Movement);
+		console.log('Child2 movement:', child2Movement);
+
+		// Screenshot to verify
+		await page.screenshot({ path: 'test-results/nested-group-rotate-final.png', fullPage: true });
+
+		// Elements should not have moved thousands of pixels
+		expect(child1Movement).toBeLessThan(maxExpectedMovement);
+		expect(child2Movement).toBeLessThan(maxExpectedMovement);
+	});
 });
