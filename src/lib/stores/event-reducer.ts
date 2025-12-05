@@ -958,6 +958,8 @@ function handleGroupUpdateStyles(state: DesignState, event: GroupUpdateStylesEve
 // Group Handlers
 // ============================================================================
 
+// DEPRECATED: Group handlers removed - groups are now regular divs
+/*
 function handleGroupElements(state: DesignState, event: GroupElementsEvent): DesignState {
 	const { groupId, elementIds } = event.payload;
 
@@ -1350,6 +1352,7 @@ function handleCreateGroupWrapper(state: DesignState, event: CreateGroupWrapperE
 		}
 	};
 }
+*/
 
 // ============================================================================
 // Style Handlers

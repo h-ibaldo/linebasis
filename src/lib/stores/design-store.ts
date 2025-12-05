@@ -1536,6 +1536,7 @@ export async function unwrapSelectedDiv(): Promise<void> {
  * Group selected elements
  * Grouped elements behave as if they are selected together - property changes affect all group members
  */
+// DEPRECATED: Groups are now regular divs - use CREATE_ELEMENT instead
 export async function groupElements(): Promise<void> {
 	const selected = get(selectedElements);
 	if (selected.length < 2) return; // Need at least 2 elements to group
