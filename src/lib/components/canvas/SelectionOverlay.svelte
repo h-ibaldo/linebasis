@@ -16,6 +16,7 @@
 	import { interactionState, updateInteractionStateThrottled, updateInteractionStateImmediate } from '$lib/stores/interaction-store';
 	import { currentTool } from '$lib/stores/tool-store';
 	import { CANVAS_INTERACTION } from '$lib/constants/canvas';
+	import { getAbsolutePosition, getAbsoluteTransform, absoluteToRelative, invalidateTransformCache } from '$lib/utils/coordinates';
 	import SelectionUI from './SelectionUI.svelte';
 
 	// Props
@@ -3964,24 +3965,31 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 			{@const groupBounds = getGroupBounds(groupElements)}
 			{@const commonParentId = (() => {
 				// Check if all group elements share the same parent
+				// For groups, the common parent is the group wrapper
 				const firstParent = groupElements[0]?.parentId;
 				if (firstParent === undefined) return null;
 				return groupElements.every(el => el.parentId === firstParent) ? firstParent : null;
 			})()}
 			{@const commonParent = commonParentId ? $designState.elements[commonParentId] : null}
 			{@const isParentGroupWrapper = commonParent?.isGroupWrapper || false}
-			{@const groupParentTransform = commonParent && !isParentGroupWrapper ? (() => {
-				const absPos = getAbsolutePosition(commonParent);
-				const ancestorRot = getCumulativeRotation(commonParent);
-				const totalRot = ancestorRot + (commonParent.rotation || 0);
+			{@const wrapperParentId = isParentGroupWrapper && commonParent ? commonParent.parentId : null}
+			{@const wrapperParent = wrapperParentId ? $designState.elements[wrapperParentId] : null}
+			{@const groupParentTransform = (() => {
+				// Use wrapperParent if group wrapper is inside a parent, otherwise use commonParent
+				const parentToUse = isParentGroupWrapper && wrapperParent ? wrapperParent : (commonParent && !isParentGroupWrapper ? commonParent : null);
+				if (!parentToUse) return null;
+				
+				const absPos = getAbsolutePosition(parentToUse);
+				const ancestorRot = getCumulativeRotation(parentToUse);
+				const totalRot = ancestorRot + (parentToUse.rotation || 0);
 
 				let pos = absPos;
-				if (commonParent.parentId) {
+				if (parentToUse.parentId) {
 					const angleRad = ancestorRot * (Math.PI / 180);
 					const cos = Math.cos(angleRad);
 					const sin = Math.sin(angleRad);
-					const halfW = commonParent.size.width / 2;
-					const halfH = commonParent.size.height / 2;
+					const halfW = parentToUse.size.width / 2;
+					const halfH = parentToUse.size.height / 2;
 
 					const rotatedHalfW = halfW * cos - halfH * sin;
 					const rotatedHalfH = halfW * sin + halfH * cos;
@@ -3995,24 +4003,27 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 				return {
 					position: pos,
 					rotation: totalRot,
-					size: commonParent.size
+					size: parentToUse.size
 				};
-			})() : null}
+			})()}
 			{@const localGroupBounds = (() => {
 				// When elements share a common parent, calculate bounds in parent-relative space
 				// This is critical for rotated parents - we need bounds in local space, not absolute
-				if (!commonParent) {
+				// But if the common parent is a group wrapper at root level, use absolute bounds
+				if (!commonParent || (isParentGroupWrapper && !wrapperParent)) {
 					return groupBounds; // Use absolute bounds as-is
 				}
 
 				// Calculate bounds from element positions in parent-relative space
+				// For groups, elements are children of the wrapper, so their positions are relative to the wrapper
+				// We need bounds relative to the wrapper (which is what localGroupBounds represents)
 				let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
 
 				for (const el of groupElements) {
 					const size = el.size;
 					const rotation = el.rotation || 0;
 
-					// Use parent-relative position directly
+					// Use parent-relative position directly (relative to wrapper for grouped elements)
 					const localPos = el.position;
 
 					if (rotation !== 0) {
@@ -4046,23 +4057,107 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 			{@const canvasElement = document.querySelector('.canvas')}
 			{#if canvasElement && groupElements.length > 0}
 				{@const canvasRect = canvasElement.getBoundingClientRect()}
-				{@const parentHasAutoLayout = commonParent?.autoLayout?.enabled || false}
-				{@const hasParent = commonParent !== null && !isParentGroupWrapper}
-				{@const parentWrapperScreenPos = hasParent && groupParentTransform ? {
-					x: canvasRect.left + viewport.x + groupParentTransform.position.x * viewport.scale,
-					y: canvasRect.top + viewport.y + groupParentTransform.position.y * viewport.scale
-				} : null}
-				{@const screenWidth = localGroupBounds.width * viewport.scale}
-				{@const screenHeight = localGroupBounds.height * viewport.scale}
-				{@const parentCenterX = hasParent && groupParentTransform ? groupParentTransform.size.width / 2 * viewport.scale : 0}
-				{@const parentCenterY = hasParent && groupParentTransform ? groupParentTransform.size.height / 2 * viewport.scale : 0}
-				{@const childScreenPos = hasParent ? {
-					x: localGroupBounds.x * viewport.scale,
-					y: localGroupBounds.y * viewport.scale
-				} : {
-					x: canvasRect.left + viewport.x + localGroupBounds.x * viewport.scale,
-					y: canvasRect.top + viewport.y + localGroupBounds.y * viewport.scale
-				}}
+				{@const parentHasAutoLayout = (wrapperParent || commonParent)?.autoLayout?.enabled || false}
+				{@const hasParent = wrapperParent !== null}
+				{@const absoluteGroupBounds = (() => {
+					if (isParentGroupWrapper && wrapperParent && commonParent) {
+						// Group wrapper is inside a parent div - convert wrapper position to absolute
+						const wrapperAbsPos = getAbsolutePosition(commonParent);
+						return {
+							x: wrapperAbsPos.x + localGroupBounds.x,
+							y: wrapperAbsPos.y + localGroupBounds.y,
+							width: localGroupBounds.width,
+							height: localGroupBounds.height
+						};
+					} else if (hasParent && commonParent) {
+						// Group elements are directly inside a parent (not a group wrapper)
+						const parentAbsPos = getAbsolutePosition(commonParent);
+						return {
+							x: parentAbsPos.x + localGroupBounds.x,
+							y: parentAbsPos.y + localGroupBounds.y,
+							width: localGroupBounds.width,
+							height: localGroupBounds.height
+						};
+					} else {
+						// No parent or group wrapper at root level - use absolute bounds directly
+						// localGroupBounds should already be absolute in this case
+						return localGroupBounds;
+					}
+				})()}
+				{@const parentWrapperScreenPos = hasParent && groupParentTransform ? (() => {
+					// For rotated parents, we need to position the wrapper at the parent's top-left
+					// Use the parent's position from groupParentTransform which is already adjusted for rotation
+					// This matches how individual element hover borders handle rotated parents
+					// The position in groupParentTransform is the parent's position after rotation adjustment
+					// (it accounts for the parent rotating around its center)
+					// This is the "unrotated position" that, when rotated around center, gives the actual origin
+					const parentPos = groupParentTransform.position;
+					return {
+						x: canvasRect.left + viewport.x + parentPos.x * viewport.scale,
+						y: canvasRect.top + viewport.y + parentPos.y * viewport.scale
+					};
+				})() : null}
+				{@const screenWidth = absoluteGroupBounds.width * viewport.scale}
+				{@const screenHeight = absoluteGroupBounds.height * viewport.scale}
+				{@const parentCenterX = hasParent && groupParentTransform ? (() => {
+					// Transform origin should be at the parent's center in screen coordinates
+					// relative to the parentWrapperScreenPos (which is the parent's top-left)
+					// This matches how individual element hover borders calculate it
+					return groupParentTransform.size.width / 2 * viewport.scale;
+				})() : 0}
+				{@const parentCenterY = hasParent && groupParentTransform ? (() => {
+					// Transform origin should be at the parent's center in screen coordinates
+					// relative to the parentWrapperScreenPos (which is the parent's top-left)
+					// This matches how individual element hover borders calculate it
+					return groupParentTransform.size.height / 2 * viewport.scale;
+				})() : 0}
+				{@const childScreenPos = (() => {
+					if (hasParent && groupParentTransform && (groupParentTransform.rotation || 0) !== 0) {
+						// For rotated parent: position relative to parent wrapper (in parent's local coordinate system)
+						// This matches how individual element hover borders work: pos.x * viewport.scale
+						// where pos is the element's position relative to the parent
+						if (isParentGroupWrapper && commonParent && wrapperParent) {
+							// Group elements are relative to wrapper, wrapper is relative to parent
+							// localGroupBounds is the bounds of group elements relative to the wrapper
+							// The wrapper's position is relative to the parent
+							// So the group's position relative to the parent = wrapper position + localGroupBounds
+							// This is the position in the parent's local (unrotated) coordinate system
+							// Example: wrapper at (50, 50), elements at (0, 0) and (100, 0) relative to wrapper
+							// localGroupBounds = (0, 0, 200, 100)
+							// groupPosRelativeToParent = (50, 50) + (0, 0) = (50, 50)
+							const wrapperPos = commonParent.position;
+							const groupPosRelativeToParent = {
+								x: wrapperPos.x + localGroupBounds.x,
+								y: wrapperPos.y + localGroupBounds.y
+							};
+							// Convert to screen coordinates (relative to parentWrapperScreenPos)
+							// This matches how individual element hover borders work
+							return {
+								x: groupPosRelativeToParent.x * viewport.scale,
+								y: groupPosRelativeToParent.y * viewport.scale
+							};
+						} else if (commonParent && !isParentGroupWrapper) {
+							// Group elements are directly relative to parent (no wrapper)
+							// localGroupBounds is already relative to the parent
+							return {
+								x: localGroupBounds.x * viewport.scale,
+								y: localGroupBounds.y * viewport.scale
+							};
+						} else {
+							// Fallback: use absolute position
+							return {
+								x: canvasRect.left + viewport.x + absoluteGroupBounds.x * viewport.scale,
+								y: canvasRect.top + viewport.y + absoluteGroupBounds.y * viewport.scale
+							};
+						}
+					} else {
+						// For non-rotated parent or no parent: use absolute position
+						return {
+							x: canvasRect.left + viewport.x + absoluteGroupBounds.x * viewport.scale,
+							y: canvasRect.top + viewport.y + absoluteGroupBounds.y * viewport.scale
+						};
+					}
+				})()}
 				
 				{#if hasParent && groupParentTransform && parentWrapperScreenPos && (groupParentTransform.rotation || 0) !== 0}
 					<!-- Group hover border with parent rotation -->
@@ -4073,6 +4168,7 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 							top: {parentWrapperScreenPos.y}px;
 							transform: rotate({groupParentTransform.rotation}deg);
 							transform-origin: {parentCenterX}px {parentCenterY}px;
+							will-change: transform;
 							pointer-events: none;
 						"
 					>
