@@ -31,9 +31,9 @@ import type {
 	GroupResizeElementsEvent,
 	GroupRotateElementsEvent,
 	GroupUpdateStylesEvent,
-	GroupElementsEvent,
-	UngroupElementsEvent,
-	CreateGroupWrapperEvent,
+	// GroupElementsEvent, // DEPRECATED
+	// UngroupElementsEvent, // DEPRECATED
+	// CreateGroupWrapperEvent, // DEPRECATED
 	UpdateStylesEvent,
 	UpdateTypographyEvent,
 	UpdateSpacingEvent,
@@ -152,13 +152,13 @@ export function reduceEvent(state: DesignState, event: DesignEvent): DesignState
 		case 'GROUP_UPDATE_STYLES':
 			return handleGroupUpdateStyles(state, event);
 
-		// Group operations
-		case 'GROUP_ELEMENTS':
-			return handleGroupElements(state, event);
-		case 'UNGROUP_ELEMENTS':
-			return handleUngroupElements(state, event);
-		case 'CREATE_GROUP_WRAPPER':
-			return handleCreateGroupWrapper(state, event);
+		// Group operations (DEPRECATED - groups are now regular divs)
+		// case 'GROUP_ELEMENTS':
+		// 	return handleGroupElements(state, event);
+		// case 'UNGROUP_ELEMENTS':
+		// 	return handleUngroupElements(state, event);
+		// case 'CREATE_GROUP_WRAPPER':
+		// 	return handleCreateGroupWrapper(state, event);
 
 		// Style operations
 		case 'UPDATE_STYLES':

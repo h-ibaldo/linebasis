@@ -27,10 +27,10 @@ export type EventType =
 	| 'GROUP_MOVE_ELEMENTS'
 	| 'GROUP_RESIZE_ELEMENTS'
 	| 'GROUP_ROTATE_ELEMENTS'
-	// Group operations
-	| 'GROUP_ELEMENTS'
-	| 'UNGROUP_ELEMENTS'
-	| 'CREATE_GROUP_WRAPPER'
+	// Group operations (DEPRECATED - groups are now regular divs)
+	// | 'GROUP_ELEMENTS'
+	// | 'UNGROUP_ELEMENTS'
+	// | 'CREATE_GROUP_WRAPPER'
 	// Style operations
 	| 'UPDATE_STYLES'
 	| 'GROUP_UPDATE_STYLES'
@@ -222,37 +222,40 @@ export interface GroupUpdateStylesEvent extends BaseEvent {
 }
 
 // ============================================================================
-// Group Events
+// Group Events (DEPRECATED - groups are now regular div elements)
 // ============================================================================
 
-export interface GroupElementsEvent extends BaseEvent {
-	type: 'GROUP_ELEMENTS';
-	payload: {
-		groupId: string;
-		elementIds: string[];
-	};
-}
+// DEPRECATED: Use CREATE_ELEMENT with type='div' and children instead
+// export interface GroupElementsEvent extends BaseEvent {
+// 	type: 'GROUP_ELEMENTS';
+// 	payload: {
+// 		groupId: string;
+// 		elementIds: string[];
+// 	};
+// }
 
-export interface UngroupElementsEvent extends BaseEvent {
-	type: 'UNGROUP_ELEMENTS';
-	payload: {
-		groupId: string;
-	};
-}
+// DEPRECATED: Use DELETE_ELEMENT on the wrapper div instead
+// export interface UngroupElementsEvent extends BaseEvent {
+// 	type: 'UNGROUP_ELEMENTS';
+// 	payload: {
+// 		groupId: string;
+// 	};
+// }
 
-export interface CreateGroupWrapperEvent extends BaseEvent {
-	type: 'CREATE_GROUP_WRAPPER';
-	payload: {
-		groupId: string;
-		wrapperId: string;
-		elementIds: string[];
-		wrapperPosition: Position;
-		wrapperSize: Size;
-		memberOffsets: Record<string, Position>;
-		parentId: string | null;
-		pageId: string;
-	};
-}
+// DEPRECATED: Use CREATE_ELEMENT with type='div' and children instead
+// export interface CreateGroupWrapperEvent extends BaseEvent {
+// 	type: 'CREATE_GROUP_WRAPPER';
+// 	payload: {
+// 		groupId: string;
+// 		wrapperId: string;
+// 		elementIds: string[];
+// 		wrapperPosition: Position;
+// 		wrapperSize: Size;
+// 		memberOffsets: Record<string, Position>;
+// 		parentId: string | null;
+// 		pageId: string;
+// 	};
+// }
 
 // ============================================================================
 // Style Events
@@ -399,9 +402,10 @@ export type DesignEvent =
 	| GroupResizeElementsEvent
 	| GroupRotateElementsEvent
 	| GroupUpdateStylesEvent
-	| GroupElementsEvent
-	| UngroupElementsEvent
-	| CreateGroupWrapperEvent
+	// DEPRECATED: Group events removed (groups are now regular divs)
+	// | GroupElementsEvent
+	// | UngroupElementsEvent
+	// | CreateGroupWrapperEvent
 	| UpdateStylesEvent
 	| UpdateTypographyEvent
 	| UpdateSpacingEvent
@@ -572,10 +576,12 @@ export interface Page {
 	// Array index 0 = bottom layer, last index = top layer
 }
 
+// DEPRECATED: Groups are now regular div elements with children
+// Keeping interface for backward compatibility during migration
 export interface Group {
 	id: string;
-	elementIds: string[]; // Element IDs that belong to this group (NOT including wrapper)
-	wrapperId?: string; // ID of the wrapper div (for new wrapper-based groups)
+	elementIds: string[];
+	wrapperId?: string;
 }
 
 export interface Component {
@@ -587,7 +593,7 @@ export interface Component {
 export interface DesignState {
 	pages: Record<string, Page>;
 	elements: Record<string, Element>;
-	groups: Record<string, Group>;
+	groups: Record<string, Group>; // DEPRECATED: Will be removed in Phase 2
 	components: Record<string, Component>;
 	pageOrder: string[];
 	currentPageId: string | null;
