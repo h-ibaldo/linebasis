@@ -33,9 +33,9 @@ import type {
 	GroupUpdateStylesEvent,
 	GroupElementsEvent,
 	UngroupElementsEvent,
+	CreateGroupWrapperEvent,
 	UpdateStylesEvent,
 	UpdateTypographyEvent,
-	ApplyTypographyPresetEvent,
 	UpdateSpacingEvent,
 	UpdateAutoLayoutEvent,
 	CreatePageEvent,
@@ -45,7 +45,8 @@ import type {
 	CreateComponentEvent,
 	UpdateComponentEvent,
 	DeleteComponentEvent,
-	InstanceComponentEvent
+	InstanceComponentEvent,
+	MigrateToUnifiedPositioningEvent
 } from '$lib/types/events';
 
 /**
@@ -156,6 +157,8 @@ export function reduceEvent(state: DesignState, event: DesignEvent): DesignState
 			return handleGroupElements(state, event);
 		case 'UNGROUP_ELEMENTS':
 			return handleUngroupElements(state, event);
+		case 'CREATE_GROUP_WRAPPER':
+			return handleCreateGroupWrapper(state, event);
 
 		// Style operations
 		case 'UPDATE_STYLES':
@@ -187,6 +190,10 @@ export function reduceEvent(state: DesignState, event: DesignEvent): DesignState
 		case 'INSTANCE_COMPONENT':
 			return handleInstanceComponent(state, event);
 
+		// Migration operations
+		case 'MIGRATE_TO_UNIFIED_POSITIONING':
+			return handleMigrateToUnifiedPositioning(state, event);
+
 		default:
 			return state;
 	}
@@ -209,6 +216,7 @@ function handleCreateElement(state: DesignState, event: CreateElementEvent): Des
 		type: elementType,
 		parentId,
 		pageId,
+		positionMode: 'absolute', // Default: absolute positioning
 		position,
 		size,
 		styles: styles || {},
@@ -304,10 +312,22 @@ function handleDeleteElement(state: DesignState, event: DeleteElementEvent): Des
 	// Remove from selection
 	const newSelectedElementIds = state.selectedElementIds.filter((id) => id !== elementId);
 
+	// If this is a group wrapper, also delete the group record
+	let newGroups = state.groups;
+	if (element.isGroupWrapper) {
+		const groupEntry = Object.entries(state.groups).find(([_, group]) => group.wrapperId === elementId);
+		if (groupEntry) {
+			const [groupId] = groupEntry;
+			newGroups = { ...state.groups };
+			delete newGroups[groupId];
+		}
+	}
+
 	return {
 		...state,
 		elements: newElements,
 		pages: newPages,
+		groups: newGroups,
 		selectedElementIds: newSelectedElementIds
 	};
 }
@@ -385,10 +405,78 @@ function handleGroupDeleteElements(state: DesignState, event: GroupDeleteElement
 	// Remove from selection
 	const newSelectedElementIds = state.selectedElementIds.filter(id => !idsToDelete.has(id));
 
+	// Check if any deleted elements were group wrappers or if all group elements are being deleted
+	let newGroups = state.groups;
+	const groupsToCheck = new Set<string>();
+
+	// First, check if any deleted elements are wrappers
+	for (const id of idsToDelete) {
+		const element = state.elements[id]; // Use original state to check
+		if (element?.isGroupWrapper) {
+			const groupEntry = Object.entries(state.groups).find(([_, group]) => group.wrapperId === id);
+			if (groupEntry) {
+				const [groupId] = groupEntry;
+				groupsToCheck.add(groupId);
+			}
+		} else if (element?.groupId) {
+			// Track groups that have elements being deleted
+			groupsToCheck.add(element.groupId);
+		}
+	}
+
+	// For each affected group, check if all elements are being deleted
+	for (const groupId of groupsToCheck) {
+		const group = state.groups[groupId];
+		if (!group) continue;
+
+		// Check if all group elements are being deleted
+		const allElementsDeleted = group.elementIds.every(id => idsToDelete.has(id));
+
+		if (allElementsDeleted) {
+			// All group elements are being deleted - also delete the wrapper if it exists
+			if (group.wrapperId && !idsToDelete.has(group.wrapperId)) {
+				// Wrapper is not in the deletion list, add it
+				const wrapper = newElements[group.wrapperId];
+				if (wrapper) {
+					idsToDelete.add(group.wrapperId);
+
+					// Remove wrapper from parent's children or page's canvasElements
+					if (wrapper.parentId && newElements[wrapper.parentId]) {
+						newElements[wrapper.parentId] = {
+							...newElements[wrapper.parentId],
+							children: newElements[wrapper.parentId].children.filter(id => id !== group.wrapperId)
+						};
+					} else if (!wrapper.parentId && newPages[wrapper.pageId]) {
+						newPages[wrapper.pageId] = {
+							...newPages[wrapper.pageId],
+							canvasElements: newPages[wrapper.pageId].canvasElements.filter(id => id !== group.wrapperId)
+						};
+					}
+
+					// Delete the wrapper element
+					delete newElements[group.wrapperId];
+				}
+			}
+
+			// Delete the group record
+			if (newGroups === state.groups) {
+				newGroups = { ...state.groups };
+			}
+			delete newGroups[groupId];
+		} else if (group.wrapperId && idsToDelete.has(group.wrapperId)) {
+			// Wrapper is being deleted - delete the group record
+			if (newGroups === state.groups) {
+				newGroups = { ...state.groups };
+			}
+			delete newGroups[groupId];
+		}
+	}
+
 	return {
 		...state,
 		elements: newElements,
 		pages: newPages,
+		groups: newGroups,
 		selectedElementIds: newSelectedElementIds
 	};
 }
@@ -612,9 +700,124 @@ function handleShiftElementLayer(state: DesignState, event: ShiftElementLayerEve
 	return state;
 }
 
+// Helper function to calculate bounding box of group elements (accounting for rotation)
+function calculateGroupBounds(groupElements: Element[]): { x: number; y: number; width: number; height: number } {
+	if (groupElements.length === 0) return { x: 0, y: 0, width: 0, height: 0 };
+
+	let minX = Infinity;
+	let minY = Infinity;
+	let maxX = -Infinity;
+	let maxY = -Infinity;
+
+	for (const el of groupElements) {
+		const rotation = el.rotation || 0;
+
+		if (rotation !== 0) {
+			// For rotated elements, calculate all four corners
+			const angleRad = rotation * (Math.PI / 180);
+			const cos = Math.cos(angleRad);
+			const sin = Math.sin(angleRad);
+
+			const width = el.size.width || 0;
+			const height = el.size.height || 0;
+			const centerX = el.position.x + width / 2;
+			const centerY = el.position.y + height / 2;
+
+			// Local corners (relative to center)
+			const halfW = width / 2;
+			const halfH = height / 2;
+			const localCorners = [
+				{ x: -halfW, y: -halfH }, // Top-left
+				{ x: halfW, y: -halfH },  // Top-right
+				{ x: halfW, y: halfH },   // Bottom-right
+				{ x: -halfW, y: halfH }   // Bottom-left
+			];
+
+			// Rotate each corner around center
+			for (const corner of localCorners) {
+				const worldX = centerX + corner.x * cos - corner.y * sin;
+				const worldY = centerY + corner.x * sin + corner.y * cos;
+				minX = Math.min(minX, worldX);
+				minY = Math.min(minY, worldY);
+				maxX = Math.max(maxX, worldX);
+				maxY = Math.max(maxY, worldY);
+			}
+		} else {
+			// Non-rotated elements use simple bounds
+			minX = Math.min(minX, el.position.x);
+			minY = Math.min(minY, el.position.y);
+			maxX = Math.max(maxX, el.position.x + (el.size.width || 0));
+			maxY = Math.max(maxY, el.position.y + (el.size.height || 0));
+		}
+	}
+
+	return {
+		x: minX,
+		y: minY,
+		width: maxX - minX,
+		height: maxY - minY
+	};
+}
+
+// Helper function to update wrapper bounds for a group
+function updateWrapperBounds(
+	newElements: Record<string, Element>,
+	groups: Record<string, Group>,
+	group: Group
+): void {
+	if (!group.wrapperId) return; // Old-style group without wrapper
+
+	const wrapper = newElements[group.wrapperId];
+	if (!wrapper) return;
+
+	// Get all group elements
+	const groupElements = group.elementIds
+		.map(id => newElements[id])
+		.filter(Boolean);
+
+	if (groupElements.length === 0) return;
+
+	// Calculate new bounding box (relative to current wrapper position)
+	const bounds = calculateGroupBounds(groupElements);
+
+	// The bounding box should start at (0, 0) relative to the wrapper
+	// If it doesn't, we need to adjust the wrapper position and element positions
+	const deltaX = bounds.x; // How much to shift wrapper and elements
+	const deltaY = bounds.y;
+
+	// Calculate new wrapper position (move by delta to keep bounding box at origin)
+	const newWrapperPosition = {
+		x: wrapper.position.x + deltaX,
+		y: wrapper.position.y + deltaY
+	};
+
+	// Update wrapper position and size
+	newElements[group.wrapperId] = {
+		...wrapper,
+		position: newWrapperPosition,
+		size: { width: bounds.width, height: bounds.height }
+	};
+
+	// Adjust element positions to be relative to new wrapper position
+	// (subtract delta so bounding box starts at (0, 0) relative to wrapper)
+	for (const el of groupElements) {
+		newElements[el.id] = {
+			...el,
+			position: {
+				x: el.position.x - deltaX,
+				y: el.position.y - deltaY
+			}
+		};
+	}
+}
+
 function handleGroupMoveElements(state: DesignState, event: GroupMoveElementsEvent): DesignState {
 	const { elements } = event.payload;
 	const newElements = { ...state.elements };
+	const newGroups = { ...state.groups };
+
+	// Track which groups need wrapper updates
+	const groupsToUpdate = new Set<string>();
 
 	// Update all elements atomically
 	for (const { elementId, position } of elements) {
@@ -624,18 +827,36 @@ function handleGroupMoveElements(state: DesignState, event: GroupMoveElementsEve
 				...element,
 				position
 			};
+
+			// Track groups that contain this element
+			if (element.groupId) {
+				groupsToUpdate.add(element.groupId);
+			}
+		}
+	}
+
+	// Update wrapper bounds for all affected groups
+	for (const groupId of groupsToUpdate) {
+		const group = newGroups[groupId];
+		if (group) {
+			updateWrapperBounds(newElements, newGroups, group);
 		}
 	}
 
 	return {
 		...state,
-		elements: newElements
+		elements: newElements,
+		groups: newGroups
 	};
 }
 
 function handleGroupResizeElements(state: DesignState, event: GroupResizeElementsEvent): DesignState {
 	const { elements } = event.payload;
 	const newElements = { ...state.elements };
+	const newGroups = { ...state.groups };
+
+	// Track which groups need wrapper updates
+	const groupsToUpdate = new Set<string>();
 
 	// Update all elements atomically
 	for (const { elementId, size, position } of elements) {
@@ -646,18 +867,36 @@ function handleGroupResizeElements(state: DesignState, event: GroupResizeElement
 				size,
 				...(position && { position })
 			};
+
+			// Track groups that contain this element
+			if (element.groupId) {
+				groupsToUpdate.add(element.groupId);
+			}
+		}
+	}
+
+	// Update wrapper bounds for all affected groups
+	for (const groupId of groupsToUpdate) {
+		const group = newGroups[groupId];
+		if (group) {
+			updateWrapperBounds(newElements, newGroups, group);
 		}
 	}
 
 	return {
 		...state,
-		elements: newElements
+		elements: newElements,
+		groups: newGroups
 	};
 }
 
 function handleGroupRotateElements(state: DesignState, event: GroupRotateElementsEvent): DesignState {
 	const { elements } = event.payload;
 	const newElements = { ...state.elements };
+	const newGroups = { ...state.groups };
+
+	// Track which groups need wrapper updates
+	const groupsToUpdate = new Set<string>();
 
 	// Update all elements atomically
 	for (const { elementId, rotation, position } of elements) {
@@ -668,12 +907,26 @@ function handleGroupRotateElements(state: DesignState, event: GroupRotateElement
 				rotation,
 				position
 			};
+
+			// Track groups that contain this element
+			if (element.groupId) {
+				groupsToUpdate.add(element.groupId);
+			}
+		}
+	}
+
+	// Update wrapper bounds for all affected groups
+	for (const groupId of groupsToUpdate) {
+		const group = newGroups[groupId];
+		if (group) {
+			updateWrapperBounds(newElements, newGroups, group);
 		}
 	}
 
 	return {
 		...state,
-		elements: newElements
+		elements: newElements,
+		groups: newGroups
 	};
 }
 
@@ -802,11 +1055,26 @@ function handleGroupElements(state: DesignState, event: GroupElementsEvent): Des
 		};
 	});
 
+	// Check if all elements share a group wrapper as parent
+	// If so, set wrapperId on the group
+	let wrapperId: string | undefined = undefined;
+	if (allSameParent && parentId) {
+		const parent = newElements[parentId];
+		if (parent?.isGroupWrapper) {
+			wrapperId = parentId;
+		}
+	}
+
+	// Update or create the group with wrapperId if applicable
+	const finalGroup: Group = wrapperId
+		? { ...group, wrapperId }
+		: group;
+
 	return {
 		...state,
 		groups: {
 			...state.groups,
-			[groupId]: group
+			[groupId]: finalGroup
 		},
 		elements: newElements,
 		pages: newPages
@@ -819,15 +1087,71 @@ function handleUngroupElements(state: DesignState, event: UngroupElementsEvent):
 
 	if (!group) return state;
 
-	// Remove groupId from all elements in the group
 	const newElements = { ...state.elements };
-	for (const elementId of group.elementIds) {
-		const element = newElements[elementId];
-		if (element) {
-			newElements[elementId] = {
-				...element,
-				groupId: null
-			};
+	let newPages = state.pages;
+
+	// Check if this is a new-style group with wrapper
+	if (group.wrapperId) {
+		const wrapper = newElements[group.wrapperId];
+
+		if (wrapper) {
+			// Move children out of wrapper to wrapper's parent
+			for (const memberId of group.elementIds) {
+				const member = newElements[memberId];
+				if (member) {
+					// Calculate absolute position (member position + wrapper position)
+					const absolutePos = {
+						x: member.position.x + wrapper.position.x,
+						y: member.position.y + wrapper.position.y
+					};
+
+					newElements[memberId] = {
+						...member,
+						groupId: null,
+						parentId: wrapper.parentId,
+						position: absolutePos
+					};
+				}
+			}
+
+			// Remove wrapper from parent's children array or page's canvasElements
+			if (wrapper.parentId && newElements[wrapper.parentId]) {
+				const parent = newElements[wrapper.parentId];
+				newElements[wrapper.parentId] = {
+					...parent,
+					children: parent.children
+						.filter(id => id !== group.wrapperId)
+						.concat(group.elementIds)
+				};
+			} else {
+				// Root level - update page's canvasElements
+				const page = state.pages[wrapper.pageId];
+				if (page) {
+					newPages = {
+						...state.pages,
+						[wrapper.pageId]: {
+							...page,
+							canvasElements: page.canvasElements
+								.filter(id => id !== group.wrapperId)
+								.concat(group.elementIds)
+						}
+					};
+				}
+			}
+
+			// Delete the wrapper element
+			delete newElements[group.wrapperId];
+		}
+	} else {
+		// Old-style group (no wrapper) - just remove groupId from elements
+		for (const elementId of group.elementIds) {
+			const element = newElements[elementId];
+			if (element) {
+				newElements[elementId] = {
+					...element,
+					groupId: null
+				};
+			}
 		}
 	}
 
@@ -838,7 +1162,192 @@ function handleUngroupElements(state: DesignState, event: UngroupElementsEvent):
 	return {
 		...state,
 		groups: newGroups,
-		elements: newElements
+		elements: newElements,
+		pages: newPages
+	};
+}
+
+function handleCreateGroupWrapper(state: DesignState, event: CreateGroupWrapperEvent): DesignState {
+	const { groupId, wrapperId, elementIds, wrapperPosition, wrapperSize, memberOffsets, parentId, pageId } = event.payload;
+
+	const newElements = { ...state.elements };
+	let newPages = state.pages;
+
+	// Check if wrapper already exists (e.g., during paste operation)
+	const existingWrapper = state.elements[wrapperId];
+	if (!existingWrapper) {
+		// Create the wrapper element
+		const wrapper: Element = {
+			id: wrapperId,
+			type: 'div',
+			name: 'Group',
+			isGroupWrapper: true,
+			parentId,
+			pageId,
+			groupId: null,
+			position: wrapperPosition,
+			size: wrapperSize,
+			rotation: 0,
+			visible: true,
+			locked: false,
+			styles: { display: 'block' },
+			typography: {},
+			spacing: {},
+			children: elementIds
+		};
+
+		newElements[wrapperId] = wrapper;
+	} else {
+		// Wrapper already exists (e.g., during paste) - update it to ensure correct properties
+		// Preserve existing styles but ensure display: block and isGroupWrapper: true
+		const existingStyles = existingWrapper.styles || {};
+		newElements[wrapperId] = {
+			...existingWrapper,
+			isGroupWrapper: true,
+			children: elementIds,
+			// Preserve wrapper's dimensions and position (they were already set during paste)
+			position: wrapperPosition,
+			size: wrapperSize,
+			// Ensure display: block is set (preserve other styles)
+			styles: {
+				...existingStyles,
+				display: 'block'
+			}
+		};
+	}
+
+	// Update each member element
+	// Only update if wrapper doesn't already exist (during paste, children are already correctly set up)
+	if (!existingWrapper) {
+		for (const elementId of elementIds) {
+			const element = newElements[elementId];
+			if (element) {
+				const offset = memberOffsets[elementId] || { x: 0, y: 0 };
+				newElements[elementId] = {
+					...element,
+					parentId: wrapperId,
+					groupId,
+					position: offset
+				};
+			}
+		}
+	} else {
+		// Wrapper already exists - just update groupId on members (they already have correct parentId and position)
+		for (const elementId of elementIds) {
+			const element = newElements[elementId];
+			if (element) {
+				newElements[elementId] = {
+					...element,
+					groupId
+				};
+			}
+		}
+	}
+
+	// Add wrapper to parent's children array or page's canvasElements
+	// Only do this if wrapper doesn't already exist (to avoid duplicate operations during paste)
+	// When wrapper exists (during paste), it's already in the parent's children array, so we just need to ensure
+	// member elements are removed from parent (they should already be children of wrapper)
+	if (!existingWrapper) {
+		if (parentId && newElements[parentId]) {
+			const parent = newElements[parentId];
+
+			// Remove member elements from parent's children
+			const filteredChildren = parent.children.filter(id => !elementIds.includes(id));
+
+			// Add wrapper at the position of the topmost member
+			const memberIndices = elementIds.map(id => parent.children.indexOf(id)).filter(i => i !== -1);
+			const topmostIndex = memberIndices.length > 0 ? Math.max(...memberIndices) : filteredChildren.length;
+
+			const newChildren = [
+				...filteredChildren.slice(0, topmostIndex),
+				wrapperId,
+				...filteredChildren.slice(topmostIndex)
+			];
+
+			newElements[parentId] = {
+				...parent,
+				children: newChildren
+			};
+		} else {
+			// Root level - update page's canvasElements
+			const page = state.pages[pageId];
+			if (page) {
+				// Remove member elements from page's canvasElements
+				const filteredElements = page.canvasElements.filter(id => !elementIds.includes(id));
+
+				// Add wrapper at the position of the topmost member
+				const memberIndices = elementIds.map(id => page.canvasElements.indexOf(id)).filter(i => i !== -1);
+				const topmostIndex = memberIndices.length > 0 ? Math.max(...memberIndices) : filteredElements.length;
+
+				const newCanvasElements = [
+					...filteredElements.slice(0, topmostIndex),
+					wrapperId,
+					...filteredElements.slice(topmostIndex)
+				];
+
+				newPages = {
+					...state.pages,
+					[pageId]: {
+						...page,
+						canvasElements: newCanvasElements
+					}
+				};
+			}
+		}
+	} else {
+		// Wrapper already exists (during paste) - ensure structure is correct
+		// The wrapper was already pasted into the parent, and the children were already pasted as children of the wrapper
+		// But we need to ensure:
+		// 1. Member elements are NOT in parent's children array (they should be children of wrapper)
+		// 2. Wrapper IS in parent's children array
+		if (parentId && newElements[parentId]) {
+			const parent = newElements[parentId];
+			// Remove member elements from parent's children (they should be children of wrapper, not parent)
+			const filteredChildren = parent.children.filter(id => !elementIds.includes(id));
+			// Ensure wrapper is in parent's children (it should already be there from paste, but verify)
+			if (!filteredChildren.includes(wrapperId)) {
+				// Wrapper not in parent's children - add it
+				filteredChildren.push(wrapperId);
+			}
+			newElements[parentId] = {
+				...parent,
+				children: filteredChildren
+			};
+		} else if (!parentId) {
+			// Root level - ensure wrapper is in page's canvasElements and members are removed
+			const page = state.pages[pageId];
+			if (page) {
+				const filteredElements = page.canvasElements.filter(id => !elementIds.includes(id));
+				if (!filteredElements.includes(wrapperId)) {
+					filteredElements.push(wrapperId);
+				}
+				newPages = {
+					...state.pages,
+					[pageId]: {
+						...page,
+						canvasElements: filteredElements
+					}
+				};
+			}
+		}
+	}
+
+	// Create the group record
+	const group: Group = {
+		id: groupId,
+		elementIds,
+		wrapperId
+	};
+
+	return {
+		...state,
+		elements: newElements,
+		pages: newPages,
+		groups: {
+			...state.groups,
+			[groupId]: group
+		}
 	};
 }
 
@@ -1206,5 +1715,47 @@ function handleInstanceComponent(
 		...state,
 		elements: newElements,
 		pages: newPages
+	};
+}
+
+// ============================================================================
+// Migration Handlers
+// ============================================================================
+
+function handleMigrateToUnifiedPositioning(
+	state: DesignState,
+	event: MigrateToUnifiedPositioningEvent
+): DesignState {
+	const newElements: Record<string, Element> = {};
+
+	// Migrate all elements to unified positioning model
+	for (const [id, element] of Object.entries(state.elements)) {
+		// Skip if already has positionMode
+		if (element.positionMode) {
+			newElements[id] = element;
+			continue;
+		}
+
+		// Determine position mode based on legacy properties
+		let positionMode: 'absolute' | 'flex-item' = 'absolute';
+
+		// Check if element is a child in auto-layout parent
+		if (element.parentId) {
+			const parent = state.elements[element.parentId];
+			if (parent?.autoLayout?.enabled && !element.autoLayout?.ignoreAutoLayout) {
+				positionMode = 'flex-item';
+			}
+		}
+
+		// Migrate element with positionMode
+		newElements[id] = {
+			...element,
+			positionMode
+		};
+	}
+
+	return {
+		...state,
+		elements: newElements
 	};
 }

@@ -156,6 +156,10 @@ type DocumentWithCaret = Document & {
 		const clickedElement = state.elements[element.id];
 		const groupId = clickedElement?.groupId;
 
+		// Group wrappers are not clickable (pointer-events: none)
+		// Clicks pass through to children, which handle group selection
+		// No need to handle wrapper clicks here
+
 		// Check if this element is part of a multi-selection
 		const currentSelection = get(selectedElements).map(el => el.id);
 		const isPartOfMultiSelection = currentSelection.length > 1 && currentSelection.includes(element.id);
@@ -656,21 +660,27 @@ type DocumentWithCaret = Document & {
 	$: elementStyles = (() => {
 		const styles: string[] = [];
 
-		// Check if parent has auto layout enabled (and child doesn't ignore it)
+		// Determine position mode (unified positioning model)
+		const positionMode = element.positionMode || 'absolute'; // Default to absolute for backward compatibility
+
+		// Check if parent has auto layout enabled (legacy check)
 		const parent = element.parentId ? $designState.elements[element.parentId] : null;
 		const parentHasAutoLayout = parent?.autoLayout?.enabled || false;
 		const childIgnoresAutoLayout = element.autoLayout?.ignoreAutoLayout || false;
-		const useRelativePosition = parentHasAutoLayout && !childIgnoresAutoLayout;
+
+		// Determine if should use relative positioning
+		// Priority: positionMode > legacy auto-layout check
+		const useRelativePosition = positionMode === 'flex-item' || (parentHasAutoLayout && !childIgnoresAutoLayout);
 
 		// Position and size - use pending values during interaction
 		if (isBeingDragged && !isAutoLayoutChildDragging) {
-			// Non-auto-layout element being dragged: use absolute positioning to follow cursor
+			// Element being dragged: use absolute positioning to follow cursor
 			// Note: DOM order determines stacking, no z-index manipulation needed
 			styles.push(`position: absolute`);
 			styles.push(`left: ${displayPosition.x}px`);
 			styles.push(`top: ${displayPosition.y}px`);
 		} else if (useRelativePosition) {
-			// Auto layout: children use relative positioning
+			// Flex item: use relative positioning (CSS flexbox handles layout)
 			styles.push(`position: relative`);
 			styles.push(`left: 0`);
 			styles.push(`top: 0`);
@@ -683,7 +693,7 @@ type DocumentWithCaret = Document & {
 				styles.push(`opacity: 0.3`);
 			}
 		} else {
-			// Freeform: use absolute positioning with coordinates
+			// Absolute positioning: use explicit coordinates
 			styles.push(`position: absolute`);
 			styles.push(`left: ${displayPosition.x}px`);
 			styles.push(`top: ${displayPosition.y}px`);
@@ -827,6 +837,11 @@ type DocumentWithCaret = Document & {
 		// Hide element during parent change transition to prevent flash
 		if (isHiddenDuringTransition) {
 			styles.push(`visibility: hidden`);
+			styles.push(`pointer-events: none`);
+		}
+
+		// Group wrappers should not be clickable - clicks pass through to children
+		if (element.isGroupWrapper) {
 			styles.push(`pointer-events: none`);
 		}
 

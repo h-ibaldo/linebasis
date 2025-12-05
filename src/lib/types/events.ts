@@ -30,6 +30,7 @@ export type EventType =
 	// Group operations
 	| 'GROUP_ELEMENTS'
 	| 'UNGROUP_ELEMENTS'
+	| 'CREATE_GROUP_WRAPPER'
 	// Style operations
 	| 'UPDATE_STYLES'
 	| 'GROUP_UPDATE_STYLES'
@@ -45,7 +46,9 @@ export type EventType =
 	| 'CREATE_COMPONENT'
 	| 'UPDATE_COMPONENT'
 	| 'DELETE_COMPONENT'
-	| 'INSTANCE_COMPONENT';
+	| 'INSTANCE_COMPONENT'
+	// Migration operations
+	| 'MIGRATE_TO_UNIFIED_POSITIONING';
 
 export interface BaseEvent {
 	id: string; // UUID for the event
@@ -237,6 +240,20 @@ export interface UngroupElementsEvent extends BaseEvent {
 	};
 }
 
+export interface CreateGroupWrapperEvent extends BaseEvent {
+	type: 'CREATE_GROUP_WRAPPER';
+	payload: {
+		groupId: string;
+		wrapperId: string;
+		elementIds: string[];
+		wrapperPosition: Position;
+		wrapperSize: Size;
+		memberOffsets: Record<string, Position>;
+		parentId: string | null;
+		pageId: string;
+	};
+}
+
 // ============================================================================
 // Style Events
 // ============================================================================
@@ -355,6 +372,11 @@ export interface InstanceComponentEvent extends BaseEvent {
 	};
 }
 
+export interface MigrateToUnifiedPositioningEvent extends BaseEvent {
+	type: 'MIGRATE_TO_UNIFIED_POSITIONING';
+	payload: Record<string, never>; // No payload needed - migrates all elements
+}
+
 // ============================================================================
 // Union Type
 // ============================================================================
@@ -379,6 +401,7 @@ export type DesignEvent =
 	| GroupUpdateStylesEvent
 	| GroupElementsEvent
 	| UngroupElementsEvent
+	| CreateGroupWrapperEvent
 	| UpdateStylesEvent
 	| UpdateTypographyEvent
 	| UpdateSpacingEvent
@@ -390,7 +413,8 @@ export type DesignEvent =
 	| CreateComponentEvent
 	| UpdateComponentEvent
 	| DeleteComponentEvent
-	| InstanceComponentEvent;
+	| InstanceComponentEvent
+	| MigrateToUnifiedPositioningEvent;
 
 // ============================================================================
 // Design State Types (computed from events)
@@ -506,13 +530,17 @@ export interface AutoLayoutStyle {
 	ignoreAutoLayout?: boolean; // Per-child property: if true, child uses position: absolute
 }
 
+export type PositionMode = 'absolute' | 'flex-item';
+
 export interface Element {
 	id: string;
 	type: ElementType;
 	name?: string; // Custom name for the element (for layers panel)
 	parentId: string | null;
 	pageId: string; // Elements belong to a page's canvas
-	groupId?: string | null; // Group ID if element belongs to a group
+	groupId?: string | null; // Group ID if element belongs to a group (DEPRECATED - will be removed)
+	isGroupWrapper?: boolean; // Whether this div is a group wrapper (DEPRECATED - will be removed)
+	positionMode?: PositionMode; // How this element is positioned (default: 'absolute')
 	position: Position;
 	size: Size;
 	rotation?: number; // Rotation angle in degrees (default 0)
@@ -546,7 +574,8 @@ export interface Page {
 
 export interface Group {
 	id: string;
-	elementIds: string[]; // Element IDs that belong to this group
+	elementIds: string[]; // Element IDs that belong to this group (NOT including wrapper)
+	wrapperId?: string; // ID of the wrapper div (for new wrapper-based groups)
 }
 
 export interface Component {
