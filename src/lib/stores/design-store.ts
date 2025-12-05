@@ -2201,21 +2201,8 @@ export async function pasteElements(customOffset?: { x: number; y: number } | nu
 
 		// Copy additional properties (all dispatched synchronously within transaction)
 
-		// Preserve isGroupWrapper flag if this is a group wrapper
-		if (element.isGroupWrapper) {
-			console.log('[PASTE DEBUG] Preserving isGroupWrapper for element:', newElementId, 'original:', element.id);
-			dispatch({
-				id: uuidv4(),
-				type: 'UPDATE_ELEMENT',
-				timestamp: Date.now(),
-				payload: {
-					elementId: newElementId,
-					changes: {
-						isGroupWrapper: true
-					}
-				}
-			});
-		}
+		// DEPRECATED: No need to preserve isGroupWrapper - groups are just divs now
+		// Groups are identified by having children, not by a special flag
 
 		// Preserve element name if set
 		if (element.name) {
@@ -2315,26 +2302,8 @@ export async function pasteElements(customOffset?: { x: number; y: number } | nu
 		}
 		// Preserve groupId if element belongs to a group (use new group ID)
 		// BUT: Skip this if the element's parent is a group wrapper (new-style groups)
-		// In new-style groups, the groupId is maintained by the wrapper's children
-		if (element.groupId) {
-			// Check if this element's parent (in clipboard) is a group wrapper
-			const parentInClipboard = element.parentId ? clipboard.find(el => el.id === element.parentId) : null;
-			const isChildOfGroupWrapper = parentInClipboard?.isGroupWrapper;
-
-			// Only dispatch GROUP_ELEMENTS for old-style groups (no wrapper)
-			if (!isChildOfGroupWrapper) {
-				const newGroupId = oldToNewGroupIdMap.get(element.groupId) || element.groupId;
-				dispatch({
-					id: uuidv4(),
-					type: 'GROUP_ELEMENTS',
-					timestamp: Date.now(),
-					payload: {
-						groupId: newGroupId,
-						elementIds: [newElementId]
-					}
-				});
-			}
-		}
+		// DEPRECATED: No need to handle groupId - groups are just parent-child relationships now
+		// The parent-child structure was already preserved when creating the element
 
 		// Recursively paste children (synchronous)
 		const children = clipboard.filter(el => el.parentId === element.id);
