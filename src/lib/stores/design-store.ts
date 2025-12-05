@@ -1175,8 +1175,8 @@ export function manualSave(): void {
 let clipboard: Element[] = [];
 // Track if clipboard contains cut elements (vs copied elements)
 let isClipboardFromCut = false;
-// Store group records associated with copied elements
-let clipboardGroups: Record<string, Group> = {};
+// DEPRECATED: Groups are now just div elements, no separate group records needed
+// let clipboardGroups: Record<string, Group> = {};
 
 /**
  * Helper: Get the four corners of a rotated rectangle in world space
@@ -1888,16 +1888,14 @@ export function copyElements(): void {
 	clipboard = Array.from(elementsToCopy).map((el) => ({ ...el }));
 	isClipboardFromCut = false;
 
-	// Copy group records for any group wrappers in the clipboard
-	clipboardGroups = {};
-	const elementIds = new Set(clipboard.map(el => el.id));
-	for (const [groupId, group] of Object.entries(state.groups)) {
-		// If the group's wrapper is in the clipboard, copy the group record
-		if (group.wrapperId && elementIds.has(group.wrapperId)) {
-			clipboardGroups[groupId] = { ...group };
-		}
-	}
-	console.log('[COPY DEBUG] Copied groups:', Object.keys(clipboardGroups));
+	// DEPRECATED: No need to copy group records - groups are just divs now
+	// clipboardGroups = {};
+	// const elementIds = new Set(clipboard.map(el => el.id));
+	// for (const [groupId, group] of Object.entries(state.groups)) {
+	// 	if (group.wrapperId && elementIds.has(group.wrapperId)) {
+	// 		clipboardGroups[groupId] = { ...group };
+	// 	}
+	// }
 }
 
 /**
@@ -1921,16 +1919,14 @@ export async function cutElements(): Promise<void> {
 	clipboard = Array.from(elementsToCopy).map((el) => ({ ...el }));
 	isClipboardFromCut = true;
 
-	// Copy group records for any group wrappers in the clipboard
-	clipboardGroups = {};
-	const elementIds = new Set(clipboard.map(el => el.id));
-	for (const [groupId, group] of Object.entries(state.groups)) {
-		// If the group's wrapper is in the clipboard, copy the group record
-		if (group.wrapperId && elementIds.has(group.wrapperId)) {
-			clipboardGroups[groupId] = { ...group };
-		}
-	}
-	console.log('[CUT DEBUG] Copied groups:', Object.keys(clipboardGroups));
+	// DEPRECATED: No need to copy group records - groups are just divs now
+	// clipboardGroups = {};
+	// const elementIds = new Set(clipboard.map(el => el.id));
+	// for (const [groupId, group] of Object.entries(state.groups)) {
+	// 	if (group.wrapperId && elementIds.has(group.wrapperId)) {
+	// 		clipboardGroups[groupId] = { ...group };
+	// 	}
+	// }
 
 	// Wrap deletion in a transaction for single undo/redo
 	beginTransaction();
@@ -2356,86 +2352,9 @@ export async function pasteElements(customOffset?: { x: number; y: number } | nu
 			newRootElementIds.push(newId);
 		}
 
-		// Recreate Group records for any group wrappers that were pasted
-		// Group wrappers in clipboard need their group records recreated with new IDs
-		console.log('[PASTE DEBUG] Recreating group records. Clipboard elements:', clipboard.length);
-		console.log('[PASTE DEBUG] Group wrappers in clipboard:', clipboard.filter(el => el.isGroupWrapper).map(el => el.id));
-		console.log('[PASTE DEBUG] Clipboard groups available:', Object.keys(clipboardGroups));
-
-		for (const element of clipboard) {
-			if (element.isGroupWrapper) {
-				console.log('[PASTE DEBUG] Processing group wrapper:', element.id);
-				// Find the original group for this wrapper from clipboardGroups (captured at copy time)
-				const originalGroup = Object.values(clipboardGroups).find(g => g.wrapperId === element.id);
-				console.log('[PASTE DEBUG] Original group found:', originalGroup?.id);
-
-				if (originalGroup) {
-					// Get the new wrapper ID
-					const newWrapperId = oldToNewIdMap.get(element.id);
-					console.log('[PASTE DEBUG] New wrapper ID:', newWrapperId);
-
-					if (newWrapperId) {
-						// Get new IDs for all group members
-						const newMemberIds = originalGroup.elementIds
-							.map(id => oldToNewIdMap.get(id))
-							.filter(Boolean) as string[];
-
-						// Generate new group ID
-						const newGroupId = oldToNewGroupIdMap.get(originalGroup.id) || uuidv4();
-						
-						// Get the current state to access wrapper and member elements
-						const currentState = get(designState);
-						const wrapper = currentState.elements[newWrapperId];
-						const members = newMemberIds.map(id => currentState.elements[id]).filter(Boolean);
-
-						if (wrapper && members.length > 0) {
-							// Calculate member offsets (positions relative to wrapper)
-							// These are already correct since children were pasted with their relative positions
-							const memberOffsets: Record<string, { x: number; y: number }> = {};
-							for (const member of members) {
-								memberOffsets[member.id] = member.position;
-							}
-
-							console.log('[PASTE DEBUG] Dispatching CREATE_GROUP_WRAPPER. GroupID:', newGroupId, 'Members:', newMemberIds, 'WrapperID:', newWrapperId);
-
-							// Use CREATE_GROUP_WRAPPER to properly set up the group with wrapperId
-							// This will:
-							// 1. Ensure wrapper has isGroupWrapper: true and correct children array
-							// 2. Update member elements to have groupId (they already have correct parentId and position)
-							// 3. Create the group record with wrapperId
-							// 4. Preserve wrapper's display: block and dimensions
-							dispatch({
-								id: uuidv4(),
-								type: 'CREATE_GROUP_WRAPPER',
-								timestamp: Date.now(),
-								payload: {
-									groupId: newGroupId,
-									wrapperId: newWrapperId,
-									elementIds: newMemberIds,
-									wrapperPosition: wrapper.position,
-									wrapperSize: wrapper.size,
-									memberOffsets,
-									parentId: wrapper.parentId,
-									pageId: wrapper.pageId
-								}
-							});
-						} else {
-							console.warn('[PASTE DEBUG] Wrapper or members not found, falling back to GROUP_ELEMENTS');
-							// Fallback to GROUP_ELEMENTS if wrapper/members not found
-							dispatch({
-								id: uuidv4(),
-								type: 'GROUP_ELEMENTS',
-								timestamp: Date.now(),
-								payload: {
-									groupId: newGroupId,
-									elementIds: newMemberIds
-								}
-							});
-						}
-					}
-				}
-			}
-		}
+		// DEPRECATED: No need to recreate group records - groups are just divs now
+		// The tree structure (parent-child relationships) was already preserved during paste
+		// No special group logic needed
 
 		// Commit the transaction (batches all events into single undo/redo step + single IndexedDB write)
 		await commitTransaction();
