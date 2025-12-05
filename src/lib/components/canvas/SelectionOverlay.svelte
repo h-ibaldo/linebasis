@@ -3657,16 +3657,19 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 	});
 </script>
 
-<!-- Render selection UI (hide during rotation, during auto layout reordering, or during parent change transition) -->
-	{#if selectedElements.length === 1 && !(interactionMode === 'dragging' && reorderParentId) && interactionMode !== 'rotating' && !$interactionState.hiddenDuringTransition}
+<!-- Render selection UI (hide during rotation, during actual dragging after threshold, during auto layout reordering, or during parent change transition) -->
+<!-- Show on mouse down (before drag threshold) for better UX -->
+	{#if selectedElements.length === 1 && !(interactionMode === 'dragging' && reorderParentId) && interactionMode !== 'rotating' && (interactionMode !== 'dragging' || !hasMovedBeyondThreshold) && !$interactionState.hiddenDuringTransition}
 		<!-- Single element selection (hidden during auto layout reordering - ghost shows instead) -->
 		{@const selectedElement = selectedElements[0]}
 		{@const state = get(designState)}
 		{@const parent = selectedElement.parentId ? $designState.elements[selectedElement.parentId] : null}
+		{@const isParentGroupWrapper = parent?.isGroupWrapper || false}
 		{@const parentHasAutoLayout = parent?.autoLayout?.enabled || false}
 		{@const childIgnoresAutoLayout = selectedElement.autoLayout?.ignoreAutoLayout || false}
 		{@const isInAutoLayout = parentHasAutoLayout && !childIgnoresAutoLayout}
-		{@const parentTransform = parent ? (() => {
+		{@const wrapperAbsolutePos = isParentGroupWrapper && parent ? getAbsolutePosition(parent) : null}
+		{@const parentTransform = parent && !isParentGroupWrapper ? (() => {
 			const absPos = getAbsolutePosition(parent);
 			// getCumulativeRotation returns sum of ANCESTORS' rotations (not including parent itself)
 			const ancestorRot = getCumulativeRotation(parent);
@@ -3704,8 +3707,9 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 			};
 		})() : null}
 		{@const relativePendingPosition = (() => {
-			// If element is being dragged and has pending position
-			if (activeElementId === selectedElement.id && pendingPosition) {
+			// If element is being dragged and has pending position AND we've moved beyond threshold
+			// Don't use pendingPosition on mouse down (before drag threshold) - use element's current position
+			if (activeElementId === selectedElement.id && pendingPosition && hasMovedBeyondThreshold) {
 				// If element has a parent, convert absolute position to relative
 				if (parent) {
 					// FIX: For rotated parents, we must transform the CENTER of the element, not the top-left.
@@ -3797,9 +3801,10 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 			radiusFrozenValues={activeElementId === selectedElement.id ? radiusFrozenValues : null}
 			rotation={getDisplayRotation(selectedElement)}
 			{parentTransform}
+			wrapperAbsolutePos={wrapperAbsolutePos}
 			onMouseDown={(e, handle) => handleMouseDown(e, selectedElement, handle)}
 		/>
-	{:else if selectedElements.length > 1 && groupBounds && interactionMode !== 'rotating' && !$interactionState.hiddenDuringTransition}
+	{:else if selectedElements.length > 1 && groupBounds && interactionMode !== 'rotating' && (interactionMode !== 'dragging' || !hasMovedBeyondThreshold) && !$interactionState.hiddenDuringTransition}
 		<!-- Multi-element selection - single bounding box -->
 		<!-- Note: groupBounds already accounts for rotated elements by calculating their corners -->
 		<!-- groupBounds is reactive to groupPendingTransforms, so it updates in real-time during interactions -->
@@ -3942,86 +3947,277 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 	{/if}
 
 <!-- Hover border - show border on hover (like Figma/Framer) -->
+<!-- Hide during dragging to avoid showing wrapper borders -->
+<!-- For grouped elements, show group border instead of individual element border -->
 {#if hoveredElementId && interactionMode === 'idle' && !$interactionState.hiddenDuringTransition}
 	{@const hoveredElement = $designState.elements[hoveredElementId]}
 	{@const isHoveredSelected = selectedElements.some(el => el.id === hoveredElementId)}
 	{#if hoveredElement && !isHoveredSelected && $interactionState.mode !== 'editing-text'}
-		{@const parent = hoveredElement.parentId ? $designState.elements[hoveredElement.parentId] : null}
-		{@const parentTransform = parent ? (() => {
-			const absPos = getAbsolutePosition(parent);
-			const ancestorRot = getCumulativeRotation(parent);
-			const totalRot = ancestorRot + (parent.rotation || 0);
-			
-			let parentPos = absPos;
-			if (parent.parentId) {
-				const angleRad = ancestorRot * (Math.PI / 180);
-				const cos = Math.cos(angleRad);
-				const sin = Math.sin(angleRad);
-				const halfW = parent.size.width / 2;
-				const halfH = parent.size.height / 2;
-				
-				const rotatedHalfW = halfW * cos - halfH * sin;
-				const rotatedHalfH = halfW * sin + halfH * cos;
-				
-				parentPos = {
-					x: absPos.x - halfW + rotatedHalfW,
-					y: absPos.y - halfH + rotatedHalfH
+		{@const hoveredGroupId = hoveredElement.groupId}
+		{@const hoveredGroup = hoveredGroupId ? $designState.groups[hoveredGroupId] : null}
+		{@const isGrouped = hoveredGroup !== null}
+		{@const isGroupSelected = isGrouped && hoveredGroup.elementIds.every(id => selectedElements.some(el => el.id === id))}
+		
+		{#if isGrouped && !isGroupSelected}
+			<!-- Show group border when hovering any element in an unselected group -->
+			{@const groupElements = hoveredGroup.elementIds.map(id => $designState.elements[id]).filter(Boolean)}
+			{@const groupBounds = getGroupBounds(groupElements)}
+			{@const commonParentId = (() => {
+				// Check if all group elements share the same parent
+				const firstParent = groupElements[0]?.parentId;
+				if (firstParent === undefined) return null;
+				return groupElements.every(el => el.parentId === firstParent) ? firstParent : null;
+			})()}
+			{@const commonParent = commonParentId ? $designState.elements[commonParentId] : null}
+			{@const isParentGroupWrapper = commonParent?.isGroupWrapper || false}
+			{@const groupParentTransform = commonParent && !isParentGroupWrapper ? (() => {
+				const absPos = getAbsolutePosition(commonParent);
+				const ancestorRot = getCumulativeRotation(commonParent);
+				const totalRot = ancestorRot + (commonParent.rotation || 0);
+
+				let pos = absPos;
+				if (commonParent.parentId) {
+					const angleRad = ancestorRot * (Math.PI / 180);
+					const cos = Math.cos(angleRad);
+					const sin = Math.sin(angleRad);
+					const halfW = commonParent.size.width / 2;
+					const halfH = commonParent.size.height / 2;
+
+					const rotatedHalfW = halfW * cos - halfH * sin;
+					const rotatedHalfH = halfW * sin + halfH * cos;
+
+					pos = {
+						x: absPos.x - halfW + rotatedHalfW,
+						y: absPos.y - halfH + rotatedHalfH
+					};
+				}
+
+				return {
+					position: pos,
+					rotation: totalRot,
+					size: commonParent.size
 				};
-			}
+			})() : null}
+			{@const localGroupBounds = (() => {
+				// When elements share a common parent, calculate bounds in parent-relative space
+				// This is critical for rotated parents - we need bounds in local space, not absolute
+				if (!commonParent) {
+					return groupBounds; // Use absolute bounds as-is
+				}
 
-			return {
-				position: parentPos,
-				rotation: totalRot,
-				size: parent.size
-			};
-		})() : null}
-		{@const parentHasAutoLayout = parent?.autoLayout?.enabled || false}
-		{@const childIgnoresAutoLayout = hoveredElement.autoLayout?.ignoreAutoLayout || false}
-		{@const isInAutoLayout = parentHasAutoLayout && !childIgnoresAutoLayout}
-		{@const absPos = getAbsolutePosition(hoveredElement)}
-		{@const pos = isInAutoLayout ? absPos : hoveredElement.position}
-		{@const size = hoveredElement.size}
-		{@const elementRotation = getDisplayRotation(hoveredElement)}
-		{@const cumulativeRotation = isInAutoLayout ? getCumulativeRotation(hoveredElement) : 0}
-		{@const totalRotation = elementRotation + cumulativeRotation}
-		{@const rotation = totalRotation}
-		{@const hasParent = parent !== null && !isInAutoLayout}
-		{@const canvasElement = document.querySelector('.canvas')}
-		{#if canvasElement}
-			{@const canvasRect = canvasElement.getBoundingClientRect()}
-			{@const parentWrapperScreenPos = hasParent && parentTransform ? {
-				x: canvasRect.left + viewport.x + parentTransform.position.x * viewport.scale,
-				y: canvasRect.top + viewport.y + parentTransform.position.y * viewport.scale
-			} : null}
-			{@const screenWidth = size.width * viewport.scale}
-			{@const screenHeight = size.height * viewport.scale}
-			{@const centerX = screenWidth / 2}
-			{@const centerY = screenHeight / 2}
-			{@const parentCenterX = hasParent && parentTransform ? parentTransform.size.width / 2 * viewport.scale : 0}
-			{@const parentCenterY = hasParent && parentTransform ? parentTransform.size.height / 2 * viewport.scale : 0}
-			{@const childScreenPos = hasParent ? {
-				x: pos.x * viewport.scale,
-				y: pos.y * viewport.scale
-			} : {
-				x: canvasRect.left + viewport.x + pos.x * viewport.scale,
-				y: canvasRect.top + viewport.y + pos.y * viewport.scale
-			}}
+				// Calculate bounds from element positions in parent-relative space
+				let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
 
-			{#if hasParent && parentTransform && parentWrapperScreenPos}
-				<!-- Parent wrapper: applies parent's transform -->
-				<div
-					style="
-						position: fixed;
-						left: {parentWrapperScreenPos.x}px;
-						top: {parentWrapperScreenPos.y}px;
-						{parentTransform.rotation ? `transform: rotate(${parentTransform.rotation}deg); transform-origin: ${parentCenterX}px ${parentCenterY}px;` : ''}
-						pointer-events: none;
-					"
-				>
-					<!-- Selection container: positioned relative to parent, rotated by element's own rotation -->
+				for (const el of groupElements) {
+					const size = el.size;
+					const rotation = el.rotation || 0;
+
+					// Use parent-relative position directly
+					const localPos = el.position;
+
+					if (rotation !== 0) {
+						// For rotated elements, get all four corners and find their bounds
+						const corners = getRotatedCorners({
+							x: localPos.x,
+							y: localPos.y,
+							width: size.width,
+							height: size.height,
+							rotation
+						});
+
+						// Find min/max across all corners
+						for (const corner of corners) {
+							minX = Math.min(minX, corner.x);
+							minY = Math.min(minY, corner.y);
+							maxX = Math.max(maxX, corner.x);
+							maxY = Math.max(maxY, corner.y);
+						}
+					} else {
+						// For non-rotated elements, use simple bounds
+						minX = Math.min(minX, localPos.x);
+						minY = Math.min(minY, localPos.y);
+						maxX = Math.max(maxX, localPos.x + size.width);
+						maxY = Math.max(maxY, localPos.y + size.height);
+					}
+				}
+
+				return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+			})()}
+			{@const canvasElement = document.querySelector('.canvas')}
+			{#if canvasElement && groupElements.length > 0}
+				{@const canvasRect = canvasElement.getBoundingClientRect()}
+				{@const parentHasAutoLayout = commonParent?.autoLayout?.enabled || false}
+				{@const hasParent = commonParent !== null && !isParentGroupWrapper}
+				{@const parentWrapperScreenPos = hasParent && groupParentTransform ? {
+					x: canvasRect.left + viewport.x + groupParentTransform.position.x * viewport.scale,
+					y: canvasRect.top + viewport.y + groupParentTransform.position.y * viewport.scale
+				} : null}
+				{@const screenWidth = localGroupBounds.width * viewport.scale}
+				{@const screenHeight = localGroupBounds.height * viewport.scale}
+				{@const parentCenterX = hasParent && groupParentTransform ? groupParentTransform.size.width / 2 * viewport.scale : 0}
+				{@const parentCenterY = hasParent && groupParentTransform ? groupParentTransform.size.height / 2 * viewport.scale : 0}
+				{@const childScreenPos = hasParent ? {
+					x: localGroupBounds.x * viewport.scale,
+					y: localGroupBounds.y * viewport.scale
+				} : {
+					x: canvasRect.left + viewport.x + localGroupBounds.x * viewport.scale,
+					y: canvasRect.top + viewport.y + localGroupBounds.y * viewport.scale
+				}}
+				
+				{#if hasParent && groupParentTransform && parentWrapperScreenPos && (groupParentTransform.rotation || 0) !== 0}
+					<!-- Group hover border with parent rotation -->
 					<div
 						style="
-							position: absolute;
+							position: fixed;
+							left: {parentWrapperScreenPos.x}px;
+							top: {parentWrapperScreenPos.y}px;
+							transform: rotate({groupParentTransform.rotation}deg);
+							transform-origin: {parentCenterX}px {parentCenterY}px;
+							pointer-events: none;
+						"
+					>
+						<div
+							style="
+								position: absolute;
+								left: {childScreenPos.x}px;
+								top: {childScreenPos.y}px;
+								width: {screenWidth}px;
+								height: {screenHeight}px;
+								border: 2px solid #3b82f6;
+								pointer-events: none;
+								box-sizing: border-box;
+							"
+						/>
+					</div>
+				{:else}
+					<!-- Group hover border without parent rotation (absolute positioning) -->
+					<div
+						style="
+							position: fixed;
+							left: {childScreenPos.x}px;
+							top: {childScreenPos.y}px;
+							width: {screenWidth}px;
+							height: {screenHeight}px;
+							border: 2px solid #3b82f6;
+							pointer-events: none;
+							box-sizing: border-box;
+						"
+					/>
+				{/if}
+			{/if}
+		{:else}
+			<!-- Show individual element border for non-grouped elements or when group is already selected -->
+			{@const parent = hoveredElement.parentId ? $designState.elements[hoveredElement.parentId] : null}
+			{@const isParentGroupWrapper = parent?.isGroupWrapper || false}
+			{@const wrapperAbsolutePos = isParentGroupWrapper && parent ? getAbsolutePosition(parent) : null}
+			{@const parentTransform = parent && !isParentGroupWrapper ? (() => {
+				const absPos = getAbsolutePosition(parent);
+				const ancestorRot = getCumulativeRotation(parent);
+				const totalRot = ancestorRot + (parent.rotation || 0);
+				
+				let parentPos = absPos;
+				if (parent.parentId) {
+					const angleRad = ancestorRot * (Math.PI / 180);
+					const cos = Math.cos(angleRad);
+					const sin = Math.sin(angleRad);
+					const halfW = parent.size.width / 2;
+					const halfH = parent.size.height / 2;
+					
+					const rotatedHalfW = halfW * cos - halfH * sin;
+					const rotatedHalfH = halfW * sin + halfH * cos;
+					
+					parentPos = {
+						x: absPos.x - halfW + rotatedHalfW,
+						y: absPos.y - halfH + rotatedHalfH
+					};
+				}
+
+				return {
+					position: parentPos,
+					rotation: totalRot,
+					size: parent.size
+				};
+			})() : null}
+			{@const parentHasAutoLayout = parent?.autoLayout?.enabled || false}
+			{@const childIgnoresAutoLayout = hoveredElement.autoLayout?.ignoreAutoLayout || false}
+			{@const isInAutoLayout = parentHasAutoLayout && !childIgnoresAutoLayout}
+			{@const absPos = getAbsolutePosition(hoveredElement)}
+			{@const pos = isInAutoLayout ? absPos : (isParentGroupWrapper && wrapperAbsolutePos ? absPos : hoveredElement.position)}
+			{@const size = hoveredElement.size}
+			{@const elementRotation = getDisplayRotation(hoveredElement)}
+			{@const cumulativeRotation = isInAutoLayout ? getCumulativeRotation(hoveredElement) : 0}
+			{@const totalRotation = elementRotation + cumulativeRotation}
+			{@const rotation = totalRotation}
+			{@const hasParent = parent !== null && !isInAutoLayout}
+			{@const canvasElement = document.querySelector('.canvas')}
+			{#if canvasElement}
+				{@const canvasRect = canvasElement.getBoundingClientRect()}
+				{@const parentWrapperScreenPos = hasParent && parentTransform ? {
+					x: canvasRect.left + viewport.x + parentTransform.position.x * viewport.scale,
+					y: canvasRect.top + viewport.y + parentTransform.position.y * viewport.scale
+				} : null}
+				{@const screenWidth = size.width * viewport.scale}
+				{@const screenHeight = size.height * viewport.scale}
+				{@const centerX = screenWidth / 2}
+				{@const centerY = screenHeight / 2}
+				{@const parentCenterX = hasParent && parentTransform ? parentTransform.size.width / 2 * viewport.scale : 0}
+				{@const parentCenterY = hasParent && parentTransform ? parentTransform.size.height / 2 * viewport.scale : 0}
+				{@const childScreenPos = hasParent ? {
+					x: pos.x * viewport.scale,
+					y: pos.y * viewport.scale
+				} : isParentGroupWrapper && wrapperAbsolutePos ? {
+					// Group wrapper case: pos is already absolute position, use it directly
+					x: canvasRect.left + viewport.x + pos.x * viewport.scale,
+					y: canvasRect.top + viewport.y + pos.y * viewport.scale
+				} : {
+					// No parent: absolute position
+					x: canvasRect.left + viewport.x + pos.x * viewport.scale,
+					y: canvasRect.top + viewport.y + pos.y * viewport.scale
+				}}
+
+				{#if hasParent && parentTransform && parentWrapperScreenPos}
+					<!-- Parent wrapper: applies parent's transform -->
+					<div
+						style="
+							position: fixed;
+							left: {parentWrapperScreenPos.x}px;
+							top: {parentWrapperScreenPos.y}px;
+							{parentTransform.rotation ? `transform: rotate(${parentTransform.rotation}deg); transform-origin: ${parentCenterX}px ${parentCenterY}px;` : ''}
+							pointer-events: none;
+						"
+					>
+						<!-- Selection container: positioned relative to parent, rotated by element's own rotation -->
+						<div
+							style="
+								position: absolute;
+								left: {childScreenPos.x}px;
+								top: {childScreenPos.y}px;
+								width: {screenWidth}px;
+								height: {screenHeight}px;
+								{rotation ? `transform: rotate(${rotation}deg); transform-origin: ${centerX}px ${centerY}px;` : ''}
+								pointer-events: none;
+							"
+						>
+							<!-- Hover border -->
+							<div
+								style="
+									position: absolute;
+									left: 0;
+									top: 0;
+									width: 100%;
+									height: 100%;
+									border: 2px solid #3b82f6;
+									pointer-events: none;
+									box-sizing: border-box;
+								"
+							/>
+						</div>
+					</div>
+				{:else}
+					<!-- No parent: positioned absolutely in canvas space -->
+					<div
+						style="
+							position: fixed;
 							left: {childScreenPos.x}px;
 							top: {childScreenPos.y}px;
 							width: {screenWidth}px;
@@ -4044,38 +4240,11 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 							"
 						/>
 					</div>
-				</div>
-			{:else}
-				<!-- No parent: positioned absolutely in canvas space -->
-				<div
-					style="
-						position: fixed;
-						left: {childScreenPos.x}px;
-						top: {childScreenPos.y}px;
-						width: {screenWidth}px;
-						height: {screenHeight}px;
-						{rotation ? `transform: rotate(${rotation}deg); transform-origin: ${centerX}px ${centerY}px;` : ''}
-						pointer-events: none;
-					"
-				>
-					<!-- Hover border -->
-					<div
-						style="
-							position: absolute;
-							left: 0;
-							top: 0;
-							width: 100%;
-							height: 100%;
-							border: 2px solid #3b82f6;
-							pointer-events: none;
-							box-sizing: border-box;
-						"
-					/>
-				</div>
-			{/if}
+				{/if}
 			{/if}
 		{/if}
 	{/if}
+{/if}
 
 <!-- Rotation angle display - follows cursor -->
 {#if interactionMode === 'rotating' && pendingRotation !== null && currentMouseScreen.x !== 0 && currentMouseScreen.y !== 0}
@@ -4286,8 +4455,9 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 
 			{@const shouldHideHighlight = isSameAsOriginalParent && isView}
 			{@const shouldShowMinimalHighlight = isSameAsOriginalParent && isRegularDiv}
+			{@const isDragging = interactionMode === 'dragging'}
 
-			{#if !shouldHideHighlight}
+			{#if !shouldHideHighlight && !isDragging}
 				<div
 					style="
 						position: fixed;
@@ -4295,7 +4465,7 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 						top: {parentScreenTop}px;
 						width: {parentScreenWidth}px;
 						height: {parentScreenHeight}px;
-						border: {shouldShowMinimalHighlight ? '1px dotted #3b82f6' : '2px dashed #3b82f6'};
+						border: {shouldShowMinimalHighlight ? '1px dotted yellow' : '2px dashed red'};
 						background: {shouldShowMinimalHighlight ? 'transparent' : 'rgba(59, 130, 246, 0.05)'};
 						pointer-events: none;
 						box-sizing: border-box;
