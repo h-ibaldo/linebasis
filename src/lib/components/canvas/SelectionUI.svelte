@@ -179,7 +179,7 @@
 	$: centerY = screenHeight / 2;
 </script>
 
-{#if hasParent && parentTransform && parentWrapperScreenPos && !pendingPosition}
+{#if hasParent && parentTransform && parentWrapperScreenPos}
 	<!-- Parent wrapper: applies parent's transform (position and rotation) -->
 	<!-- Hidden during dragging or when hideParentWrapper is true (e.g., for group wrappers) -->
 	{@const parentCenterX = parentTransform.size.width / 2 * viewport.scale}

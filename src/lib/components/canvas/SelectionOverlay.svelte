@@ -2999,7 +2999,7 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 								x: finalAbsPos.x + el.width / 2,
 								y: finalAbsPos.y + el.height / 2
 							};
-							const parent = state.elements[element.parentId];
+							const parent = state.elements[el.parentId];
 							const centerLocal = absoluteToRelative(centerWorld, parent || null, state);
 							const finalPos = {
 								x: centerLocal.x - el.width / 2,
@@ -3996,13 +3996,55 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 			{@const childIgnoresAutoLayout = hoveredElement.autoLayout?.ignoreAutoLayout || false}
 			{@const isInAutoLayout = parentHasAutoLayout && !childIgnoresAutoLayout}
 			{@const absPos = getAbsolutePositionLocal(hoveredElement)}
-			{@const pos = isInAutoLayout ? absPos : (isParentGroupWrapper && wrapperAbsolutePos ? absPos : hoveredElement.position)}
+			{@const pos = (() => {
+				if (isInAutoLayout && parent && parentTransform) {
+					// For auto-layout children, use the same DOM-based calculation as selected elements
+					// This ensures consistency between hover and selection
+					const domElement = document.querySelector(`[data-element-id="${hoveredElement.id}"]`);
+					const parentDomElement = document.querySelector(`[data-element-id="${parent.id}"]`);
+					
+					if (domElement && parentDomElement) {
+						const elementRect = domElement.getBoundingClientRect();
+						const parentRect = parentDomElement.getBoundingClientRect();
+						
+						const elementCenterX = elementRect.left + elementRect.width / 2;
+						const elementCenterY = elementRect.top + elementRect.height / 2;
+						const parentCenterX = parentRect.left + parentRect.width / 2;
+						const parentCenterY = parentRect.top + parentRect.height / 2;
+						
+						const dx = elementCenterX - parentCenterX;
+						const dy = elementCenterY - parentCenterY;
+						
+						const dxModel = dx / viewport.scale;
+						const dyModel = dy / viewport.scale;
+						
+						const parentRotationRad = (parentTransform.rotation || 0) * (Math.PI / 180);
+						const cos = Math.cos(-parentRotationRad);
+						const sin = Math.sin(-parentRotationRad);
+						
+						const localDx = dxModel * cos - dyModel * sin;
+						const localDy = dxModel * sin + dyModel * cos;
+						
+						const parentHalfW = parent.size.width / 2;
+						const parentHalfH = parent.size.height / 2;
+						
+						const localCenterX = parentHalfW + localDx;
+						const localCenterY = parentHalfH + localDy;
+						
+						return {
+							x: localCenterX - hoveredElement.size.width / 2,
+							y: localCenterY - hoveredElement.size.height / 2
+						};
+					}
+				}
+				return isParentGroupWrapper && wrapperAbsolutePos ? absPos : hoveredElement.position;
+			})()}
 			{@const size = hoveredElement.size}
 			{@const elementRotation = getDisplayRotation(hoveredElement)}
 			{@const cumulativeRotation = isInAutoLayout ? getCumulativeRotation(hoveredElement) : 0}
 			{@const totalRotation = elementRotation + cumulativeRotation}
 			{@const rotation = totalRotation}
-			{@const hasParent = parent !== null && !isInAutoLayout}
+			{@const hasParent = parent !== null}
 			{@const canvasElement = document.querySelector('.canvas')}
 			{#if canvasElement}
 				{@const canvasRect = canvasElement.getBoundingClientRect()}
