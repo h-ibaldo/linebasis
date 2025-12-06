@@ -3446,11 +3446,26 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 			const ancestorRot = getCumulativeRotation(parent);
 			// Total rotation for the wrapper should include parent's own rotation
 			const totalRot = ancestorRot + (parent.rotation || 0);
-			
-			// Use recursive function to get parent's center in absolute space
-			// This correctly handles deeply nested rotated parents
-			const parentCenter = getElementCenterAbsoluteRecursive(parent, state);
-			
+
+			// Check if parent is ALSO in auto-layout (grandchild scenario)
+			const grandparent = parent.parentId ? state.elements[parent.parentId] : null;
+			const grandparentHasAutoLayout = grandparent?.autoLayout?.enabled || false;
+			const parentIgnoresAutoLayout = parent.autoLayout?.ignoreAutoLayout || false;
+			const parentIsInAutoLayout = grandparentHasAutoLayout && !parentIgnoresAutoLayout;
+
+			// For auto-layout parents (grandchildren scenario), get center from DOM
+			// Otherwise use recursive calculation from stored coordinates
+			const parentCenter = parentIsInAutoLayout
+				? (() => {
+					// Get parent's absolute position from DOM (flexbox-positioned)
+					const parentAbsPos = getAbsolutePositionLocal(parent);
+					return {
+						x: parentAbsPos.x + parent.size.width / 2,
+						y: parentAbsPos.y + parent.size.height / 2
+					};
+				})()
+				: getElementCenterAbsoluteRecursive(parent, state);
+
 			// Calculate the "unrotated position" - the position that, when rotated around center,
 			// results in the actual world origin (top-left corner)
 			// The unrotated position is simply: center - size/2
@@ -3972,11 +3987,26 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 				const state = get(designState);
 				const ancestorRot = getCumulativeRotation(parent);
 				const totalRot = ancestorRot + (parent.rotation || 0);
-				
-				// Use recursive function to get parent's center in absolute space
-				// This correctly handles deeply nested rotated parents
-				const parentCenter = getElementCenterAbsoluteRecursive(parent, state);
-				
+
+				// Check if parent is ALSO in auto-layout (grandchild scenario)
+				const grandparent = parent.parentId ? state.elements[parent.parentId] : null;
+				const grandparentHasAutoLayout = grandparent?.autoLayout?.enabled || false;
+				const parentIgnoresAutoLayout = parent.autoLayout?.ignoreAutoLayout || false;
+				const parentIsInAutoLayout = grandparentHasAutoLayout && !parentIgnoresAutoLayout;
+
+				// For auto-layout parents (grandchildren scenario), get center from DOM
+				// Otherwise use recursive calculation from stored coordinates
+				const parentCenter = parentIsInAutoLayout
+					? (() => {
+						// Get parent's absolute position from DOM (flexbox-positioned)
+						const parentAbsPos = getAbsolutePositionLocal(parent);
+						return {
+							x: parentAbsPos.x + parent.size.width / 2,
+							y: parentAbsPos.y + parent.size.height / 2
+						};
+					})()
+					: getElementCenterAbsoluteRecursive(parent, state);
+
 				// Calculate the "unrotated position" - the position that, when rotated around center,
 				// results in the actual world origin (top-left corner)
 				const halfW = parent.size.width / 2;
@@ -3997,21 +4027,61 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 			{@const isInAutoLayout = parentHasAutoLayout && !childIgnoresAutoLayout}
 			{@const absPos = getAbsolutePositionLocal(hoveredElement)}
 			{@const pos = (() => {
-				if (isInAutoLayout && parent) {
-					// For auto-layout children, use coordinate utilities to convert from absolute to parent-relative
-					// This is more efficient than DOM queries and handles rotated parents correctly
-					const state = get(designState);
-					const elementAbsPos = getAbsolutePositionLocal(hoveredElement);
-					return absoluteToRelative(elementAbsPos, parent, state);
+				if (isInAutoLayout && parent && parentTransform) {
+					// For auto-layout children, calculate position from DOM
+					// This correctly handles flexbox positioning with rotated parents
+					const domElement = document.querySelector(`[data-element-id="${hoveredElement.id}"]`);
+					const parentDomElement = document.querySelector(`[data-element-id="${parent.id}"]`);
+
+					if (domElement && parentDomElement) {
+						const elementRect = domElement.getBoundingClientRect();
+						const parentRect = parentDomElement.getBoundingClientRect();
+
+						const elementCenterX = elementRect.left + elementRect.width / 2;
+						const elementCenterY = elementRect.top + elementRect.height / 2;
+						const parentCenterX = parentRect.left + parentRect.width / 2;
+						const parentCenterY = parentRect.top + parentRect.height / 2;
+
+						const dx = elementCenterX - parentCenterX;
+						const dy = elementCenterY - parentCenterY;
+
+						const dxModel = dx / viewport.scale;
+						const dyModel = dy / viewport.scale;
+
+						const parentRotationRad = (parentTransform.rotation || 0) * (Math.PI / 180);
+						const cos = Math.cos(-parentRotationRad);
+						const sin = Math.sin(-parentRotationRad);
+
+						const localDx = dxModel * cos - dyModel * sin;
+						const localDy = dxModel * sin + dyModel * cos;
+
+						const parentHalfW = parent.size.width / 2;
+						const parentHalfH = parent.size.height / 2;
+
+						const localCenterX = parentHalfW + localDx;
+						const localCenterY = parentHalfH + localDy;
+
+						return {
+							x: localCenterX - hoveredElement.size.width / 2,
+							y: localCenterY - hoveredElement.size.height / 2
+						};
+					}
 				}
 				return isParentGroupWrapper && wrapperAbsolutePos ? absPos : hoveredElement.position;
 			})()}
 			{@const size = hoveredElement.size}
 			{@const elementRotation = getDisplayRotation(hoveredElement)}
 			{@const cumulativeRotation = isInAutoLayout ? getCumulativeRotation(hoveredElement) : 0}
-			{@const totalRotation = elementRotation + cumulativeRotation}
-			{@const rotation = totalRotation}
 			{@const hasParent = parent !== null}
+			{@const rotation = (() => {
+				// For auto-layout children with parent wrapper, only apply element's own rotation
+				// Parent wrapper already applies parent's cumulative rotation
+				if (isInAutoLayout && hasParent && parentTransform && parentTransform.rotation) {
+					return elementRotation; // Only element's own rotation
+				}
+				// Otherwise, apply total rotation (element + cumulative parent rotation)
+				return elementRotation + cumulativeRotation;
+			})()}
 			{@const canvasElement = document.querySelector('.canvas')}
 			{#if canvasElement}
 				{@const canvasRect = canvasElement.getBoundingClientRect()}
