@@ -1,0 +1,143 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e3]:
+  - generic [ref=e4]:
+    - generic [ref=e5]:
+      - combobox [ref=e6] [cursor=pointer]:
+        - option "Move" [selected]
+        - option "Hand"
+        - option "Scale"
+      - button "Div" [ref=e7] [cursor=pointer]
+      - button "Text" [ref=e8] [cursor=pointer]
+      - button "Media" [ref=e9] [cursor=pointer]
+    - generic [ref=e10]:
+      - button "↶" [ref=e11] [cursor=pointer]
+      - button "↷" [ref=e12] [cursor=pointer]
+      - combobox [ref=e14] [cursor=pointer]:
+        - option "100%" [selected]
+        - option "75%"
+        - option "50%"
+        - option "25%"
+        - option "125%"
+        - option "150%"
+        - option "200%"
+    - generic [ref=e15]:
+      - generic [ref=e16]: Saved
+      - button "Preview" [ref=e17] [cursor=pointer]
+      - button "Publish" [ref=e18] [cursor=pointer]
+  - generic [ref=e19]:
+    - generic [ref=e20]:
+      - button "-" [ref=e21] [cursor=pointer]
+      - generic [ref=e22]: 100%
+      - button "+" [ref=e23] [cursor=pointer]
+      - button "Reset" [ref=e24] [cursor=pointer]
+    - application "Page builder canvas" [ref=e25]:
+      - generic:
+        - button [ref=e26]
+        - button [ref=e27]
+        - button [ref=e28]:
+          - button [ref=e29]
+          - button [ref=e30]
+      - generic:
+        - generic:
+          - button "Drag div"
+          - button "Resize northeast" [ref=e31]
+          - button "Resize southeast" [ref=e32]
+          - button "Resize southwest" [ref=e33]
+          - button "Resize northwest" [ref=e34]
+          - button "Adjust corner radius" [ref=e35]
+          - button "Adjust corner radius" [ref=e36]
+          - button "Adjust corner radius" [ref=e37]
+          - button "Adjust corner radius" [ref=e38]
+          - button "Resize north" [ref=e39]
+          - button "Resize east" [ref=e40]
+          - button "Resize south" [ref=e41]
+          - button "Resize west" [ref=e42]
+          - button "Rotate element from top-left corner" [ref=e43]
+          - button "Rotate element from top-left corner" [ref=e44]
+          - button "Rotate element from top-right corner" [ref=e45]
+          - button "Rotate element from top-right corner" [ref=e46]
+          - button "Rotate element from bottom-right corner" [ref=e47]
+          - button "Rotate element from bottom-right corner" [ref=e48]
+          - button "Rotate element from bottom-left corner" [ref=e49]
+          - button "Rotate element from bottom-left corner" [ref=e50]
+  - dialog "Properties" [ref=e51]:
+    - generic [ref=e52]:
+      - generic [ref=e53]: Properties
+      - button "×" [ref=e54] [cursor=pointer]
+    - generic [ref=e57]:
+      - generic [ref=e58]:
+        - heading "Selection" [level=3] [ref=e59]
+        - paragraph [ref=e60]: 2 elements selected
+        - paragraph [ref=e61]: Edit properties to apply to all selected elements. Mixed values can be set to unify all elements.
+      - generic [ref=e62]:
+        - heading "Background" [level=3] [ref=e63]
+        - generic [ref=e65]:
+          - generic [ref=e66]: Color (Mixed)
+          - textbox "Color (Mixed)" [ref=e67] [cursor=pointer]: "#3b82f6"
+      - generic [ref=e68]:
+        - heading "Border" [level=3] [ref=e69]
+        - generic [ref=e71]:
+          - generic [ref=e72]: Width (Mixed)
+          - textbox "Width (Mixed)" [ref=e73]:
+            - /placeholder: Set new value
+            - text: 0px
+        - generic [ref=e75]:
+          - generic [ref=e76]: Color (Mixed)
+          - textbox "Color (Mixed)" [ref=e77] [cursor=pointer]: "#000000"
+        - generic [ref=e79]:
+          - generic [ref=e80]: Style (Mixed)
+          - combobox "Style (Mixed)" [ref=e81]:
+            - option "Solid" [selected]
+            - option "Dashed"
+            - option "Dotted"
+      - generic [ref=e82]:
+        - heading "Opacity" [level=3] [ref=e83]
+        - generic [ref=e85]:
+          - generic [ref=e86]: Mixed
+          - slider "Mixed" [ref=e87]: "1"
+      - generic [ref=e88]:
+        - heading "Info" [level=3] [ref=e89]
+        - generic [ref=e91]:
+          - generic [ref=e92]: Elements
+          - generic [ref=e93]: "2"
+  - dialog "Layers" [ref=e94]:
+    - generic [ref=e95]:
+      - generic [ref=e96]: Layers
+      - button "×" [ref=e97] [cursor=pointer]
+    - generic [ref=e100]:
+      - generic [ref=e101]:
+        - generic [ref=e102] [cursor=pointer]:
+          - button "Collapse" [ref=e103]:
+            - generic [ref=e104]: ▸
+          - generic "div" [ref=e105]: ▭
+          - generic [ref=e106]: Div
+          - generic [ref=e107]:
+            - button "Hide" [ref=e108]: 👁
+            - button "Lock" [ref=e109]: 🔓
+        - generic [ref=e111] [cursor=pointer]:
+          - generic "div" [ref=e113]: ▭
+          - generic [ref=e114]: Div
+          - generic [ref=e115]:
+            - button "Hide" [ref=e116]: 👁
+            - button "Lock" [ref=e117]: 🔓
+        - generic [ref=e119] [cursor=pointer]:
+          - generic "div" [ref=e121]: ▭
+          - generic [ref=e122]: Div
+          - generic [ref=e123]:
+            - button "Hide" [ref=e124]: 👁
+            - button "Lock" [ref=e125]: 🔓
+      - generic [ref=e127] [cursor=pointer]:
+        - generic "div" [ref=e129]: ▭
+        - generic [ref=e130]: Div
+        - generic [ref=e131]:
+          - button "Hide" [ref=e132]: 👁
+          - button "Lock" [ref=e133]: 🔓
+      - generic [ref=e135] [cursor=pointer]:
+        - generic "div" [ref=e137]: ▭
+        - generic [ref=e138]: Div
+        - generic [ref=e139]:
+          - button "Hide" [ref=e140]: 👁
+          - button "Lock" [ref=e141]: 🔓
+```

@@ -15,7 +15,16 @@
 	import PropertiesWindow from '$lib/components/canvas/PropertiesWindow.svelte';
 	import LayersWindow from '$lib/components/canvas/LayersWindow.svelte';
 	import ShortcutsModal from '$lib/components/canvas/ShortcutsModal.svelte';
-	import { setupKeyboardShortcuts } from '$lib/stores/design-store';
+	import {
+		setupKeyboardShortcuts,
+		designState,
+		selectElements,
+		updateElement,
+		updateElementAutoLayout,
+		dispatch
+	} from '$lib/stores/design-store';
+	import { get } from 'svelte/store';
+	import { nanoid } from 'nanoid';
 
 	let cleanupKeyboard: (() => void) | undefined;
 	let showShortcutsModal = false;
@@ -35,6 +44,17 @@
 	onMount(() => {
 		// Setup keyboard shortcuts for undo/redo
 		cleanupKeyboard = setupKeyboardShortcuts();
+
+		// Expose design store and functions to window for E2E testing
+		if (typeof window !== 'undefined') {
+			(window as any).__designState = designState;
+			(window as any).__selectElements = selectElements;
+			(window as any).__getDesignState = () => get(designState);
+			(window as any).__updateElement = updateElement;
+			(window as any).__updateAutoLayout = updateElementAutoLayout;
+			(window as any).__dispatch = dispatch;
+			(window as any).__nanoid = nanoid;
+		}
 
 		return () => {
 			if (cleanupKeyboard) cleanupKeyboard();

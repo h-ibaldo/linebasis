@@ -79,6 +79,32 @@
 			// Skip if already processed as part of a group
 			if (processedElementIds.has(element.id)) continue;
 
+			// Skip group wrappers (they're displayed as group folders via the group record)
+			if (element.isGroupWrapper) {
+				const group = Object.values(groups).find(g => g.wrapperId === element.id);
+				if (group) {
+					// Skip if we already added this group
+					if (processedElementIds.has(group.id)) continue;
+
+					const groupElements = group.elementIds
+						.map(id => $designState.elements[id])
+						.filter(Boolean);
+
+					// Mark all group elements as processed
+					group.elementIds.forEach(id => processedElementIds.add(id));
+					processedElementIds.add(group.id);
+					processedElementIds.add(element.id); // Mark wrapper as processed too
+
+					items.push({
+						type: 'group',
+						id: group.id,
+						group,
+						groupElements
+					});
+				}
+				continue;
+			}
+
 			// Check if element belongs to a group
 			if (element.groupId && groups[element.groupId]) {
 				// Skip if we already added this group

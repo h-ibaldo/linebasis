@@ -19,6 +19,7 @@
 	export let radiusFrozenValues: { nw: number; ne: number; se: number; sw: number } | null = null; // Frozen values when independent
 	export let rotation: number = 0; // Element's own rotation angle in degrees
 	export let parentTransform: { position: { x: number; y: number }; rotation: number; size: { width: number; height: number } } | null = null; // Parent's transform (position, rotation, and size) if element has a parent
+	export let wrapperAbsolutePos: { x: number; y: number } | null = null; // Absolute position of wrapper (for group wrappers when hiding parent wrapper)
 	export let isPanning: boolean = false;
 	export let onMouseDown: (e: MouseEvent, handle?: string) => void;
 
@@ -40,16 +41,22 @@
 	$: hasParent = parentTransform !== null;
 	
 	// Parent wrapper position (absolute position in canvas space)
-	$: parentWrapperScreenPos = hasParent ? {
+	$: parentWrapperScreenPos = hasParent && parentTransform ? {
 		x: viewport.x + parentTransform.position.x * viewport.scale,
 		y: viewport.y + parentTransform.position.y * viewport.scale
 	} : null;
 	
 	// Child selection container position (relative to parent if has parent, absolute otherwise)
+	// If wrapperAbsolutePos is provided (group wrapper case), add wrapper position to element's relative position
 	$: childScreenPos = hasParent ? {
 		x: pos.x * viewport.scale,
 		y: pos.y * viewport.scale
+	} : wrapperAbsolutePos ? {
+		// Group wrapper case: element position is relative to wrapper, add wrapper's absolute position
+		x: viewport.x + (wrapperAbsolutePos.x + pos.x) * viewport.scale,
+		y: viewport.y + (wrapperAbsolutePos.y + pos.y) * viewport.scale
 	} : {
+		// No parent: absolute position
 		x: viewport.x + pos.x * viewport.scale,
 		y: viewport.y + pos.y * viewport.scale
 	};
@@ -172,8 +179,9 @@
 	$: centerY = screenHeight / 2;
 </script>
 
-{#if hasParent}
+{#if hasParent && parentTransform && parentWrapperScreenPos && !pendingPosition}
 	<!-- Parent wrapper: applies parent's transform (position and rotation) -->
+	<!-- Hidden during dragging or when hideParentWrapper is true (e.g., for group wrappers) -->
 	{@const parentCenterX = parentTransform.size.width / 2 * viewport.scale}
 	{@const parentCenterY = parentTransform.size.height / 2 * viewport.scale}
 	<div

@@ -1,0 +1,63 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e3]:
+  - generic [ref=e4]:
+    - generic [ref=e5]:
+      - combobox [ref=e6] [cursor=pointer]:
+        - option "Move" [selected]
+        - option "Hand"
+        - option "Scale"
+      - button "Div" [ref=e7] [cursor=pointer]
+      - button "Text" [ref=e8] [cursor=pointer]
+      - button "Media" [ref=e9] [cursor=pointer]
+    - generic [ref=e10]:
+      - button "↶" [ref=e11] [cursor=pointer]
+      - button "↷" [ref=e12] [cursor=pointer]
+      - combobox [ref=e14] [cursor=pointer]:
+        - option "100%" [selected]
+        - option "75%"
+        - option "50%"
+        - option "25%"
+        - option "125%"
+        - option "150%"
+        - option "200%"
+    - generic [ref=e15]:
+      - generic [ref=e16]: Saved
+      - button "Preview" [ref=e17] [cursor=pointer]
+      - button "Publish" [ref=e18] [cursor=pointer]
+  - generic [ref=e19]:
+    - generic [ref=e20]:
+      - button "-" [ref=e21] [cursor=pointer]
+      - generic [ref=e22]: 100%
+      - button "+" [ref=e23] [cursor=pointer]
+      - button "Reset" [ref=e24] [cursor=pointer]
+    - application "Page builder canvas" [ref=e25]:
+      - generic:
+        - button [ref=e26]
+        - button [ref=e27]
+  - dialog "Properties" [ref=e28]:
+    - generic [ref=e29]:
+      - generic [ref=e30]: Properties
+      - button "×" [ref=e31] [cursor=pointer]
+    - generic [ref=e34]:
+      - paragraph [ref=e35]: No element selected
+      - paragraph [ref=e36]: Select an element to edit its properties
+  - dialog "Layers" [ref=e37]:
+    - generic [ref=e38]:
+      - generic [ref=e39]: Layers
+      - button "×" [ref=e40] [cursor=pointer]
+    - generic [ref=e43]:
+      - generic [ref=e45] [cursor=pointer]:
+        - generic "div" [ref=e47]: ▭
+        - generic [ref=e48]: Div
+        - generic [ref=e49]:
+          - button "Hide" [ref=e50]: 👁
+          - button "Lock" [ref=e51]: 🔓
+      - generic [ref=e53] [cursor=pointer]:
+        - generic "div" [ref=e55]: ▭
+        - generic [ref=e56]: Div
+        - generic [ref=e57]:
+          - button "Hide" [ref=e58]: 👁
+          - button "Lock" [ref=e59]: 🔓
+```

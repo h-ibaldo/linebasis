@@ -179,7 +179,7 @@
 			if (containerTypes.includes(originalParent.type)) {
 				const parentRotation = getDisplayRotation(originalParent);
 				const parentRotationRad = parentRotation * (Math.PI / 180);
-				const parentAbsPos = getAbsolutePosition(originalParent);
+				const parentAbsPos = getAbsolutePositionLocal(originalParent);
 
 				// Parent's center in canvas space
 				const parentCenterX = parentAbsPos.x + originalParent.size.width / 2;
@@ -264,7 +264,7 @@
 
 			// Check containment using actual rotated rectangle, not bounding box
 			// Get container's stored position and rotation
-			const containerAbsPos = getAbsolutePosition(element);
+			const containerAbsPos = getAbsolutePositionLocal(element);
 			const containerRotation = getDisplayRotation(element);
 			const containerRotationRad = containerRotation * (Math.PI / 180);
 			
@@ -850,7 +850,8 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 	}
 
 	// Helper: Get absolute position (relative to canvas, not parent)
-	function getAbsolutePosition(element: Element): { x: number; y: number } {
+	// Uses unified coordinate utility with auto-layout DOM reading fallback
+	function getAbsolutePositionLocal(element: Element): { x: number; y: number } {
 		const state = get(designState);
 
 		// Check if element is in auto layout mode (parent has auto layout and child doesn't ignore it)
@@ -895,202 +896,13 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 			}
 		}
 
-		// Otherwise, use stored coordinates and traverse parent chain
-		// IMPORTANT: We need to apply parent transforms (position AND rotation) correctly
-
-		// Build ancestor chain from element to root
-		const ancestors: Array<{ position: { x: number; y: number }; size: { width: number; height: number }; rotation: number }> = [];
-		let currentElement = element;
-
-		while (currentElement.parentId) {
-			const parent = state.elements[currentElement.parentId];
-			if (!parent) break;
-
-			ancestors.push({
-				position: parent.position,
-				size: parent.size,
-				rotation: parent.rotation || 0
-			});
-
-			currentElement = parent;
-		}
-
-		// Start with element's local position
-		let x = element.position.x;
-		let y = element.position.y;
-
-		// Apply transforms from immediate parent to root (reverse order)
-		for (let i = 0; i < ancestors.length; i++) {
-			const ancestor = ancestors[i];
-
-			// If parent is rotated, we need to rotate the child's position around parent's center
-			if (ancestor.rotation !== 0) {
-				const centerX = ancestor.size.width / 2;
-				const centerY = ancestor.size.height / 2;
-
-				// Translate to parent's center
-				const relX = x - centerX;
-				const relY = y - centerY;
-
-				// Apply rotation
-				const angleRad = ancestor.rotation * (Math.PI / 180);
-				const cos = Math.cos(angleRad);
-				const sin = Math.sin(angleRad);
-
-				const rotatedX = relX * cos - relY * sin;
-				const rotatedY = relX * sin + relY * cos;
-
-				// Translate back from center
-				x = rotatedX + centerX;
-				y = rotatedY + centerY;
-			}
-
-			// Add parent's position
-			x += ancestor.position.x;
-			y += ancestor.position.y;
-		}
-
-		return { x, y };
+		// Otherwise, use unified coordinate utility
+		return getAbsolutePosition(element, state);
 	}
 
-	// Helper: Convert absolute position to parent-relative position
-	// This properly handles rotated parent hierarchies
-	function absoluteToRelativePosition(element: Element, absolutePos: { x: number; y: number }): { x: number; y: number } {
-		const state = get(designState);
-
-		// If element has no parent, absolute = relative
-		if (!element.parentId) {
-			return absolutePos;
-		}
-
-		// Get parent's absolute position
-		const parent = state.elements[element.parentId];
-		if (!parent) {
-			return absolutePos;
-		}
-
-		// Build the ancestor chain from root to immediate parent
-		const ancestors: Array<{
-			id: string;
-			position: { x: number; y: number };
-			size: { width: number; height: number };
-			rotation: number;
-		}> = [];
-		let currentParent = parent;
-
-		while (currentParent) {
-			ancestors.unshift({
-				id: currentParent.id,
-				position: currentParent.position,
-				size: currentParent.size,
-				rotation: currentParent.rotation || 0
-			});
-
-			if (!currentParent.parentId) break;
-			const nextParent = state.elements[currentParent.parentId];
-			if (!nextParent) break;
-			currentParent = nextParent;
-		}
-
-		// Start with absolute position
-		let x = absolutePos.x;
-		let y = absolutePos.y;
-
-		// Apply inverse transform for each ancestor (from root to immediate parent)
-		for (const ancestor of ancestors) {
-			// Subtract the ancestor's position (in its parent's coordinate space)
-			x -= ancestor.position.x;
-			y -= ancestor.position.y;
-
-			// If ancestor is rotated, we need to apply inverse rotation around its center
-			// CSS rotation uses the element's center as transform-origin
-			if (ancestor.rotation !== 0) {
-				// Get ancestor's center point (in its local coordinate space, which is now our current space)
-				const centerX = ancestor.size.width / 2;
-				const centerY = ancestor.size.height / 2;
-
-				// Translate to origin (relative to ancestor's center)
-				const relX = x - centerX;
-				const relY = y - centerY;
-
-				// Apply inverse rotation
-				const angleRad = -ancestor.rotation * (Math.PI / 180); // Negative for inverse
-				const cos = Math.cos(angleRad);
-				const sin = Math.sin(angleRad);
-
-				const rotatedX = relX * cos - relY * sin;
-				const rotatedY = relX * sin + relY * cos;
-
-				// Translate back from origin
-				x = rotatedX + centerX;
-				y = rotatedY + centerY;
-			}
-		}
-
-		return { x, y };
-	}
-
-	// Helper: Convert absolute position to a specific parent's relative space
-	// This properly handles all ancestor rotations up to the target parent
-	function absoluteToParentSpace(absolutePos: { x: number; y: number }, targetParent: Element): { x: number; y: number } {
-		const state = get(designState);
-		
-		// Build ancestor chain from root to target parent
-		const ancestors: Array<{
-			position: { x: number; y: number };
-			size: { width: number; height: number };
-			rotation: number;
-		}> = [];
-		let currentParent = targetParent;
-
-		while (currentParent) {
-			ancestors.unshift({
-				position: currentParent.position,
-				size: currentParent.size,
-				rotation: currentParent.rotation || 0
-			});
-
-			if (!currentParent.parentId) break;
-			const nextParent = state.elements[currentParent.parentId];
-			if (!nextParent) break;
-			currentParent = nextParent;
-		}
-
-		// Start with absolute position
-		let x = absolutePos.x;
-		let y = absolutePos.y;
-
-		// Apply inverse transform for each ancestor (from root to target parent)
-		for (const ancestor of ancestors) {
-			// Subtract the ancestor's position (in its parent's coordinate space)
-			x -= ancestor.position.x;
-			y -= ancestor.position.y;
-
-			// If ancestor is rotated, apply inverse rotation around its center
-			if (ancestor.rotation !== 0) {
-				const centerX = ancestor.size.width / 2;
-				const centerY = ancestor.size.height / 2;
-
-				// Translate to origin (relative to ancestor's center)
-				const relX = x - centerX;
-				const relY = y - centerY;
-
-				// Apply inverse rotation
-				const angleRad = -ancestor.rotation * (Math.PI / 180);
-				const cos = Math.cos(angleRad);
-				const sin = Math.sin(angleRad);
-
-				const rotatedX = relX * cos - relY * sin;
-				const rotatedY = relX * sin + relY * cos;
-
-				// Translate back from origin
-				x = rotatedX + centerX;
-				y = rotatedY + centerY;
-			}
-		}
-
-		return { x, y };
-	}
+	// REMOVED: Duplicate coordinate conversion functions replaced with unified utility
+	// - absoluteToRelativePosition() → absoluteToRelative() from coordinates.ts
+	// - absoluteToParentSpace() → absoluteToRelative() from coordinates.ts
 
 	// Helper: Get display position (pending or actual, in absolute coordinates)
 	function getDisplayPosition(element: Element): { x: number; y: number } {
@@ -1104,7 +916,7 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 			return pendingPosition;
 		}
 
-		return getAbsolutePosition(element);
+		return getAbsolutePositionLocal(element);
 	}
 
 	// Helper: Get display size (pending or actual)
@@ -1236,7 +1048,7 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 			// Store initial bounds using getAbsolutePosition (unrotated absolute coordinates)
 			// This is what CanvasElement expects when converting positions
 			groupStartElements = selectedElements.map(el => {
-				const absPos = getAbsolutePosition(el);
+				const absPos = getAbsolutePositionLocal(el);
 				return {
 					id: el.id,
 					x: absPos.x,
@@ -1290,7 +1102,7 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 		groupStartElements = selectedElements.map(el => {
 			// Get element's actual rendered position from DOM to match displayed position exactly
 			const elementDom = document.querySelector(`[data-element-id="${el.id}"]`) as HTMLElement | null;
-			let initialPosition = getAbsolutePosition(el);
+			let initialPosition = getAbsolutePositionLocal(el);
 
 			if (canvasRect && elementDom) {
 				// Measure actual rendered position from DOM
@@ -1860,7 +1672,7 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 				// Initialize group dragging
 			// Store initial bounds using getAbsolutePosition
 			groupStartElements = elementsToUse.map(el => {
-				const absPos = getAbsolutePosition(el);
+				const absPos = getAbsolutePositionLocal(el);
 				return {
 					id: el.id,
 					x: absPos.x,
@@ -1909,7 +1721,7 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 
 					// CRITICAL: For the initial pendingPosition, we need to calculate what would produce
 					// the element's current visual position when passed through absoluteToRelativePosition.
-					// This is NOT the same as getAbsolutePosition(element) because that calculates
+					// This is NOT the same as getAbsolutePositionLocal(element) because that calculates
 					// the unrotated top-left in canvas space, but we need the position that when
 					// converted through our transforms produces the current rendered position.
 
@@ -2794,11 +2606,11 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 					// For auto layout: read actual position from DOM (flexbox controls positioning)
 					// Use setTimeout to let Svelte update the DOM first
 					setTimeout(() => {
-						const actualPos = getAbsolutePosition(activeElement);
+						const actualPos = getAbsolutePositionLocal(activeElement);
 						pendingPosition = actualPos;
 					}, 0);
 					// Temporarily use the last known position
-					pendingPosition = pendingPosition || getAbsolutePosition(activeElement);
+					pendingPosition = pendingPosition || getAbsolutePositionLocal(activeElement);
 				} else {
 					// For non-auto layout: use calculated anchor position
 					pendingPosition = { x: newX, y: newY };
@@ -2968,10 +2780,10 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 				
 				if (isInAutoLayout) {
 					setTimeout(() => {
-						const actualPos = getAbsolutePosition(activeElement);
+						const actualPos = getAbsolutePositionLocal(activeElement);
 						pendingPosition = actualPos;
 					}, 0);
-					pendingPosition = getAbsolutePosition(activeElement);
+					pendingPosition = getAbsolutePositionLocal(activeElement);
 				}
 			}
 
@@ -3206,7 +3018,8 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 								x: finalAbsPos.x + el.width / 2,
 								y: finalAbsPos.y + el.height / 2
 							};
-							const centerLocal = absoluteToRelativePosition(element, centerWorld);
+							const parent = state.elements[element.parentId];
+							const centerLocal = absoluteToRelative(centerWorld, parent || null, state);
 							const finalPos = {
 								x: centerLocal.x - el.width / 2,
 								y: centerLocal.y - el.height / 2
@@ -3255,7 +3068,9 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 										x: newAbsX + newWidth / 2,
 										y: newAbsY + newHeight / 2
 									};
-									const centerLocal = absoluteToRelativePosition(currentElement, centerAbs);
+									const state = get(designState);
+									const parent = currentElement.parentId ? state.elements[currentElement.parentId] : null;
+									const centerLocal = absoluteToRelative(centerAbs, parent, state);
 									finalPosition = {
 										x: centerLocal.x - newWidth / 2,
 										y: centerLocal.y - newHeight / 2
@@ -3320,7 +3135,9 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 								x: newElCenterX,
 								y: newElCenterY
 							};
-							const centerLocal = absoluteToRelativePosition(originalElement, centerAbs);
+							const state = get(designState);
+							const parent = originalElement.parentId ? state.elements[originalElement.parentId] : null;
+							const centerLocal = absoluteToRelative(centerAbs, parent, state);
 							finalPosition = {
 								x: centerLocal.x - el.width / 2,
 								y: centerLocal.y - el.height / 2
@@ -3403,7 +3220,7 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 
 								if (newParent) {
 									// Convert element's top-left position to relative position for new parent
-									const newParentAbsPos = getAbsolutePosition(newParent);
+									const newParentAbsPos = getAbsolutePositionLocal(newParent);
 									const newParentRotation = getDisplayRotation(newParent);
 
 									// Get parent's center in canvas space
@@ -3467,7 +3284,9 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 									x: pendingPosition.x + currentSize.width / 2,
 									y: pendingPosition.y + currentSize.height / 2
 								};
-								const centerLocal = absoluteToRelativePosition(activeElement, centerWorld);
+								const state = get(designState);
+								const parent = activeElement.parentId ? state.elements[activeElement.parentId] : null;
+								const centerLocal = absoluteToRelative(centerWorld, parent, state);
 								const relativePos = {
 									x: centerLocal.x - currentSize.width / 2,
 									y: centerLocal.y - currentSize.height / 2
@@ -3491,16 +3310,18 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 							// FIX: Use center-based transformation to prevent jump on resize for rotated nested elements
 							// This mirrors the fix applied to dragging logic
 							const currentSize = pendingSize; // Use the NEW size
-							
+
 							// 1. Calculate center in world space
 							const centerWorld = {
 								x: pendingPosition.x + currentSize.width / 2,
 								y: pendingPosition.y + currentSize.height / 2
 							};
-							
+
 							// 2. Transform center to local space (parent-relative)
-							const centerLocal = absoluteToRelativePosition(activeElement, centerWorld);
-							
+							const state = get(designState);
+							const parent = activeElement.parentId ? state.elements[activeElement.parentId] : null;
+							const centerLocal = absoluteToRelative(centerWorld, parent, state);
+
 							// 3. Convert back to top-left in local space
 							relativePos = {
 								x: centerLocal.x - currentSize.width / 2,
@@ -3669,9 +3490,9 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 		{@const parentHasAutoLayout = parent?.autoLayout?.enabled || false}
 		{@const childIgnoresAutoLayout = selectedElement.autoLayout?.ignoreAutoLayout || false}
 		{@const isInAutoLayout = parentHasAutoLayout && !childIgnoresAutoLayout}
-		{@const wrapperAbsolutePos = isParentGroupWrapper && parent ? getAbsolutePosition(parent) : null}
+		{@const wrapperAbsolutePos = isParentGroupWrapper && parent ? getAbsolutePositionLocal(parent) : null}
 		{@const parentTransform = parent && !isParentGroupWrapper ? (() => {
-			const absPos = getAbsolutePosition(parent);
+			const absPos = getAbsolutePositionLocal(parent);
 			// getCumulativeRotation returns sum of ANCESTORS' rotations (not including parent itself)
 			const ancestorRot = getCumulativeRotation(parent);
 			// Total rotation for the wrapper should include parent's own rotation
@@ -3716,16 +3537,17 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 					// FIX: For rotated parents, we must transform the CENTER of the element, not the top-left.
 					// Transforming top-left directly fails because rotation happens around the center.
 					const currentSize = pendingSize || selectedElement.size;
-					
+
 					// 1. Calculate center in world space
 					const centerWorld = {
 						x: pendingPosition.x + currentSize.width / 2,
 						y: pendingPosition.y + currentSize.height / 2
 					};
-					
+
 					// 2. Transform center to local space (parent-relative)
-					const centerLocal = absoluteToRelativePosition(selectedElement, centerWorld);
-					
+					const state = get(designState);
+					const centerLocal = absoluteToRelative(centerWorld, parent, state);
+
 					// 3. Convert back to top-left in local space
 					return {
 						x: centerLocal.x - currentSize.width / 2,
@@ -3817,7 +3639,7 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 		})()}
 		{@const commonParent = commonParentId ? $designState.elements[commonParentId] : null}
 		{@const groupParentTransform = commonParent ? (() => {
-			const absPos = getAbsolutePosition(commonParent);
+			const absPos = getAbsolutePositionLocal(commonParent);
 			const ancestorRot = getCumulativeRotation(commonParent);
 			const totalRot = ancestorRot + (commonParent.rotation || 0);
 
@@ -3863,6 +3685,7 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 				// For nested elements: use parent-relative position directly when not dragging
 				// For pending transforms during drag: convert absolute to parent-relative
 				const localPos = (() => {
+					const state = get(designState);
 					if (pending) {
 						// Pending transforms store absolute positions - convert to common parent's relative space
 						const absPos = pending.position;
@@ -3871,7 +3694,7 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 							x: absPos.x + size.width / 2,
 							y: absPos.y + size.height / 2
 						};
-						const centerLocal = absoluteToParentSpace(centerAbs, commonParent);
+						const centerLocal = absoluteToRelative(centerAbs, commonParent, state);
 						return {
 							x: centerLocal.x - size.width / 2,
 							y: centerLocal.y - size.height / 2
@@ -3888,7 +3711,7 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 								x: absPos.x + size.width / 2,
 								y: absPos.y + size.height / 2
 							};
-							const centerLocal = absoluteToParentSpace(centerAbs, commonParent);
+							const centerLocal = absoluteToRelative(centerAbs, commonParent, state);
 							return {
 								x: centerLocal.x - size.width / 2,
 								y: centerLocal.y - size.height / 2
@@ -3979,7 +3802,7 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 				const parentToUse = isParentGroupWrapper && wrapperParent ? wrapperParent : (commonParent && !isParentGroupWrapper ? commonParent : null);
 				if (!parentToUse) return null;
 				
-				const absPos = getAbsolutePosition(parentToUse);
+				const absPos = getAbsolutePositionLocal(parentToUse);
 				const ancestorRot = getCumulativeRotation(parentToUse);
 				const totalRot = ancestorRot + (parentToUse.rotation || 0);
 
@@ -4062,7 +3885,7 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 				{@const absoluteGroupBounds = (() => {
 					if (isParentGroupWrapper && wrapperParent && commonParent) {
 						// Group wrapper is inside a parent div - convert wrapper position to absolute
-						const wrapperAbsPos = getAbsolutePosition(commonParent);
+						const wrapperAbsPos = getAbsolutePositionLocal(commonParent);
 						return {
 							x: wrapperAbsPos.x + localGroupBounds.x,
 							y: wrapperAbsPos.y + localGroupBounds.y,
@@ -4071,7 +3894,7 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 						};
 					} else if (hasParent && commonParent) {
 						// Group elements are directly inside a parent (not a group wrapper)
-						const parentAbsPos = getAbsolutePosition(commonParent);
+						const parentAbsPos = getAbsolutePositionLocal(commonParent);
 						return {
 							x: parentAbsPos.x + localGroupBounds.x,
 							y: parentAbsPos.y + localGroupBounds.y,
@@ -4205,9 +4028,9 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 			<!-- Show individual element border for non-grouped elements or when group is already selected -->
 			{@const parent = hoveredElement.parentId ? $designState.elements[hoveredElement.parentId] : null}
 			{@const isParentGroupWrapper = parent?.isGroupWrapper || false}
-			{@const wrapperAbsolutePos = isParentGroupWrapper && parent ? getAbsolutePosition(parent) : null}
+			{@const wrapperAbsolutePos = isParentGroupWrapper && parent ? getAbsolutePositionLocal(parent) : null}
 			{@const parentTransform = parent && !isParentGroupWrapper ? (() => {
-				const absPos = getAbsolutePosition(parent);
+				const absPos = getAbsolutePositionLocal(parent);
 				const ancestorRot = getCumulativeRotation(parent);
 				const totalRot = ancestorRot + (parent.rotation || 0);
 				
@@ -4237,7 +4060,7 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 			{@const parentHasAutoLayout = parent?.autoLayout?.enabled || false}
 			{@const childIgnoresAutoLayout = hoveredElement.autoLayout?.ignoreAutoLayout || false}
 			{@const isInAutoLayout = parentHasAutoLayout && !childIgnoresAutoLayout}
-			{@const absPos = getAbsolutePosition(hoveredElement)}
+			{@const absPos = getAbsolutePositionLocal(hoveredElement)}
 			{@const pos = isInAutoLayout ? absPos : (isParentGroupWrapper && wrapperAbsolutePos ? absPos : hoveredElement.position)}
 			{@const size = hoveredElement.size}
 			{@const elementRotation = getDisplayRotation(hoveredElement)}
@@ -4510,7 +4333,7 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 			<!-- FIX: Apply same coordinate transformation logic as SelectionUI for nested rotated parents -->
 			{@const ancestorRot = getCumulativeRotation(dropParent)}
 			{@const totalRot = ancestorRot + (dropParent.rotation || 0)}
-			{@const absPos = getAbsolutePosition(dropParent)}
+			{@const absPos = getAbsolutePositionLocal(dropParent)}
 			
 			{@const parentCanvasPos = (() => {
 				let pos = absPos;

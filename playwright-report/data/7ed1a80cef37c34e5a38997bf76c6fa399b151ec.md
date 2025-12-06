@@ -1,0 +1,71 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e3]:
+  - generic [ref=e4]:
+    - generic [ref=e5]:
+      - combobox [ref=e6] [cursor=pointer]:
+        - option "Move" [selected]
+        - option "Hand"
+        - option "Scale"
+      - button "Div" [ref=e7] [cursor=pointer]
+      - button "Text" [ref=e8] [cursor=pointer]
+      - button "Media" [ref=e9] [cursor=pointer]
+    - generic [ref=e10]:
+      - button "↶" [ref=e11] [cursor=pointer]
+      - button "↷" [ref=e12] [cursor=pointer]
+      - combobox [ref=e14] [cursor=pointer]:
+        - option "100%" [selected]
+        - option "75%"
+        - option "50%"
+        - option "25%"
+        - option "125%"
+        - option "150%"
+        - option "200%"
+    - generic [ref=e15]:
+      - generic [ref=e16]: Saved
+      - button "Preview" [ref=e17] [cursor=pointer]
+      - button "Publish" [ref=e18] [cursor=pointer]
+  - generic [ref=e19]:
+    - generic [ref=e20]:
+      - button "-" [ref=e21] [cursor=pointer]
+      - generic [ref=e22]: 100%
+      - button "+" [ref=e23] [cursor=pointer]
+      - button "Reset" [ref=e24] [cursor=pointer]
+    - application "Page builder canvas" [ref=e25]:
+      - button [ref=e26]:
+        - button [ref=e27]
+        - button [ref=e28]
+  - dialog "Properties" [ref=e29]:
+    - generic [ref=e30]:
+      - generic [ref=e31]: Properties
+      - button "×" [ref=e32] [cursor=pointer]
+    - generic [ref=e35]:
+      - paragraph [ref=e36]: No element selected
+      - paragraph [ref=e37]: Select an element to edit its properties
+  - dialog "Layers" [ref=e38]:
+    - generic [ref=e39]:
+      - generic [ref=e40]: Layers
+      - button "×" [ref=e41] [cursor=pointer]
+    - generic [ref=e45]:
+      - generic [ref=e46] [cursor=pointer]:
+        - button "Collapse" [ref=e47]:
+          - generic [ref=e48]: ▸
+        - generic "div" [ref=e49]: ▭
+        - generic [ref=e50]: Div
+        - generic [ref=e51]:
+          - button "Hide" [ref=e52]: 👁
+          - button "Lock" [ref=e53]: 🔓
+      - generic [ref=e55] [cursor=pointer]:
+        - generic "div" [ref=e57]: ▭
+        - generic [ref=e58]: Div
+        - generic [ref=e59]:
+          - button "Hide" [ref=e60]: 👁
+          - button "Lock" [ref=e61]: 🔓
+      - generic [ref=e63] [cursor=pointer]:
+        - generic "div" [ref=e65]: ▭
+        - generic [ref=e66]: Div
+        - generic [ref=e67]:
+          - button "Hide" [ref=e68]: 👁
+          - button "Lock" [ref=e69]: 🔓
+```

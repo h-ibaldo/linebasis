@@ -48,6 +48,7 @@ import type {
 	InstanceComponentEvent,
 	MigrateToUnifiedPositioningEvent
 } from '$lib/types/events';
+import { invalidateTransformCache } from '$lib/utils/coordinates';
 
 /**
  * Initial empty state
@@ -487,6 +488,9 @@ function handleMoveElement(state: DesignState, event: MoveElementEvent): DesignS
 
 	if (!element) return state;
 
+	// Invalidate transform cache for element and all descendants
+	invalidateTransformCache(elementId, state);
+
 	return {
 		...state,
 		elements: {
@@ -504,6 +508,10 @@ function handleResizeElement(state: DesignState, event: ResizeElementEvent): Des
 	const element = state.elements[elementId];
 
 	if (!element) return state;
+
+	// Invalidate transform cache for element and all descendants
+	// (resize changes bounding box which affects child transforms in rotated parents)
+	invalidateTransformCache(elementId, state);
 
 	return {
 		...state,
@@ -524,6 +532,10 @@ function handleRotateElement(state: DesignState, event: RotateElementEvent): Des
 	const element = state.elements[elementId];
 
 	if (!element) return state;
+
+	// Invalidate transform cache for element and all descendants
+	// (rotation affects all child transforms)
+	invalidateTransformCache(elementId, state);
 
 	return {
 		...state,

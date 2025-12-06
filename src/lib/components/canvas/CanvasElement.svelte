@@ -22,6 +22,7 @@
 	} from '$lib/stores/design-store';
 import { interactionState, startEditingText, stopEditingText, isolateElementFromGroup, clearElementIsolation } from '$lib/stores/interaction-store';
 import { sanitizeTextContent } from '$lib/utils/sanitize';
+import { absoluteToRelative } from '$lib/utils/coordinates';
 
 	const dispatch = createEventDispatcher<{ contextmenu: { elementId: string; x: number; y: number } }>();
 
@@ -469,79 +470,7 @@ type DocumentWithCaret = Document & {
 		}
 	}
 
-	// Helper: Convert absolute position (from SelectionOverlay) to parent-relative position
-	// This properly handles rotated parent hierarchies
-	function absoluteToRelativePosition(absolutePos: { x: number; y: number }): { x: number; y: number } {
-		// If element has no parent, absolute = relative
-		if (!element.parentId) return absolutePos;
-
-		// Get parent element from store
-		const state = get(designState);
-		const parent = state.elements[element.parentId];
-		if (!parent) return absolutePos;
-
-		// Build the ancestor chain from root to immediate parent
-		const ancestors: Array<{
-			id: string;
-			position: { x: number; y: number };
-			size: { width: number; height: number };
-			rotation: number;
-		}> = [];
-		let currentParent = parent;
-
-		while (currentParent) {
-			ancestors.unshift({
-				id: currentParent.id,
-				position: currentParent.position,
-				size: currentParent.size,
-				rotation: currentParent.rotation || 0
-			});
-
-			if (!currentParent.parentId) break;
-			const nextParent = state.elements[currentParent.parentId];
-			if (!nextParent) break;
-			currentParent = nextParent;
-		}
-
-		// Start with absolute position
-		let x = absolutePos.x;
-		let y = absolutePos.y;
-
-		// Apply inverse transform for each ancestor (from root to immediate parent)
-		for (let i = 0; i < ancestors.length; i++) {
-			const ancestor = ancestors[i];
-
-			// Subtract the ancestor's position (in its parent's coordinate space)
-			x -= ancestor.position.x;
-			y -= ancestor.position.y;
-
-			// If ancestor is rotated, we need to apply inverse rotation around its center
-			// CSS rotation uses the element's center as transform-origin
-			if (ancestor.rotation !== 0) {
-				// Get ancestor's center point (in its local coordinate space, which is now our current space)
-				const centerX = ancestor.size.width / 2;
-				const centerY = ancestor.size.height / 2;
-
-				// Translate to origin (relative to ancestor's center)
-				const relX = x - centerX;
-				const relY = y - centerY;
-
-				// Apply inverse rotation
-				const angleRad = -ancestor.rotation * (Math.PI / 180); // Negative for inverse
-				const cos = Math.cos(angleRad);
-				const sin = Math.sin(angleRad);
-
-				const rotatedX = relX * cos - relY * sin;
-				const rotatedY = relX * sin + relY * cos;
-
-				// Translate back from origin
-				x = rotatedX + centerX;
-				y = rotatedY + centerY;
-			}
-		}
-
-		return { x, y };
-	}
+	// REMOVED: Duplicate function replaced with unified utility absoluteToRelative() from coordinates.ts
 
 	// Get display position/size (pending during interaction, or actual)
 	$: displayPosition = (() => {
@@ -561,7 +490,9 @@ type DocumentWithCaret = Document & {
 				};
 
 				// 2. Transform center to local space (parent-relative)
-				const centerLocal = absoluteToRelativePosition(centerWorld);
+				const state = get(designState);
+				const parent = state.elements[element.parentId];
+				const centerLocal = absoluteToRelative(centerWorld, parent || null, state);
 
 				// 3. Convert back to top-left in local space
 				return {
@@ -584,24 +515,28 @@ type DocumentWithCaret = Document & {
 
 			if (isAutoLayoutReorder) {
 				// Auto layout reordering: convert to relative
-				return absoluteToRelativePosition($interactionState.pendingPosition);
+				const state = get(designState);
+				const parentEl = element.parentId ? state.elements[element.parentId] : null;
+				return absoluteToRelative($interactionState.pendingPosition, parentEl, state);
 			} else if (element.parentId) {
 				// Nested element drag: convert absolute position to parent-relative
 				// This is critical because position:absolute on nested elements is relative to parent
-				
+
 				// FIX: For rotated parents, we must transform the CENTER of the element, not the top-left.
 				// Transforming top-left directly fails because rotation happens around the center.
 				const currentSize = $interactionState.pendingSize || element.size;
-				
+
 				// 1. Calculate center in world space
 				const centerWorld = {
 					x: $interactionState.pendingPosition.x + currentSize.width / 2,
 					y: $interactionState.pendingPosition.y + currentSize.height / 2
 				};
-				
+
 				// 2. Transform center to local space (parent-relative)
-				const centerLocal = absoluteToRelativePosition(centerWorld);
-				
+				const state = get(designState);
+				const parentEl = state.elements[element.parentId];
+				const centerLocal = absoluteToRelative(centerWorld, parentEl || null, state);
+
 				// 3. Convert back to top-left in local space
 				return {
 					x: centerLocal.x - currentSize.width / 2,
