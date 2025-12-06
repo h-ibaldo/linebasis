@@ -2849,3 +2849,17 @@ export function setupKeyboardShortcuts(): (() => void) | undefined {
 	};
 }
 
+
+// Expose for E2E testing
+if (typeof window !== 'undefined') {
+	(window as any).__designStore = {
+		get designState() {
+			return get(designState);
+		},
+		createElement,
+		rotateElement,
+		selectElement,
+		selectElements,
+		clearSelection
+	};
+}

@@ -164,3 +164,15 @@ export function getAbsoluteRotation(element: Element, state: DesignState): numbe
 	const transform = getAbsoluteTransform(element, state);
 	return transform.rotation;
 }
+
+// Expose for E2E testing
+if (typeof window !== 'undefined') {
+	(window as any).__coordinates = {
+		getAbsoluteTransform,
+		absoluteToRelative,
+		getAbsolutePosition,
+		getAbsoluteRotation,
+		invalidateTransformCache,
+		clearTransformCache
+	};
+}
