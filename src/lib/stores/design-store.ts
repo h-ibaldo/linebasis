@@ -22,7 +22,6 @@ import { reduceEvents, applyEventsIncremental, getInitialState } from './event-r
 import { currentTool } from './tool-store';
 import { interactionState, startEditingText, clearElementIsolation, isolateElementFromGroup } from './interaction-store';
 import { viewport, screenToCanvas } from './viewport-store';
-import { migrateGroupsToWrappers } from '$lib/utils/migrate-groups';
 import { migrateToUnifiedPositioning } from '$lib/utils/migrate-positioning';
 
 // ============================================================================
@@ -149,9 +148,8 @@ export async function initialize(): Promise<void> {
 
 	let designState = reduceEvents(events);
 
-	// Migrate old-style groups to wrapper-based groups
-	// This is safe to run on every load - it only migrates groups that need it
-	designState = migrateGroupsToWrappers(designState);
+	// TODO: Group migration removed - groups feature has been deprecated
+	// Groups are no longer supported in this version
 
 	// Migrate to unified positioning model (adds positionMode to all elements)
 	// This is safe to run on every load - it only migrates elements that need it

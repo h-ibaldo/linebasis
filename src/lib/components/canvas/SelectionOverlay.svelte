@@ -3437,12 +3437,10 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 		{@const selectedElement = selectedElements[0]}
 		{@const state = get(designState)}
 		{@const parent = selectedElement.parentId ? $designState.elements[selectedElement.parentId] : null}
-		{@const isParentGroupWrapper = parent?.isGroupWrapper || false}
 		{@const parentHasAutoLayout = parent?.autoLayout?.enabled || false}
 		{@const childIgnoresAutoLayout = selectedElement.autoLayout?.ignoreAutoLayout || false}
 		{@const isInAutoLayout = parentHasAutoLayout && !childIgnoresAutoLayout}
-		{@const wrapperAbsolutePos = isParentGroupWrapper && parent ? getAbsolutePositionLocal(parent) : null}
-		{@const parentTransform = parent && !isParentGroupWrapper ? (() => {
+		{@const parentTransform = parent ? (() => {
 			const state = get(designState);
 			// getCumulativeRotation returns sum of ANCESTORS' rotations (not including parent itself)
 			const ancestorRot = getCumulativeRotation(parent);
@@ -3565,7 +3563,7 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 			radiusFrozenValues={activeElementId === selectedElement.id ? radiusFrozenValues : null}
 			rotation={getDisplayRotation(selectedElement)}
 			{parentTransform}
-			wrapperAbsolutePos={wrapperAbsolutePos}
+			wrapperAbsolutePos={null}
 			onMouseDown={(e, handle) => handleMouseDown(e, selectedElement, handle)}
 		/>
 	{:else if selectedElements.length > 1 && groupBounds && interactionMode !== 'rotating' && (interactionMode !== 'dragging' || !hasMovedBeyondThreshold) && !$interactionState.hiddenDuringTransition}

@@ -542,8 +542,13 @@ export interface Element {
 	name?: string; // Custom name for the element (for layers panel)
 	parentId: string | null;
 	pageId: string; // Elements belong to a page's canvas
-	groupId?: string | null; // Group ID if element belongs to a group (DEPRECATED - will be removed)
-	isGroupWrapper?: boolean; // Whether this div is a group wrapper (DEPRECATED - will be removed)
+
+	// TODO: Remove these deprecated group properties once group code is fully removed
+	/** @deprecated Group feature removed - this property will be deleted */
+	groupId?: string | null;
+	/** @deprecated Group feature removed - this property will be deleted */
+	isGroupWrapper?: boolean;
+
 	positionMode?: PositionMode; // How this element is positioned (default: 'absolute')
 	position: Position;
 	size: Size;
