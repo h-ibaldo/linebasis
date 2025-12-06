@@ -3997,45 +3997,12 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 			{@const isInAutoLayout = parentHasAutoLayout && !childIgnoresAutoLayout}
 			{@const absPos = getAbsolutePositionLocal(hoveredElement)}
 			{@const pos = (() => {
-				if (isInAutoLayout && parent && parentTransform) {
-					// For auto-layout children, use the same DOM-based calculation as selected elements
-					// This ensures consistency between hover and selection
-					const domElement = document.querySelector(`[data-element-id="${hoveredElement.id}"]`);
-					const parentDomElement = document.querySelector(`[data-element-id="${parent.id}"]`);
-					
-					if (domElement && parentDomElement) {
-						const elementRect = domElement.getBoundingClientRect();
-						const parentRect = parentDomElement.getBoundingClientRect();
-						
-						const elementCenterX = elementRect.left + elementRect.width / 2;
-						const elementCenterY = elementRect.top + elementRect.height / 2;
-						const parentCenterX = parentRect.left + parentRect.width / 2;
-						const parentCenterY = parentRect.top + parentRect.height / 2;
-						
-						const dx = elementCenterX - parentCenterX;
-						const dy = elementCenterY - parentCenterY;
-						
-						const dxModel = dx / viewport.scale;
-						const dyModel = dy / viewport.scale;
-						
-						const parentRotationRad = (parentTransform.rotation || 0) * (Math.PI / 180);
-						const cos = Math.cos(-parentRotationRad);
-						const sin = Math.sin(-parentRotationRad);
-						
-						const localDx = dxModel * cos - dyModel * sin;
-						const localDy = dxModel * sin + dyModel * cos;
-						
-						const parentHalfW = parent.size.width / 2;
-						const parentHalfH = parent.size.height / 2;
-						
-						const localCenterX = parentHalfW + localDx;
-						const localCenterY = parentHalfH + localDy;
-						
-						return {
-							x: localCenterX - hoveredElement.size.width / 2,
-							y: localCenterY - hoveredElement.size.height / 2
-						};
-					}
+				if (isInAutoLayout && parent) {
+					// For auto-layout children, use coordinate utilities to convert from absolute to parent-relative
+					// This is more efficient than DOM queries and handles rotated parents correctly
+					const state = get(designState);
+					const elementAbsPos = getAbsolutePositionLocal(hoveredElement);
+					return absoluteToRelative(elementAbsPos, parent, state);
 				}
 				return isParentGroupWrapper && wrapperAbsolutePos ? absPos : hoveredElement.position;
 			})()}
