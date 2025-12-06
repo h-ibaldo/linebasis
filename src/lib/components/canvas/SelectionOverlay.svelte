@@ -1719,20 +1719,29 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 						y: cursorCanvasY - elementCenterCanvasY
 					};
 
-					// CRITICAL: For the initial pendingPosition, we need to calculate what would produce
-					// the element's current visual position when passed through absoluteToRelativePosition.
-					// This is NOT the same as getAbsolutePositionLocal(element) because that calculates
-					// the unrotated top-left in canvas space, but we need the position that when
-					// converted through our transforms produces the current rendered position.
-
-					// The element is currently rendered at the DOM position we just measured.
-					// During drag, we calculate: elementCenter = cursor - dragOffset
-					// Then: pendingPosition = elementCenter - size/2
-					// So for consistency, use the same calculation here:
-					const initialPendingPosition = {
+					// CRITICAL: Calculate initial position in absolute space, then convert to relative
+					// The element's center in absolute canvas space (from DOM measurement)
+					const absoluteTopLeft = {
 						x: elementCenterCanvasX - size.width / 2,
 						y: elementCenterCanvasY - size.height / 2
 					};
+
+					// Convert absolute to parent-relative if element has a parent
+					let initialPendingPosition: { x: number; y: number };
+					if (element.parentId) {
+						const state = get(designState);
+						const parent = state.elements[element.parentId];
+						if (parent) {
+							// Use unified coordinate utilities to handle all rotations correctly
+							initialPendingPosition = absoluteToRelative(absoluteTopLeft, parent, state);
+						} else {
+							// Parent not found, fall back to absolute
+							initialPendingPosition = absoluteTopLeft;
+						}
+					} else {
+						// Root element - absolute position is correct
+						initialPendingPosition = absoluteTopLeft;
+					}
 
 					elementStartCanvas = {
 						x: initialPendingPosition.x,
