@@ -1696,9 +1696,13 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 				pendingPosition = { x: elementStartCanvas.x, y: elementStartCanvas.y };
 			} else {
 				// Single element drag
-				pendingPosition = { ...pos };
+				// Don't set pendingPosition yet - wait until mouse actually moves
+				// This prevents initial jump from coordinate calculation differences, especially for rotated parents
+				// The element will use its current position (element.position) until the mouse moves
+				pendingPosition = null;
 
 				// Calculate and store offset from cursor to element's center at drag start
+				// For nested elements with rotated parents, we must measure from DOM to match actual rendered position
 				const canvasElement = document.querySelector('.canvas') as HTMLElement | null;
 				const canvasRect = canvasElement?.getBoundingClientRect();
 				const elementDom = document.querySelector(`[data-element-id="${element.id}"]`) as HTMLElement | null;
@@ -1706,7 +1710,8 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 					const cursorCanvasX = (e.clientX - canvasRect.left - viewport.x) / viewport.scale;
 					const cursorCanvasY = (e.clientY - canvasRect.top - viewport.y) / viewport.scale;
 
-					// Get element's actual rendered center from DOM
+					// Measure actual rendered center from DOM (matches what's visually displayed)
+					// This is critical for rotated parents where coordinate utilities may not match DOM exactly
 					const elementRect = elementDom.getBoundingClientRect();
 					const elementCenterScreenX = elementRect.left + elementRect.width / 2;
 					const elementCenterScreenY = elementRect.top + elementRect.height / 2;
@@ -1718,39 +1723,6 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 						x: cursorCanvasX - elementCenterCanvasX,
 						y: cursorCanvasY - elementCenterCanvasY
 					};
-
-					// CRITICAL: Calculate initial position in absolute space, then convert to relative
-					// The element's center in absolute canvas space (from DOM measurement)
-					const absoluteTopLeft = {
-						x: elementCenterCanvasX - size.width / 2,
-						y: elementCenterCanvasY - size.height / 2
-					};
-
-					// Convert absolute to parent-relative if element has a parent
-					let initialPendingPosition: { x: number; y: number };
-					if (element.parentId) {
-						const state = get(designState);
-						const parent = state.elements[element.parentId];
-						if (parent) {
-							// Use unified coordinate utilities to handle all rotations correctly
-							initialPendingPosition = absoluteToRelative(absoluteTopLeft, parent, state);
-						} else {
-							// Parent not found, fall back to absolute
-							initialPendingPosition = absoluteTopLeft;
-						}
-					} else {
-						// Root element - absolute position is correct
-						initialPendingPosition = absoluteTopLeft;
-					}
-
-					elementStartCanvas = {
-						x: initialPendingPosition.x,
-						y: initialPendingPosition.y,
-						width: size.width,
-						height: size.height
-					};
-
-					pendingPosition = initialPendingPosition;
 				}
 
 				// Initialize auto layout reordering state

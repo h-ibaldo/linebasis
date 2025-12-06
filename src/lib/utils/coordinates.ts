@@ -107,8 +107,96 @@ export function getAbsoluteTransform(
 	return result;
 }
 
+
+/**
+ * Get cumulative rotation of all ancestors (not including element itself)
+ */
+function getCumulativeRotation(element: Element, state: DesignState): number {
+	let totalRotation = 0;
+	let current = element;
+	while (current.parentId) {
+		const parent = state.elements[current.parentId];
+		if (!parent) break;
+		totalRotation += parent.rotation || 0;
+		current = parent;
+	}
+	return totalRotation;
+}
+
+/**
+ * Recursively calculate element center in absolute space
+ * This correctly handles nested rotated parents by accounting for center-based rotation at each level
+ * 
+ * @param element - Element to get center for
+ * @param state - Design state
+ * @returns Center point in absolute canvas space
+ */
+function getElementCenterAbsoluteRecursive(element: Element, state: DesignState): Point {
+	// Base case: root element
+	if (!element.parentId) {
+		const absPos = getAbsolutePosition(element, state);
+		return {
+			x: absPos.x + element.size.width / 2,
+			y: absPos.y + element.size.height / 2
+		};
+	}
+	
+	// Recursive case: get parent's center first
+	const parent = state.elements[element.parentId];
+	if (!parent) {
+		// Orphaned - fallback
+		const absPos = getAbsolutePosition(element, state);
+		return {
+			x: absPos.x + element.size.width / 2,
+			y: absPos.y + element.size.height / 2
+		};
+	}
+	
+	// Get parent's center recursively
+	const parentCenter = getElementCenterAbsoluteRecursive(parent, state);
+	
+	// Calculate total rotation up to and including parent
+	let totalRotation = 0;
+	let current = parent;
+	while (current) {
+		totalRotation += current.rotation || 0;
+		if (!current.parentId) break;
+		current = state.elements[current.parentId];
+		if (!current) break;
+	}
+	
+	const halfW = element.size.width / 2;
+	const halfH = element.size.height / 2;
+	const parentHalfW = parent.size.width / 2;
+	const parentHalfH = parent.size.height / 2;
+	
+	// Element's relative position to parent's top-left
+	const relX = element.position.x;
+	const relY = element.position.y;
+	
+	// Calculate element's center relative to parent's center in parent's local (unrotated) space
+	// This is the vector from parent's center to child's center, before parent's rotation
+	const childCenterRelToParentCenterUnrotatedX = relX + halfW - parentHalfW;
+	const childCenterRelToParentCenterUnrotatedY = relY + halfH - parentHalfH;
+	
+	// Rotate this vector by the parent's total rotation to get its position relative to parent's center in world space
+	const angleRad = (totalRotation * Math.PI) / 180;
+	const cos = Math.cos(angleRad);
+	const sin = Math.sin(angleRad);
+	
+	const rotatedRelX = childCenterRelToParentCenterUnrotatedX * cos - childCenterRelToParentCenterUnrotatedY * sin;
+	const rotatedRelY = childCenterRelToParentCenterUnrotatedX * sin + childCenterRelToParentCenterUnrotatedY * cos;
+	
+	// Add this rotated relative position to the parent's absolute center to get the child's absolute center
+	return {
+		x: parentCenter.x + rotatedRelX,
+		y: parentCenter.y + rotatedRelY
+	};
+}
+
 /**
  * Convert absolute position to relative position within parent
+ * Accounts for center-based rotation (CSS rotates around center, not origin)
  *
  * @param absolutePos - Position in canvas space
  * @param targetParent - Parent element to convert relative to (null for root)
@@ -128,25 +216,40 @@ export function absoluteToRelative(
 	// Get parent's absolute transform
 	const parentTransform = getAbsoluteTransform(targetParent, state);
 
-	// Subtract parent's position to get relative position
-	let relX = absolutePos.x - parentTransform.x;
-	let relY = absolutePos.y - parentTransform.y;
-
-	// If parent is rotated, need to un-rotate the child position
+	// If parent is rotated, CSS rotates around the parent's center, not the origin
 	if (parentTransform.rotation && parentTransform.rotation !== 0) {
-		// Rotate by negative parent rotation to get back to parent's local space
-		const angleRad = (-parentTransform.rotation * Math.PI) / 180;
-		const cos = Math.cos(angleRad);
-		const sin = Math.sin(angleRad);
-
-		const unrotatedX = relX * cos - relY * sin;
-		const unrotatedY = relX * sin + relY * cos;
-
-		relX = unrotatedX;
-		relY = unrotatedY;
+		// Use recursive function to get parent's center in absolute space
+		// This correctly handles deeply nested rotated parents
+		const parentCenterAbs = getElementCenterAbsoluteRecursive(targetParent, state);
+		
+		const halfW = targetParent.size.width / 2;
+		const halfH = targetParent.size.height / 2;
+		
+		// Translate point to be relative to parent's center
+		const relToCenterX = absolutePos.x - parentCenterAbs.x;
+		const relToCenterY = absolutePos.y - parentCenterAbs.y;
+		
+		// Rotate by negative total rotation to un-rotate (back to parent's local space)
+		const totalRotation = parentTransform.rotation;
+		const unrotateAngleRad = (-totalRotation * Math.PI) / 180;
+		const unrotateCos = Math.cos(unrotateAngleRad);
+		const unrotateSin = Math.sin(unrotateAngleRad);
+		
+		const unrotatedRelToCenterX = relToCenterX * unrotateCos - relToCenterY * unrotateSin;
+		const unrotatedRelToCenterY = relToCenterX * unrotateSin + relToCenterY * unrotateCos;
+		
+		// Translate back to be relative to parent's top-left (add local center)
+		return {
+			x: unrotatedRelToCenterX + halfW,
+			y: unrotatedRelToCenterY + halfH
+		};
+	} else {
+		// No rotation: simple translation
+		return {
+			x: absolutePos.x - parentTransform.x,
+			y: absolutePos.y - parentTransform.y
+		};
 	}
-
-	return { x: relX, y: relY };
 }
 
 /**
