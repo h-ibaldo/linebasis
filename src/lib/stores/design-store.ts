@@ -1953,7 +1953,10 @@ export async function cutElements(): Promise<void> {
 /**
  * Paste elements from clipboard
  */
-export async function pasteElements(customOffset?: { x: number; y: number } | null): Promise<void> {
+export async function pasteElements(
+	customOffset?: { x: number; y: number } | null,
+	pasteInside = false
+): Promise<void> {
 	if (clipboard.length === 0) return;
 
 	const state = get(designState);
@@ -1977,13 +1980,11 @@ export async function pasteElements(customOffset?: { x: number; y: number } | nu
 			targetParentId = selectedElement.parentId;
 		} else {
 			// Selected element is NOT in clipboard
-			// Check if it's a container type (can have children)
-			const containerTypes = ['div', 'section', 'header', 'footer', 'article', 'aside', 'nav', 'main'];
-			if (containerTypes.includes(selectedElement.type)) {
-				// Container element -> paste inside it (Framer-style behavior)
+			if (pasteInside) {
+				// Cmd+Shift+V: Explicitly paste inside selected element
 				targetParentId = selectedElement.id;
 			} else {
-				// Non-container element -> paste as sibling
+				// Cmd+V: Always paste as sibling (same level as selected element)
 				targetParentId = selectedElement.parentId;
 			}
 		}
@@ -2731,10 +2732,15 @@ export function setupKeyboardShortcuts(): (() => void) | undefined {
 			e.preventDefault();
 			cutElements();
 		}
-		// Cmd+V (paste)
-		else if ((e.metaKey || e.ctrlKey) && e.key === 'v' && !isTyping) {
+		// Cmd+Shift+V (paste inside - as child of selected element)
+		else if ((e.metaKey || e.ctrlKey) && e.key === 'v' && e.shiftKey && !isTyping) {
 			e.preventDefault();
-			pasteElements();
+			pasteElements(undefined, true);
+		}
+		// Cmd+V (paste as sibling - same level as selected element)
+		else if ((e.metaKey || e.ctrlKey) && e.key === 'v' && !e.shiftKey && !isTyping) {
+			e.preventDefault();
+			pasteElements(undefined, false);
 		}
 		// Cmd+D (duplicate)
 		else if ((e.metaKey || e.ctrlKey) && e.key === 'd' && !isTyping) {
