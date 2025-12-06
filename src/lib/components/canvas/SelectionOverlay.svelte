@@ -16,7 +16,7 @@
 	import { interactionState, updateInteractionStateThrottled, updateInteractionStateImmediate } from '$lib/stores/interaction-store';
 	import { currentTool } from '$lib/stores/tool-store';
 	import { CANVAS_INTERACTION } from '$lib/constants/canvas';
-	import { getAbsolutePosition, getAbsoluteTransform, absoluteToRelative, invalidateTransformCache } from '$lib/utils/coordinates';
+	import { getAbsolutePosition, getAbsoluteTransform, absoluteToRelative, invalidateTransformCache, getElementCenterAbsoluteRecursive } from '$lib/utils/coordinates';
 	import SelectionUI from './SelectionUI.svelte';
 
 	// Props
@@ -3443,35 +3443,25 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 		{@const isInAutoLayout = parentHasAutoLayout && !childIgnoresAutoLayout}
 		{@const wrapperAbsolutePos = isParentGroupWrapper && parent ? getAbsolutePositionLocal(parent) : null}
 		{@const parentTransform = parent && !isParentGroupWrapper ? (() => {
-			const absPos = getAbsolutePositionLocal(parent);
+			const state = get(designState);
 			// getCumulativeRotation returns sum of ANCESTORS' rotations (not including parent itself)
 			const ancestorRot = getCumulativeRotation(parent);
 			// Total rotation for the wrapper should include parent's own rotation
 			const totalRot = ancestorRot + (parent.rotation || 0);
 			
-			// For nested parents, getAbsolutePosition returns the ACTUAL WORLD ORIGIN (top-left corner).
-			// But the wrapper is rotated around its center.
-			// We need to calculate the "unrotated position" that, when rotated around center, results in the Actual Origin.
-			// The Origin position is determined by ANCESTORS' rotation only (parent rotates around its own center).
-			// Formula: UnrotatedPos = ActualOrigin - Size/2 + Rotate_Ancestors(Size/2)
+			// Use recursive function to get parent's center in absolute space
+			// This correctly handles deeply nested rotated parents
+			const parentCenter = getElementCenterAbsoluteRecursive(parent, state);
 			
-			let pos = absPos;
-			if (parent.parentId) {
-				const angleRad = ancestorRot * (Math.PI / 180);
-				const cos = Math.cos(angleRad);
-				const sin = Math.sin(angleRad);
-				const halfW = parent.size.width / 2;
-				const halfH = parent.size.height / 2;
-				
-				// Rotate(Size/2) using ancestor rotation
-				const rotatedHalfW = halfW * cos - halfH * sin;
-				const rotatedHalfH = halfW * sin + halfH * cos;
-				
-				pos = {
-					x: absPos.x - halfW + rotatedHalfW,
-					y: absPos.y - halfH + rotatedHalfH
-				};
-			}
+			// Calculate the "unrotated position" - the position that, when rotated around center,
+			// results in the actual world origin (top-left corner)
+			// The unrotated position is simply: center - size/2
+			const halfW = parent.size.width / 2;
+			const halfH = parent.size.height / 2;
+			const pos = {
+				x: parentCenter.x - halfW,
+				y: parentCenter.y - halfH
+			};
 
 			return {
 				position: pos,
@@ -3981,26 +3971,22 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 			{@const isParentGroupWrapper = parent?.isGroupWrapper || false}
 			{@const wrapperAbsolutePos = isParentGroupWrapper && parent ? getAbsolutePositionLocal(parent) : null}
 			{@const parentTransform = parent && !isParentGroupWrapper ? (() => {
-				const absPos = getAbsolutePositionLocal(parent);
+				const state = get(designState);
 				const ancestorRot = getCumulativeRotation(parent);
 				const totalRot = ancestorRot + (parent.rotation || 0);
 				
-				let parentPos = absPos;
-				if (parent.parentId) {
-					const angleRad = ancestorRot * (Math.PI / 180);
-					const cos = Math.cos(angleRad);
-					const sin = Math.sin(angleRad);
-					const halfW = parent.size.width / 2;
-					const halfH = parent.size.height / 2;
-					
-					const rotatedHalfW = halfW * cos - halfH * sin;
-					const rotatedHalfH = halfW * sin + halfH * cos;
-					
-					parentPos = {
-						x: absPos.x - halfW + rotatedHalfW,
-						y: absPos.y - halfH + rotatedHalfH
-					};
-				}
+				// Use recursive function to get parent's center in absolute space
+				// This correctly handles deeply nested rotated parents
+				const parentCenter = getElementCenterAbsoluteRecursive(parent, state);
+				
+				// Calculate the "unrotated position" - the position that, when rotated around center,
+				// results in the actual world origin (top-left corner)
+				const halfW = parent.size.width / 2;
+				const halfH = parent.size.height / 2;
+				const parentPos = {
+					x: parentCenter.x - halfW,
+					y: parentCenter.y - halfH
+				};
 
 				return {
 					position: parentPos,

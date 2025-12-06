@@ -268,7 +268,7 @@ export function getAbsoluteRotation(element: Element, state: DesignState): numbe
 	return transform.rotation;
 }
 
-// Expose for E2E testing
+// Expose for E2E testing and internal use
 if (typeof window !== 'undefined') {
 	(window as any).__coordinates = {
 		getAbsoluteTransform,
@@ -276,6 +276,10 @@ if (typeof window !== 'undefined') {
 		getAbsolutePosition,
 		getAbsoluteRotation,
 		invalidateTransformCache,
-		clearTransformCache
+		clearTransformCache,
+		getElementCenterAbsoluteRecursive
 	};
 }
+
+// Export for use in SelectionOverlay
+export { getElementCenterAbsoluteRecursive };
