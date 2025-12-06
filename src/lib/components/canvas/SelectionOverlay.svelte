@@ -3219,40 +3219,10 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 								let relativePos: { x: number; y: number };
 
 								if (newParent) {
-									// Convert element's top-left position to relative position for new parent
-									const newParentAbsPos = getAbsolutePositionLocal(newParent);
-									const newParentRotation = getDisplayRotation(newParent);
-
-									// Get parent's center in canvas space
-									const parentCenterX = newParentAbsPos.x + newParent.size.width / 2;
-									const parentCenterY = newParentAbsPos.y + newParent.size.height / 2;
-
-									// Get element's center in canvas space
-									const elementCenterX = elementTopLeftCanvas.x + activeElement.size.width / 2;
-									const elementCenterY = elementTopLeftCanvas.y + activeElement.size.height / 2;
-
-									// Offset from parent center to element center (in world/canvas space)
-									const dx = elementCenterX - parentCenterX;
-									const dy = elementCenterY - parentCenterY;
-
-									if (newParentRotation !== 0) {
-										// Transform to parent's local space (inverse rotation)
-										const angleRad = -newParentRotation * (Math.PI / 180);
-										const localDx = dx * Math.cos(angleRad) - dy * Math.sin(angleRad);
-										const localDy = dx * Math.sin(angleRad) + dy * Math.cos(angleRad);
-
-										// Convert from center-relative to top-left relative (in parent's local space)
-										relativePos = {
-											x: localDx + newParent.size.width / 2 - activeElement.size.width / 2,
-											y: localDy + newParent.size.height / 2 - activeElement.size.height / 2
-										};
-									} else {
-										// Parent not rotated - simple subtraction
-										relativePos = {
-											x: elementTopLeftCanvas.x - newParentAbsPos.x,
-											y: elementTopLeftCanvas.y - newParentAbsPos.y
-										};
-									}
+									// Use unified coordinate utilities to convert absolute to relative
+									// This handles all parent rotations correctly (including nested rotations)
+									const state = get(designState);
+									relativePos = absoluteToRelative(elementTopLeftCanvas, newParent, state);
 								} else {
 									// Dropping at root - element top-left is already in absolute coordinates
 									relativePos = elementTopLeftCanvas;
