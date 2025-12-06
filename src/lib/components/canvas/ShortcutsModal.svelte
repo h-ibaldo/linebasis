@@ -17,7 +17,6 @@
 			{ keys: ['Cmd', 'C'], description: 'Copy' },
 			{ keys: ['Cmd', 'X'], description: 'Cut' },
 			{ keys: ['Cmd', 'V'], description: 'Paste' },
-			{ keys: ['Cmd', 'Shift', 'V'], description: 'Paste inside selected div' },
 			{ keys: ['Cmd', 'D'], description: 'Duplicate' },
 			{ keys: ['Delete'], description: 'Delete selection' },
 			{ keys: ['Cmd', 'A'], description: 'Select all' },

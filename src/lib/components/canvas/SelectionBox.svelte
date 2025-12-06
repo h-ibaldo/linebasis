@@ -50,6 +50,12 @@
 		                          target.classList.contains('canvas');
 
 		if (isCanvasBackground) {
+			// Clear selection immediately on canvas click (before drag starts)
+			// This ensures single click on background clears selection
+			if (!e.shiftKey) {
+				clearSelection();
+			}
+
 			isSelecting = true;
 			shiftKeyPressed = e.shiftKey; // Store SHIFT key state at drag start
 

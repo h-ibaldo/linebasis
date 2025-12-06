@@ -18,9 +18,52 @@
 	import LayerTreeItem from './LayerTreeItem.svelte';
 	import ContextMenu from '$lib/components/ui/ContextMenu.svelte';
 	import type { Element, Group } from '$lib/types/events';
-	import type { MenuItem } from '$lib/components/ui/ContextMenu.svelte';
+	import { onMount, tick } from 'svelte';
+
+	interface MenuItem {
+		id: string;
+		label: string;
+		shortcut?: string;
+		disabled?: boolean;
+		separator?: boolean;
+		submenu?: MenuItem[];
+	}
 
 	$: selectedIds = $designState.selectedElementIds;
+
+	// Auto-scroll to selected element
+	let layersPanelElement: HTMLElement;
+	let previousSelectedIds: string[] = [];
+
+	// Watch for selection changes and scroll to newly selected element
+	$: if (selectedIds.length > 0 && !arraysEqual(selectedIds, previousSelectedIds)) {
+		scrollToSelectedElement(selectedIds[0]); // Scroll to first selected element
+		previousSelectedIds = [...selectedIds];
+	}
+
+	function arraysEqual(a: string[], b: string[]): boolean {
+		if (a.length !== b.length) return false;
+		return a.every((val, index) => val === b[index]);
+	}
+
+	async function scrollToSelectedElement(elementId: string) {
+		// Wait for DOM to update
+		await tick();
+
+		if (!layersPanelElement) return;
+
+		// Find the layer item in the DOM
+		const layerItem = layersPanelElement.querySelector(`[data-layer-id="${elementId}"]`);
+
+		if (layerItem) {
+			// Scroll the item into view with smooth behavior
+			layerItem.scrollIntoView({
+				behavior: 'smooth',
+				block: 'nearest',
+				inline: 'nearest'
+			});
+		}
+	}
 
 	// Drag and drop state
 	let draggedElementId: string | null = null;
@@ -30,6 +73,20 @@
 
 	// Context menu state
 	let contextMenu: { x: number; y: number; elementId: string } | null = null;
+
+	// Group expand/collapse state
+	// Track collapsed groups as a simple object for reliable reactivity
+	// If a groupId is in this object with value true, it's collapsed (default: expanded)
+	let collapsedGroups: Record<string, boolean> = {};
+	
+	function toggleGroupExpanded(groupId: string, e: MouseEvent) {
+		e.stopPropagation();
+		// Toggle collapsed state - create new object to trigger reactivity
+		collapsedGroups = {
+			...collapsedGroups,
+			[groupId]: !collapsedGroups[groupId] // Toggle: true = collapsed, undefined/false = expanded
+		};
+	}
 
 	// Count existing views to auto-name
 	$: viewCount = Object.values($designState.elements).filter(el => el.isView).length;
@@ -71,6 +128,32 @@
 			// Skip if already processed as part of a group
 			if (processedElementIds.has(element.id)) continue;
 
+			// Skip group wrappers (they're displayed as group folders via the group record)
+			if (element.isGroupWrapper) {
+				const group = Object.values(groups).find(g => g.wrapperId === element.id);
+				if (group) {
+					// Skip if we already added this group
+					if (processedElementIds.has(group.id)) continue;
+
+					const groupElements = group.elementIds
+						.map(id => $designState.elements[id])
+						.filter(Boolean);
+
+					// Mark all group elements as processed
+					group.elementIds.forEach(id => processedElementIds.add(id));
+					processedElementIds.add(group.id);
+					processedElementIds.add(element.id); // Mark wrapper as processed too
+
+					items.push({
+						type: 'group',
+						id: group.id,
+						group,
+						groupElements
+					});
+				}
+				continue;
+			}
+
 			// Check if element belongs to a group
 			if (element.groupId && groups[element.groupId]) {
 				// Skip if we already added this group
@@ -107,6 +190,7 @@
 		// No sorting needed - elements are already in correct order from view.elements (reversed)
 		return items;
 	}
+
 
 	function handleSelectGroup(groupId: string) {
 		const group = $designState.groups[groupId];
@@ -389,7 +473,7 @@
 	minWidth={200}
 	maxWidth={300}
 >
-	<div class="layers-panel">
+	<div class="layers-panel" bind:this={layersPanelElement}>
 		{#if !hasElements}
 			<div class="no-elements">
 				<p>No elements</p>
@@ -406,13 +490,18 @@
 								class:selected={item.groupElements.some(el => selectedIds.includes(el.id))}
 								on:click={() => handleSelectGroup(item.id)}
 							>
-								<button class="expand-btn" on:click|stopPropagation={() => {}} aria-label="Expand">
-									<span class="arrow expanded">▸</span>
+								<button 
+									class="expand-btn" 
+									on:click={(e) => toggleGroupExpanded(item.id, e)}
+									aria-label={!collapsedGroups[item.id] ? 'Collapse' : 'Expand'}
+								>
+									<span class="arrow" class:expanded={!collapsedGroups[item.id]}>▸</span>
 								</button>
 								<span class="group-icon">⊞</span>
 								<span class="group-name">Group</span>
 							</div>
-							<!-- Group members (always expanded for now, collapsible in future) -->
+							<!-- Group members (collapsible) -->
+							{#if !collapsedGroups[item.id]}
 							<div class="group-children">
 								{#each item.groupElements as element (element.id)}
 									<LayerTreeItem
@@ -434,6 +523,7 @@
 									/>
 								{/each}
 							</div>
+							{/if}
 						</div>
 					{:else if item.element}
 						<!-- Regular element -->
@@ -442,6 +532,7 @@
 							elements={$designState.elements}
 							{selectedIds}
 							onSelect={handleSelectElement}
+							onSelectGroup={handleSelectGroup}
 							onToggleVisibility={handleToggleVisibility}
 							onToggleLock={handleToggleLock}
 							onRename={handleRename}

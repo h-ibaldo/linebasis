@@ -22,6 +22,7 @@
 	} from '$lib/stores/design-store';
 import { interactionState, startEditingText, stopEditingText, isolateElementFromGroup, clearElementIsolation } from '$lib/stores/interaction-store';
 import { sanitizeTextContent } from '$lib/utils/sanitize';
+import { absoluteToRelative } from '$lib/utils/coordinates';
 
 	const dispatch = createEventDispatcher<{ contextmenu: { elementId: string; x: number; y: number } }>();
 
@@ -155,6 +156,10 @@ type DocumentWithCaret = Document & {
 		const state = get(designState);
 		const clickedElement = state.elements[element.id];
 		const groupId = clickedElement?.groupId;
+
+		// Group wrappers are not clickable (pointer-events: none)
+		// Clicks pass through to children, which handle group selection
+		// No need to handle wrapper clicks here
 
 		// Check if this element is part of a multi-selection
 		const currentSelection = get(selectedElements).map(el => el.id);
@@ -465,85 +470,39 @@ type DocumentWithCaret = Document & {
 		}
 	}
 
-	// Helper: Convert absolute position (from SelectionOverlay) to parent-relative position
-	// This properly handles rotated parent hierarchies
-	function absoluteToRelativePosition(absolutePos: { x: number; y: number }): { x: number; y: number } {
-		// If element has no parent, absolute = relative
-		if (!element.parentId) return absolutePos;
-
-		// Get parent element from store
-		const state = get(designState);
-		const parent = state.elements[element.parentId];
-		if (!parent) return absolutePos;
-
-		// Build the ancestor chain from root to immediate parent
-		const ancestors: Array<{
-			id: string;
-			position: { x: number; y: number };
-			size: { width: number; height: number };
-			rotation: number;
-		}> = [];
-		let currentParent = parent;
-
-		while (currentParent) {
-			ancestors.unshift({
-				id: currentParent.id,
-				position: currentParent.position,
-				size: currentParent.size,
-				rotation: currentParent.rotation || 0
-			});
-
-			if (!currentParent.parentId) break;
-			const nextParent = state.elements[currentParent.parentId];
-			if (!nextParent) break;
-			currentParent = nextParent;
-		}
-
-		// Start with absolute position
-		let x = absolutePos.x;
-		let y = absolutePos.y;
-
-		// Apply inverse transform for each ancestor (from root to immediate parent)
-		for (let i = 0; i < ancestors.length; i++) {
-			const ancestor = ancestors[i];
-
-			// Subtract the ancestor's position (in its parent's coordinate space)
-			x -= ancestor.position.x;
-			y -= ancestor.position.y;
-
-			// If ancestor is rotated, we need to apply inverse rotation around its center
-			// CSS rotation uses the element's center as transform-origin
-			if (ancestor.rotation !== 0) {
-				// Get ancestor's center point (in its local coordinate space, which is now our current space)
-				const centerX = ancestor.size.width / 2;
-				const centerY = ancestor.size.height / 2;
-
-				// Translate to origin (relative to ancestor's center)
-				const relX = x - centerX;
-				const relY = y - centerY;
-
-				// Apply inverse rotation
-				const angleRad = -ancestor.rotation * (Math.PI / 180); // Negative for inverse
-				const cos = Math.cos(angleRad);
-				const sin = Math.sin(angleRad);
-
-				const rotatedX = relX * cos - relY * sin;
-				const rotatedY = relX * sin + relY * cos;
-
-				// Translate back from origin
-				x = rotatedX + centerX;
-				y = rotatedY + centerY;
-			}
-		}
-
-		return { x, y };
-	}
+	// REMOVED: Duplicate function replaced with unified utility absoluteToRelative() from coordinates.ts
 
 	// Get display position/size (pending during interaction, or actual)
 	$: displayPosition = (() => {
-		// Group transforms are already in the correct coordinate space
+		// Group transforms store absolute positions - convert to parent-relative for nested elements
 		if ($interactionState.groupTransforms.has(element.id)) {
-			return $interactionState.groupTransforms.get(element.id)!.position;
+			const groupTransform = $interactionState.groupTransforms.get(element.id)!;
+			const absolutePos = groupTransform.position;
+
+			// If element has a parent, convert absolute to parent-relative
+			if (element.parentId) {
+				const currentSize = groupTransform.size || element.size;
+
+				// 1. Calculate center in world space (absolute)
+				const centerWorld = {
+					x: absolutePos.x + currentSize.width / 2,
+					y: absolutePos.y + currentSize.height / 2
+				};
+
+				// 2. Transform center to local space (parent-relative)
+				const state = get(designState);
+				const parent = state.elements[element.parentId];
+				const centerLocal = absoluteToRelative(centerWorld, parent || null, state);
+
+				// 3. Convert back to top-left in local space
+				return {
+					x: centerLocal.x - currentSize.width / 2,
+					y: centerLocal.y - currentSize.height / 2
+				};
+			} else {
+				// Root element: use absolute position directly
+				return absolutePos;
+			}
 		}
 
 		// Pending position from SelectionOverlay during drag is in absolute coordinates
@@ -556,25 +515,29 @@ type DocumentWithCaret = Document & {
 
 			if (isAutoLayoutReorder) {
 				// Auto layout reordering: convert to relative
-				return absoluteToRelativePosition($interactionState.pendingPosition);
+				const state = get(designState);
+				const parentEl = element.parentId ? state.elements[element.parentId] : null;
+				return absoluteToRelative($interactionState.pendingPosition, parentEl, state);
 			} else if (element.parentId) {
 				// Nested element drag: convert absolute position to parent-relative
-				// This is critical because position:absolute on nested elements is relative to parent
-				
-				// FIX: For rotated parents, we must transform the CENTER of the element, not the top-left.
-				// Transforming top-left directly fails because rotation happens around the center.
 				const currentSize = $interactionState.pendingSize || element.size;
+				const state = get(designState);
+				const parentEl = state.elements[element.parentId];
 				
-				// 1. Calculate center in world space
+				if (!parentEl) {
+					// Parent not found - fallback
+					return $interactionState.pendingPosition;
+				}
+				
+				// For rotated parents, we need to account for center-based rotation
+				// Use the coordinate utility which now handles this correctly
 				const centerWorld = {
 					x: $interactionState.pendingPosition.x + currentSize.width / 2,
 					y: $interactionState.pendingPosition.y + currentSize.height / 2
 				};
 				
-				// 2. Transform center to local space (parent-relative)
-				const centerLocal = absoluteToRelativePosition(centerWorld);
+				const centerLocal = absoluteToRelative(centerWorld, parentEl, state);
 				
-				// 3. Convert back to top-left in local space
 				return {
 					x: centerLocal.x - currentSize.width / 2,
 					y: centerLocal.y - currentSize.height / 2
@@ -632,21 +595,27 @@ type DocumentWithCaret = Document & {
 	$: elementStyles = (() => {
 		const styles: string[] = [];
 
-		// Check if parent has auto layout enabled (and child doesn't ignore it)
+		// Determine position mode (unified positioning model)
+		const positionMode = element.positionMode || 'absolute'; // Default to absolute for backward compatibility
+
+		// Check if parent has auto layout enabled (legacy check)
 		const parent = element.parentId ? $designState.elements[element.parentId] : null;
 		const parentHasAutoLayout = parent?.autoLayout?.enabled || false;
 		const childIgnoresAutoLayout = element.autoLayout?.ignoreAutoLayout || false;
-		const useRelativePosition = parentHasAutoLayout && !childIgnoresAutoLayout;
+
+		// Determine if should use relative positioning
+		// Priority: positionMode > legacy auto-layout check
+		const useRelativePosition = positionMode === 'flex-item' || (parentHasAutoLayout && !childIgnoresAutoLayout);
 
 		// Position and size - use pending values during interaction
 		if (isBeingDragged && !isAutoLayoutChildDragging) {
-			// Non-auto-layout element being dragged: use absolute positioning to follow cursor
+			// Element being dragged: use absolute positioning to follow cursor
 			// Note: DOM order determines stacking, no z-index manipulation needed
 			styles.push(`position: absolute`);
 			styles.push(`left: ${displayPosition.x}px`);
 			styles.push(`top: ${displayPosition.y}px`);
 		} else if (useRelativePosition) {
-			// Auto layout: children use relative positioning
+			// Flex item: use relative positioning (CSS flexbox handles layout)
 			styles.push(`position: relative`);
 			styles.push(`left: 0`);
 			styles.push(`top: 0`);
@@ -659,7 +628,7 @@ type DocumentWithCaret = Document & {
 				styles.push(`opacity: 0.3`);
 			}
 		} else {
-			// Freeform: use absolute positioning with coordinates
+			// Absolute positioning: use explicit coordinates
 			styles.push(`position: absolute`);
 			styles.push(`left: ${displayPosition.x}px`);
 			styles.push(`top: ${displayPosition.y}px`);
@@ -803,6 +772,11 @@ type DocumentWithCaret = Document & {
 		// Hide element during parent change transition to prevent flash
 		if (isHiddenDuringTransition) {
 			styles.push(`visibility: hidden`);
+			styles.push(`pointer-events: none`);
+		}
+
+		// Group wrappers should not be clickable - clicks pass through to children
+		if (element.isGroupWrapper) {
 			styles.push(`pointer-events: none`);
 		}
 

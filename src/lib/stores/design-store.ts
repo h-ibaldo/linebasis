@@ -22,6 +22,7 @@ import { reduceEvents, applyEventsIncremental, getInitialState } from './event-r
 import { currentTool } from './tool-store';
 import { interactionState, startEditingText, clearElementIsolation, isolateElementFromGroup } from './interaction-store';
 import { viewport, screenToCanvas } from './viewport-store';
+import { migrateToUnifiedPositioning } from '$lib/utils/migrate-positioning';
 
 // ============================================================================
 // Store State
@@ -146,6 +147,13 @@ export async function initialize(): Promise<void> {
 	const events = await getAllEvents();
 
 	let designState = reduceEvents(events);
+
+	// TODO: Group migration removed - groups feature has been deprecated
+	// Groups are no longer supported in this version
+
+	// Migrate to unified positioning model (adds positionMode to all elements)
+	// This is safe to run on every load - it only migrates elements that need it
+	designState = migrateToUnifiedPositioning(designState);
 
 	storeState.update((state) => ({
 		...state,
@@ -280,7 +288,7 @@ async function commitTransaction(): Promise<void> {
 /**
  * Dispatch a new event and update the design state
  */
-async function dispatch(event: DesignEvent): Promise<void> {
+export async function dispatch(event: DesignEvent): Promise<void> {
 	// If in transaction, collect events instead of dispatching immediately
 	if (isInTransaction) {
 		transactionEvents.push(event);
@@ -1165,6 +1173,8 @@ export function manualSave(): void {
 let clipboard: Element[] = [];
 // Track if clipboard contains cut elements (vs copied elements)
 let isClipboardFromCut = false;
+// DEPRECATED: Groups are now just div elements, no separate group records needed
+// let clipboardGroups: Record<string, Group> = {};
 
 /**
  * Helper: Get the four corners of a rotated rectangle in world space
@@ -1524,20 +1534,94 @@ export async function unwrapSelectedDiv(): Promise<void> {
  * Group selected elements
  * Grouped elements behave as if they are selected together - property changes affect all group members
  */
+// DEPRECATED: Groups are now regular divs - use CREATE_ELEMENT instead
 export async function groupElements(): Promise<void> {
 	const selected = get(selectedElements);
 	if (selected.length < 2) return; // Need at least 2 elements to group
 
+	const state = get(designState);
+	const pageId = state.currentPageId;
+	if (!pageId) return;
+
+	// Check if any selected element is a group wrapper (not allowed)
+	const hasGroupWrapper = selected.some(el => el.isGroupWrapper);
+	if (hasGroupWrapper) {
+		console.error('Cannot group a group wrapper. Ungroup first.');
+		return;
+	}
+
+	// Find the common parent of all selected elements
+	const firstParentId = selected[0].parentId;
+	const commonParent = selected.every(el => el.parentId === firstParentId)
+		? firstParentId
+		: null;
+
+	// Calculate bounding box of all selected elements (accounting for rotation)
+	let minX = Infinity;
+	let minY = Infinity;
+	let maxX = -Infinity;
+	let maxY = -Infinity;
+
+	for (const el of selected) {
+		const rotation = el.rotation || 0;
+
+		if (rotation !== 0) {
+			// For rotated elements, get all four corners and find their bounds
+			const corners = getRotatedCorners({
+				x: el.position.x,
+				y: el.position.y,
+				width: el.size.width || 0,
+				height: el.size.height || 0,
+				rotation
+			});
+
+			// Find min/max across all corners
+			for (const corner of corners) {
+				minX = Math.min(minX, corner.x);
+				minY = Math.min(minY, corner.y);
+				maxX = Math.max(maxX, corner.x);
+				maxY = Math.max(maxY, corner.y);
+			}
+		} else {
+			// For non-rotated elements, use simple bounds
+			minX = Math.min(minX, el.position.x);
+			minY = Math.min(minY, el.position.y);
+			maxX = Math.max(maxX, el.position.x + (el.size.width || 0));
+			maxY = Math.max(maxY, el.position.y + (el.size.height || 0));
+		}
+	}
+
+	const wrapperWidth = maxX - minX;
+	const wrapperHeight = maxY - minY;
+
+	// Calculate member offsets (position relative to wrapper)
+	const memberOffsets: Record<string, { x: number; y: number }> = {};
+	for (const el of selected) {
+		memberOffsets[el.id] = {
+			x: el.position.x - minX,
+			y: el.position.y - minY
+		};
+	}
+
+	// Generate IDs
 	const groupId = uuidv4();
+	const wrapperId = uuidv4();
 	const elementIds = selected.map(el => el.id);
 
+	// Dispatch CREATE_GROUP_WRAPPER event
 	await dispatch({
 		id: uuidv4(),
-		type: 'GROUP_ELEMENTS',
+		type: 'CREATE_GROUP_WRAPPER',
 		timestamp: Date.now(),
 		payload: {
 			groupId,
-			elementIds
+			wrapperId,
+			elementIds,
+			wrapperPosition: { x: minX, y: minY },
+			wrapperSize: { width: wrapperWidth, height: wrapperHeight },
+			memberOffsets,
+			parentId: commonParent,
+			pageId
 		}
 	});
 }
@@ -1767,9 +1851,50 @@ export function copyElements(): void {
 		descendants.forEach(desc => elementsToCopy.add(desc));
 	}
 
+	// If selected elements are part of a group but the wrapper is not selected,
+	// we need to include the wrapper in the clipboard to preserve the group structure
+	const selectedIds = new Set(selected.map(el => el.id));
+	for (const el of selected) {
+		if (el.groupId && state.groups[el.groupId]) {
+			const group = state.groups[el.groupId];
+			// If this is a new-style group with a wrapper
+			if (group.wrapperId && !selectedIds.has(group.wrapperId)) {
+				// Check if all group members are selected
+				const allMembersSelected = group.elementIds.every(id => selectedIds.has(id));
+				if (allMembersSelected) {
+					// All group members are selected but wrapper is not - include the wrapper
+					const wrapper = state.elements[group.wrapperId];
+					if (wrapper) {
+						elementsToCopy.add(wrapper);
+						// Also include wrapper's ancestors if any
+						let current = wrapper;
+						while (current.parentId) {
+							const parent = state.elements[current.parentId];
+							if (parent && !elementsToCopy.has(parent)) {
+								elementsToCopy.add(parent);
+								current = parent;
+							} else {
+								break;
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
 	// Clone elements (deep copy)
 	clipboard = Array.from(elementsToCopy).map((el) => ({ ...el }));
 	isClipboardFromCut = false;
+
+	// DEPRECATED: No need to copy group records - groups are just divs now
+	// clipboardGroups = {};
+	// const elementIds = new Set(clipboard.map(el => el.id));
+	// for (const [groupId, group] of Object.entries(state.groups)) {
+	// 	if (group.wrapperId && elementIds.has(group.wrapperId)) {
+	// 		clipboardGroups[groupId] = { ...group };
+	// 	}
+	// }
 }
 
 /**
@@ -1792,6 +1917,15 @@ export async function cutElements(): Promise<void> {
 	// Clone elements (deep copy)
 	clipboard = Array.from(elementsToCopy).map((el) => ({ ...el }));
 	isClipboardFromCut = true;
+
+	// DEPRECATED: No need to copy group records - groups are just divs now
+	// clipboardGroups = {};
+	// const elementIds = new Set(clipboard.map(el => el.id));
+	// for (const [groupId, group] of Object.entries(state.groups)) {
+	// 	if (group.wrapperId && elementIds.has(group.wrapperId)) {
+	// 		clipboardGroups[groupId] = { ...group };
+	// 	}
+	// }
 
 	// Wrap deletion in a transaction for single undo/redo
 	beginTransaction();
@@ -1817,7 +1951,10 @@ export async function cutElements(): Promise<void> {
 /**
  * Paste elements from clipboard
  */
-export async function pasteElements(customOffset?: { x: number; y: number } | null): Promise<void> {
+export async function pasteElements(
+	customOffset?: { x: number; y: number } | null,
+	pasteInside = false
+): Promise<void> {
 	if (clipboard.length === 0) return;
 
 	const state = get(designState);
@@ -1835,18 +1972,17 @@ export async function pasteElements(customOffset?: { x: number; y: number } | nu
 		const selectedElement = selected[0];
 		const clipboardIds = new Set(clipboard.map(el => el.id));
 
-
 		// Check if selected element is one of the copied elements
 		if (clipboardIds.has(selectedElement.id)) {
 			// Paste as sibling of selected element
 			targetParentId = selectedElement.parentId;
 		} else {
 			// Selected element is NOT in clipboard
-			if (selectedElement.children && selectedElement.children.length > 0) {
-				// Selected element has children -> paste as child
+			if (pasteInside) {
+				// Cmd+Shift+V: Explicitly paste inside selected element
 				targetParentId = selectedElement.id;
 			} else {
-				// Selected element has no children -> paste as sibling
+				// Cmd+V: Always paste as sibling (same level as selected element)
 				targetParentId = selectedElement.parentId;
 			}
 		}
@@ -1861,10 +1997,64 @@ export async function pasteElements(customOffset?: { x: number; y: number } | nu
 	try {
 		// Create a map from old IDs to new IDs
 		const oldToNewIdMap = new Map<string, string>();
+		const oldToNewGroupIdMap = new Map<string, string>(); // Map old group IDs to new group IDs
+
+		// Generate new group IDs for all groups in clipboard
+		// This prevents pasted elements from being linked to original groups
+		const clipboardGroupIds = new Set<string>();
+		for (const element of clipboard) {
+			if (element.groupId && !clipboardGroupIds.has(element.groupId)) {
+				clipboardGroupIds.add(element.groupId);
+				oldToNewGroupIdMap.set(element.groupId, uuidv4());
+			}
+		}
 
 		// Identify root elements (elements whose parent is not in clipboard or is null)
 		const clipboardIds = new Set(clipboard.map(el => el.id));
 		const rootElements = clipboard.filter(el => !el.parentId || !clipboardIds.has(el.parentId));
+
+	// Calculate group offsets for centering groups when pasting inside a parent
+	const groupOffsets = new Map<string, { x: number; y: number }>();
+	const groupedRoots = new Map<string, Element[]>();
+
+	// Group root elements by groupId
+	for (const element of rootElements) {
+		if (element.groupId) {
+			const group = groupedRoots.get(element.groupId) || [];
+			group.push(element);
+			groupedRoots.set(element.groupId, group);
+		}
+	}
+
+	// If pasting inside a container, calculate offsets to center groups
+	if (targetParentId) {
+		const currentState = get(designState);
+		const parentElement = currentState.elements[targetParentId];
+
+		if (parentElement && !parentElement.autoLayout?.enabled) {
+			for (const [groupId, rootElementsInGroup] of groupedRoots) {
+				// Calculate bounding box
+				let minX = Infinity, minY = Infinity;
+				let maxX = -Infinity, maxY = -Infinity;
+
+				for (const el of rootElementsInGroup) {
+					minX = Math.min(minX, el.position.x);
+					minY = Math.min(minY, el.position.y);
+					maxX = Math.max(maxX, el.position.x + el.size.width);
+					maxY = Math.max(maxY, el.position.y + el.size.height);
+				}
+
+				const groupWidth = maxX - minX;
+				const groupHeight = maxY - minY;
+				const targetX = (parentElement.size.width - groupWidth) / 2;
+				const targetY = (parentElement.size.height - groupHeight) / 2;
+				const offsetX_group = targetX - minX;
+				const offsetY_group = targetY - minY;
+
+				groupOffsets.set(groupId, { x: offsetX_group, y: offsetY_group });
+			}
+		}
+	}
 
 	// Calculate position offset based on whether this is a cut or copy operation
 	let offsetX = 0;
@@ -1910,9 +2100,10 @@ export async function pasteElements(customOffset?: { x: number; y: number } | nu
 		offsetX = centerCanvas.x - groupCenterX;
 		offsetY = centerCanvas.y - groupCenterY;
 	} else {
-		// For copied elements, paste with small offset from original
-		offsetX = 20;
-		offsetY = 20;
+		// For copied elements, paste at same position (no offset)
+		// This makes it clear what was pasted and easy to adjust
+		offsetX = 0;
+		offsetY = 0;
 	}
 
 	// Recursive function to paste an element and its descendants
@@ -1948,7 +2139,8 @@ export async function pasteElements(customOffset?: { x: number; y: number } | nu
 
 			if (parentElement?.autoLayout?.enabled) {
 				// Parent has auto layout -> paste as last child in queue
-				// Position doesn't matter, auto layout will handle it
+				// For group wrappers, position at {0,0} preserves children's relative positions
+				// For regular elements, position doesn't matter - auto layout will handle it
 				position = { x: 0, y: 0 };
 			} else if (parentElement) {
 				// Parent doesn't have auto layout
@@ -1961,9 +2153,19 @@ export async function pasteElements(customOffset?: { x: number; y: number } | nu
 					};
 				} else {
 					// Pasting into different parent -> paste at center of parent
-					const centerX = parentElement.size.width / 2 - element.size.width / 2;
-					const centerY = parentElement.size.height / 2 - element.size.height / 2;
-					position = { x: centerX, y: centerY };
+					if (element.groupId && groupOffsets.has(element.groupId)) {
+						// Apply group offset while maintaining relative position
+						const offset = groupOffsets.get(element.groupId)!;
+						position = {
+							x: element.position.x + offset.x,
+							y: element.position.y + offset.y
+						};
+					} else {
+						// Ungrouped element -> center it
+						const centerX = parentElement.size.width / 2 - element.size.width / 2;
+						const centerY = parentElement.size.height / 2 - element.size.height / 2;
+						position = { x: centerX, y: centerY };
+					}
 				}
 			} else {
 				// Fallback if parent not found
@@ -1998,6 +2200,47 @@ export async function pasteElements(customOffset?: { x: number; y: number } | nu
 		oldToNewIdMap.set(element.id, newElementId);
 
 		// Copy additional properties (all dispatched synchronously within transaction)
+
+		// DEPRECATED: No need to preserve isGroupWrapper - groups are just divs now
+		// Groups are identified by having children, not by a special flag
+
+		// Preserve element name if set
+		if (element.name) {
+			dispatch({
+				id: uuidv4(),
+				type: 'RENAME_ELEMENT',
+				timestamp: Date.now(),
+				payload: {
+					elementId: newElementId,
+					name: element.name
+				}
+			});
+		}
+
+		// Preserve visibility if explicitly set to false
+		if (element.visible === false) {
+			dispatch({
+				id: uuidv4(),
+				type: 'TOGGLE_VISIBILITY',
+				timestamp: Date.now(),
+				payload: {
+					elementId: newElementId
+				}
+			});
+		}
+
+		// Preserve locked state if true
+		if (element.locked === true) {
+			dispatch({
+				id: uuidv4(),
+				type: 'TOGGLE_LOCK',
+				timestamp: Date.now(),
+				payload: {
+					elementId: newElementId
+				}
+			});
+		}
+
 		if (Object.keys(element.typography || {}).length > 0) {
 			dispatch({
 				id: uuidv4(),
@@ -2057,18 +2300,10 @@ export async function pasteElements(customOffset?: { x: number; y: number } | nu
 				}
 			});
 		}
-		// Preserve groupId if element belongs to a group
-		if (element.groupId) {
-			dispatch({
-				id: uuidv4(),
-				type: 'GROUP_ELEMENTS',
-				timestamp: Date.now(),
-				payload: {
-					groupId: element.groupId,
-					elementIds: [newElementId]
-				}
-			});
-		}
+		// Preserve groupId if element belongs to a group (use new group ID)
+		// BUT: Skip this if the element's parent is a group wrapper (new-style groups)
+		// DEPRECATED: No need to handle groupId - groups are just parent-child relationships now
+		// The parent-child structure was already preserved when creating the element
 
 		// Recursively paste children (synchronous)
 		const children = clipboard.filter(el => el.parentId === element.id);
@@ -2087,6 +2322,10 @@ export async function pasteElements(customOffset?: { x: number; y: number } | nu
 			newRootElementIds.push(newId);
 		}
 
+		// DEPRECATED: No need to recreate group records - groups are just divs now
+		// The tree structure (parent-child relationships) was already preserved during paste
+		// No special group logic needed
+
 		// Commit the transaction (batches all events into single undo/redo step + single IndexedDB write)
 		await commitTransaction();
 
@@ -2098,214 +2337,6 @@ export async function pasteElements(customOffset?: { x: number; y: number } | nu
 		// The flag will only be reset when the user does a new copy (Cmd+C)
 	} catch (error) {
 		// If paste fails, still commit transaction to clean up state
-		if (isInTransaction) {
-			isInTransaction = false;
-			transactionEvents = [];
-			currentTransactionId = null;
-		}
-		throw error;
-	}
-}
-
-/**
- * Paste elements from clipboard INSIDE the selected container
- * This bypasses the normal drop restrictions and allows pasting into ANY div
- * Triggered by Cmd/Ctrl+Shift+V
- */
-export async function pasteElementsInside(): Promise<void> {
-	if (clipboard.length === 0) return;
-
-	const state = get(designState);
-	const currentPageId = state.currentPageId;
-	if (!currentPageId) return;
-
-	const pageId: string = currentPageId;
-
-	// Check if a single element is selected to paste inside
-	const selected = get(selectedElements);
-	if (selected.length !== 1) {
-		console.warn('Paste inside requires exactly one container element to be selected');
-		return;
-	}
-
-	const selectedElement = selected[0];
-
-	// Check if selected element can be a container
-	const containerTypes = ['div', 'section', 'header', 'footer', 'article', 'aside', 'nav', 'main'];
-	if (!containerTypes.includes(selectedElement.type)) {
-		console.warn('Selected element cannot contain children. Select a container element (div, section, etc.)');
-		return;
-	}
-
-	// Force paste inside the selected element (bypassing drop restrictions)
-	const targetParentId = selectedElement.id;
-
-	// Clear selection
-	clearSelection();
-
-	// Wrap entire paste operation in a transaction
-	beginTransaction();
-
-	try {
-		const oldToNewIdMap = new Map<string, string>();
-		const clipboardIds = new Set(clipboard.map(el => el.id));
-		const rootElements = clipboard.filter(el => !el.parentId || !clipboardIds.has(el.parentId));
-
-		// Recursive function to paste an element and its descendants
-		// NOTE: Synchronous to avoid await overhead - transaction batches all events
-		function pasteElementTreeInside(element: Element, isRoot: boolean): string {
-			// Determine new parent ID
-			let newParentId: string | null;
-			if (element.parentId && oldToNewIdMap.has(element.parentId)) {
-				newParentId = oldToNewIdMap.get(element.parentId)!;
-			} else if (isRoot) {
-				// Force paste inside the selected container
-				newParentId = targetParentId;
-			} else {
-				newParentId = null;
-			}
-
-			// Calculate position based on paste context
-			let position: { x: number; y: number };
-
-			if (isRoot && newParentId !== null) {
-				// Pasting as child of the selected container
-				const currentState = get(designState);
-				const parentElement = currentState.elements[newParentId];
-
-				if (parentElement?.autoLayout?.enabled) {
-					// Parent has auto layout -> paste as last child
-					position = { x: 0, y: 0 };
-				} else if (parentElement) {
-					// Parent doesn't have auto layout -> paste at center of parent
-					const centerX = parentElement.size.width / 2 - element.size.width / 2;
-					const centerY = parentElement.size.height / 2 - element.size.height / 2;
-					position = { x: centerX, y: centerY };
-				} else {
-					position = { x: element.position.x, y: element.position.y };
-				}
-			} else {
-				// Non-root elements -> maintain their relative position
-				position = { x: element.position.x, y: element.position.y };
-			}
-
-			// Generate new element ID
-			const newElementId = uuidv4();
-
-			// Dispatch CREATE_ELEMENT event (batched in transaction)
-			dispatch({
-				id: uuidv4(),
-				type: 'CREATE_ELEMENT',
-				timestamp: Date.now(),
-				payload: {
-					elementId: newElementId,
-					parentId: newParentId,
-					pageId,
-					elementType: element.type,
-					position,
-					size: element.size,
-					styles: element.styles,
-					content: element.content
-				}
-			});
-
-			// Map old ID to new ID
-			oldToNewIdMap.set(element.id, newElementId);
-
-			// Copy additional properties (all dispatched synchronously within transaction)
-			if (Object.keys(element.typography || {}).length > 0) {
-				dispatch({
-					id: uuidv4(),
-					type: 'UPDATE_TYPOGRAPHY',
-					timestamp: Date.now(),
-					payload: {
-						elementId: newElementId,
-						typography: element.typography
-					}
-				});
-			}
-			if (Object.keys(element.spacing || {}).length > 0) {
-				dispatch({
-					id: uuidv4(),
-					type: 'UPDATE_SPACING',
-					timestamp: Date.now(),
-					payload: {
-						elementId: newElementId,
-						spacing: element.spacing
-					}
-				});
-			}
-			if (element.autoLayout && Object.keys(element.autoLayout).length > 0) {
-				dispatch({
-					id: uuidv4(),
-					type: 'UPDATE_AUTO_LAYOUT',
-					timestamp: Date.now(),
-					payload: {
-						elementId: newElementId,
-						autoLayout: element.autoLayout
-					}
-				});
-			}
-			if (element.rotation && element.rotation !== 0) {
-				dispatch({
-					id: uuidv4(),
-					type: 'ROTATE_ELEMENT',
-					timestamp: Date.now(),
-					payload: {
-						elementId: newElementId,
-						rotation: element.rotation
-					}
-				});
-			}
-			if (element.alt || element.href || element.src) {
-				dispatch({
-					id: uuidv4(),
-					type: 'UPDATE_ELEMENT',
-					timestamp: Date.now(),
-					payload: {
-						elementId: newElementId,
-						changes: {
-							alt: element.alt,
-							href: element.href,
-							src: element.src
-						}
-					}
-				});
-			}
-			// Preserve groupId if element belongs to a group
-			if (element.groupId) {
-				dispatch({
-					id: uuidv4(),
-					type: 'GROUP_ELEMENTS',
-					timestamp: Date.now(),
-					payload: {
-						groupId: element.groupId,
-						elementIds: [newElementId]
-					}
-				});
-			}
-
-			// Paste all descendants (synchronous)
-			const descendants = clipboard.filter(el => el.parentId === element.id);
-			for (const descendant of descendants) {
-				pasteElementTreeInside(descendant, false);
-			}
-
-			return newElementId;
-		}
-
-		// Paste all root elements (synchronous - events batched in transaction)
-		const newRootElementIds: string[] = [];
-		for (const rootElement of rootElements) {
-			const newId = pasteElementTreeInside(rootElement, true);
-			newRootElementIds.push(newId);
-		}
-
-		await commitTransaction();
-
-		// Select the newly pasted root elements
-		selectElements(newRootElementIds);
-	} catch (error) {
 		if (isInTransaction) {
 			isInTransaction = false;
 			transactionEvents = [];
@@ -2700,15 +2731,15 @@ export function setupKeyboardShortcuts(): (() => void) | undefined {
 			e.preventDefault();
 			cutElements();
 		}
-		// Cmd+Shift+V (paste inside) - bypasses drop restrictions
+		// Cmd+Shift+V (paste inside - as child of selected element)
 		else if ((e.metaKey || e.ctrlKey) && e.key === 'v' && e.shiftKey && !isTyping) {
 			e.preventDefault();
-			pasteElementsInside();
+			pasteElements(undefined, true);
 		}
-		// Cmd+V (paste)
+		// Cmd+V (paste as sibling - same level as selected element)
 		else if ((e.metaKey || e.ctrlKey) && e.key === 'v' && !e.shiftKey && !isTyping) {
 			e.preventDefault();
-			pasteElements();
+			pasteElements(undefined, false);
 		}
 		// Cmd+D (duplicate)
 		else if ((e.metaKey || e.ctrlKey) && e.key === 'd' && !isTyping) {
@@ -2823,3 +2854,17 @@ export function setupKeyboardShortcuts(): (() => void) | undefined {
 	};
 }
 
+
+// Expose for E2E testing
+if (typeof window !== 'undefined') {
+	(window as any).__designStore = {
+		get designState() {
+			return get(designState);
+		},
+		createElement,
+		rotateElement,
+		selectElement,
+		selectElements,
+		clearSelection
+	};
+}

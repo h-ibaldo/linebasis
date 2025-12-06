@@ -17,12 +17,17 @@
 		"test": "vitest",
 		"test:ui": "vitest --ui",
 		"test:run": "vitest run",
+		"test:e2e": "playwright test",
+		"test:e2e:ui": "playwright test --ui",
+		"test:e2e:debug": "playwright test --debug",
+		"test:e2e:headed": "playwright test --headed",
 		"db:migrate": "prisma migrate dev",
 		"db:generate": "prisma generate",
 		"db:studio": "prisma studio",
 		"setup": "prisma migrate dev && prisma generate && tsx scripts/setup.ts"
 	},
 	"devDependencies": {
+		"@playwright/test": "^1.57.0",
 		"@sveltejs/adapter-auto": "^3.3.1",
 		"@sveltejs/kit": "^2.10.0",
 		"@sveltejs/vite-plugin-svelte": "^3.1.2",
