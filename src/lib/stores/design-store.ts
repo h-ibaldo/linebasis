@@ -2102,9 +2102,10 @@ export async function pasteElements(
 		offsetX = centerCanvas.x - groupCenterX;
 		offsetY = centerCanvas.y - groupCenterY;
 	} else {
-		// For copied elements, paste with small offset from original
-		offsetX = 20;
-		offsetY = 20;
+		// For copied elements, paste at same position (no offset)
+		// This makes it clear what was pasted and easy to adjust
+		offsetX = 0;
+		offsetY = 0;
 	}
 
 	// Recursive function to paste an element and its descendants
