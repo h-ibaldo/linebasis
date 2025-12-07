@@ -42,7 +42,7 @@ test.describe('Group Paste Debug', () => {
 					position: { x: 100, y: 100 },
 					size: { width: 100, height: 100 },
 					content: '',
-					styles: { backgroundColor: '#red' }
+					styles: { backgroundColor: '#3b82f6' }
 				}
 			});
 

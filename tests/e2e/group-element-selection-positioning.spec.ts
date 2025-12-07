@@ -50,7 +50,7 @@ test.describe('Group Element Selection Positioning', () => {
 					position: div1Pos,
 					size: { width: 100, height: 100 },
 					content: '',
-					styles: { backgroundColor: '#red' }
+					styles: { backgroundColor: '#3b82f6' }
 				}
 			});
 

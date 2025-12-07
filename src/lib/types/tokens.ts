@@ -89,7 +89,7 @@ export interface DesignTokens {
  */
 export const defaultTokens: DesignTokens = {
 	colors: {
-		primary: '#red', // Blue
+		primary: '#3B82F6', // Blue
 		secondary: '#10B981', // Green
 		accent: '#F59E0B', // Orange
 		text: '#1F2937', // Dark gray

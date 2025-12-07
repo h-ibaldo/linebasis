@@ -65,7 +65,7 @@ test.describe('Auto Layout Hover Border Troubleshooting', () => {
 						position: { x: 50, y: 50 },
 						size: { width: 100, height: 100 },
 						content: '',
-						styles: { backgroundColor: '#red' }
+						styles: { backgroundColor: '#3b82f6' }
 					}
 				});
 
