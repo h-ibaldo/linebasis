@@ -45,7 +45,7 @@ test.describe('Group Wrapper Border During Drag', () => {
 					position: { x: 100, y: 100 },
 					size: { width: 100, height: 100 },
 					content: '',
-					styles: { backgroundColor: '#3b82f6' }
+					styles: { backgroundColor: '#red' }
 				}
 			});
 
@@ -217,7 +217,7 @@ test.describe('Group Wrapper Border During Drag', () => {
 				const style = window.getComputedStyle(el as HTMLElement);
 				const borderColor = style.borderColor;
 				const hasBorder = style.borderWidth !== '0px' && style.borderStyle !== 'none';
-				const isBlue = borderColor.includes('59, 130, 246') || borderColor.includes('rgb(59, 130, 246)') || borderColor.includes('#3b82f6');
+				const isBlue = borderColor.includes('59, 130, 246') || borderColor.includes('rgb(59, 130, 246)') || borderColor.includes('#red');
 				return hasBorder && isBlue && style.display !== 'none' && style.visibility !== 'hidden';
 			});
 

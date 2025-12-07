@@ -4202,7 +4202,7 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 						top: {parentScreenTop}px;
 						width: {parentScreenWidth}px;
 						height: {parentScreenHeight}px;
-						border: {shouldShowMinimalHighlight ? '1px dotted #3b82f6' : '2px dashed #3b82f6'};
+						border: {shouldShowMinimalHighlight ? '1px dotted #red' : '2px dashed #red'};
 						background: {shouldShowMinimalHighlight ? 'transparent' : 'rgba(59, 130, 246, 0.05)'};
 						pointer-events: none;
 						box-sizing: border-box;

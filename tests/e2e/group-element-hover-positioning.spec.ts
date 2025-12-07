@@ -45,7 +45,7 @@ test.describe('Group Element Hover Positioning', () => {
 					position: { x: 100, y: 100 },
 					size: { width: 100, height: 100 },
 					content: '',
-					styles: { backgroundColor: '#3b82f6' }
+					styles: { backgroundColor: '#red' }
 				}
 			});
 
@@ -196,4 +196,5 @@ test.describe('Group Element Hover Positioning', () => {
 		console.log('✅ TEST PASSED: Hover border is correctly positioned for individual group elements!');
 	});
 });
+
 

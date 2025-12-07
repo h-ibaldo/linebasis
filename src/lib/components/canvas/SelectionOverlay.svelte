@@ -24,6 +24,30 @@
 	export let selectedElements: Element[];
 	export let isPanning: boolean = false;
 
+	/**
+	 * Check if any ancestor of the element (parent, grandparent, etc.) is an auto-layout child
+	 * This is needed for deep nesting scenarios (great-grandchildren, etc.)
+	 */
+	function hasAutoLayoutAncestor(element: Element, state: DesignState): boolean {
+		let current = element;
+		while (current.parentId) {
+			const parent = state.elements[current.parentId];
+			if (!parent) break;
+
+			// Check if current element is an auto-layout child
+			const parentHasAutoLayout = parent.autoLayout?.enabled || false;
+			const currentIgnoresAutoLayout = current.autoLayout?.ignoreAutoLayout || false;
+			const isAutoLayoutChild = parentHasAutoLayout && !currentIgnoresAutoLayout;
+
+			if (isAutoLayoutChild) {
+				return true;
+			}
+
+			current = parent;
+		}
+		return false;
+	}
+
 	// Event listener cleanup registry to prevent memory leaks
 	// Stores cleanup functions for all active event listeners
 	const cleanupFunctions: Array<() => void> = [];
@@ -1714,7 +1738,7 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 					const grandparent = parent?.parentId ? state.elements[parent.parentId] : null;
 					const grandparentHasAutoLayout = grandparent?.autoLayout?.enabled || false;
 					const parentIgnoresAutoLayout = parent?.autoLayout?.ignoreAutoLayout || false;
-					const parentIsInAutoLayout = grandparentHasAutoLayout && !parentIgnoresAutoLayout;
+					const parentIsInAutoLayout = hasAutoLayoutAncestor(parent, state);
 					
 					// For grandchildren, use element.size to match CanvasElement calculation
 					// For other elements, use getActualSize
@@ -3315,25 +3339,28 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 									const grandparent = parent.parentId ? state.elements[parent.parentId] : null;
 									const grandparentHasAutoLayout = grandparent?.autoLayout?.enabled || false;
 									const parentIgnoresAutoLayout = parent.autoLayout?.ignoreAutoLayout || false;
-									const parentIsInAutoLayout = grandparentHasAutoLayout && !parentIgnoresAutoLayout;
+									const parentIsInAutoLayout = hasAutoLayoutAncestor(parent, state);
 									
 									if (parentIsInAutoLayout) {
 										// Parent is in auto-layout: get its actual DOM position at drop time
 										const parentDom = document.querySelector(`[data-element-id="${parent.id}"]`) as HTMLElement | null;
 										const canvasElement = document.querySelector('.canvas') as HTMLElement | null;
-										
+
 										if (parentDom && canvasElement) {
 											const parentRect = parentDom.getBoundingClientRect();
 											const canvasRect = canvasElement.getBoundingClientRect();
-											
-											// Get parent's actual absolute position from DOM
-											const parentAbsX = (parentRect.left - canvasRect.left - viewport.x) / viewport.scale;
-											const parentAbsY = (parentRect.top - canvasRect.top - viewport.y) / viewport.scale;
-											
-											// Get parent's center in absolute space
+
+											// CRITICAL FIX: For rotated elements, getBoundingClientRect gives bounding box
+											// The center of the bounding box IS the element's center (CSS rotates around center)
+											// We cannot calculate center as boundingBox.left + element.size.width/2 - that's incorrect!
+											// Instead, use the bounding box center directly
+											const parentCenterScreenX = parentRect.left + parentRect.width / 2;
+											const parentCenterScreenY = parentRect.top + parentRect.height / 2;
+
+											// Get parent's center in absolute canvas space
 											const parentCenterAbs = {
-												x: parentAbsX + parent.size.width / 2,
-												y: parentAbsY + parent.size.height / 2
+												x: (parentCenterScreenX - canvasRect.left - viewport.x) / viewport.scale,
+												y: (parentCenterScreenY - canvasRect.top - viewport.y) / viewport.scale
 											};
 											
 											// Calculate vector from parent center to element center
@@ -3604,7 +3631,7 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 			const grandparent = parent.parentId ? state.elements[parent.parentId] : null;
 			const grandparentHasAutoLayout = grandparent?.autoLayout?.enabled || false;
 			const parentIgnoresAutoLayout = parent.autoLayout?.ignoreAutoLayout || false;
-			const parentIsInAutoLayout = grandparentHasAutoLayout && !parentIgnoresAutoLayout;
+			const parentIsInAutoLayout = hasAutoLayoutAncestor(parent, state);
 
 			// For auto-layout parents (grandchildren scenario), get center from DOM
 			// Otherwise use recursive calculation from stored coordinates
@@ -3620,14 +3647,16 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 					if (parentDom && canvasElement) {
 						const parentRect = parentDom.getBoundingClientRect();
 						const canvasRect = canvasElement.getBoundingClientRect();
-						
-						// Get parent's actual absolute position from DOM
-						const parentAbsX = (parentRect.left - canvasRect.left - viewport.x) / viewport.scale;
-						const parentAbsY = (parentRect.top - canvasRect.top - viewport.y) / viewport.scale;
-						
+
+						// CRITICAL FIX: For rotated elements, getBoundingClientRect gives bounding box
+						// The center of the bounding box IS the element's center (CSS rotates around center)
+						// Calculate center directly from bounding box
+						const parentCenterScreenX = parentRect.left + parentRect.width / 2;
+						const parentCenterScreenY = parentRect.top + parentRect.height / 2;
+
 						return {
-							x: parentAbsX + parent.size.width / 2,
-							y: parentAbsY + parent.size.height / 2
+							x: (parentCenterScreenX - canvasRect.left - viewport.x) / viewport.scale,
+							y: (parentCenterScreenY - canvasRect.top - viewport.y) / viewport.scale
 						};
 					}
 					
@@ -3679,7 +3708,7 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 					const grandparent = parent.parentId ? state.elements[parent.parentId] : null;
 					const grandparentHasAutoLayout = grandparent?.autoLayout?.enabled || false;
 					const parentIgnoresAutoLayout = parent.autoLayout?.ignoreAutoLayout || false;
-					const parentIsInAutoLayout = grandparentHasAutoLayout && !parentIgnoresAutoLayout;
+					const parentIsInAutoLayout = hasAutoLayoutAncestor(parent, state);
 					
 					let centerLocal;
 					
@@ -3767,7 +3796,7 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 				const grandparent = parent.parentId ? state.elements[parent.parentId] : null;
 				const grandparentHasAutoLayout = grandparent?.autoLayout?.enabled || false;
 				const parentIgnoresAutoLayout = parent.autoLayout?.ignoreAutoLayout || false;
-				const parentIsInAutoLayout = grandparentHasAutoLayout && !parentIgnoresAutoLayout;
+				const parentIsInAutoLayout = hasAutoLayoutAncestor(parent, state);
 				
 				// If element is in auto-layout OR parent is in auto-layout, read from DOM
 				if (isInAutoLayout || parentIsInAutoLayout) {
@@ -3850,7 +3879,7 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 				const grandparent = parent.parentId ? state.elements[parent.parentId] : null;
 				const grandparentHasAutoLayout = grandparent?.autoLayout?.enabled || false;
 				const parentIgnoresAutoLayout = parent.autoLayout?.ignoreAutoLayout || false;
-				const parentIsInAutoLayout = grandparentHasAutoLayout && !parentIgnoresAutoLayout;
+				const parentIsInAutoLayout = hasAutoLayoutAncestor(parent, state);
 				
 				// For grandchildren, read from DOM to match CanvasElement
 				if (parentIsInAutoLayout) {
@@ -4338,7 +4367,7 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 				const grandparent = parent.parentId ? state.elements[parent.parentId] : null;
 				const grandparentHasAutoLayout = grandparent?.autoLayout?.enabled || false;
 				const parentIgnoresAutoLayout = parent.autoLayout?.ignoreAutoLayout || false;
-				const parentIsInAutoLayout = grandparentHasAutoLayout && !parentIgnoresAutoLayout;
+				const parentIsInAutoLayout = hasAutoLayoutAncestor(parent, state);
 
 				// For auto-layout parents (grandchildren scenario), get center from DOM
 				// Otherwise use recursive calculation from stored coordinates
@@ -4354,14 +4383,16 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 						if (parentDom && canvasElement) {
 							const parentRect = parentDom.getBoundingClientRect();
 							const canvasRect = canvasElement.getBoundingClientRect();
-							
-							// Get parent's actual absolute position from DOM
-							const parentAbsX = (parentRect.left - canvasRect.left - viewport.x) / viewport.scale;
-							const parentAbsY = (parentRect.top - canvasRect.top - viewport.y) / viewport.scale;
-							
+
+							// CRITICAL FIX: For rotated elements, getBoundingClientRect gives bounding box
+							// The center of the bounding box IS the element's center (CSS rotates around center)
+							// Calculate center directly from bounding box
+							const parentCenterScreenX = parentRect.left + parentRect.width / 2;
+							const parentCenterScreenY = parentRect.top + parentRect.height / 2;
+
 							return {
-								x: parentAbsX + parent.size.width / 2,
-								y: parentAbsY + parent.size.height / 2
+								x: (parentCenterScreenX - canvasRect.left - viewport.x) / viewport.scale,
+								y: (parentCenterScreenY - canvasRect.top - viewport.y) / viewport.scale
 							};
 						}
 						
@@ -4399,7 +4430,7 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 					const grandparent = parent.parentId ? state.elements[parent.parentId] : null;
 					const grandparentHasAutoLayout = grandparent?.autoLayout?.enabled || false;
 					const parentIgnoresAutoLayout = parent.autoLayout?.ignoreAutoLayout || false;
-					const parentIsInAutoLayout = grandparentHasAutoLayout && !parentIgnoresAutoLayout;
+					const parentIsInAutoLayout = hasAutoLayoutAncestor(parent, state);
 					
 					// For grandchildren: element is NOT in auto-layout, but parent IS
 					// Also handle element itself being in auto-layout

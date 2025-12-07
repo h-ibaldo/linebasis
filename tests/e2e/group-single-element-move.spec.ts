@@ -45,7 +45,7 @@ test.describe('Group Single Element Move', () => {
 					position: { x: 100, y: 100 },
 					size: { width: 100, height: 100 },
 					content: '',
-					styles: { backgroundColor: '#3b82f6' }
+					styles: { backgroundColor: '#red' }
 				}
 			});
 
