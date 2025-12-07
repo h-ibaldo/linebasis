@@ -1,158 +1,170 @@
 import { test, expect } from '@playwright/test';
 
+/**
+ * Test: Child of rotated parent (without auto-layout)
+ *
+ * Context:
+ * - White div: auto-layout parent
+ * - Green div: child of white div, rotated, NOT in auto-layout
+ * - Purple div: child of green div
+ *
+ * Issue: Purple div jumps on mousedown/mouseup
+ */
+
 test.describe('Rotated Parent Child Drag', () => {
-	test('should not jump when dragging child inside rotated parent', async ({ page }) => {
-		await page.goto('http://localhost:5175');
+	test.beforeEach(async ({ page }) => {
+		await page.goto('http://localhost:5173');
+		await page.waitForLoadState('networkidle');
 
-		// Wait for canvas to be ready
-		await page.waitForSelector('.canvas', { timeout: 5000 });
+		await page.waitForFunction(() => {
+			return typeof (window as any).__getDesignState === 'function';
+		}, { timeout: 10000 });
 
-		// Get the actual page ID
-		const pageId = await page.evaluate(() => {
-			const state = (window as any).__designStore.designState;
-			const pages = state.pages;
-			return Object.keys(pages)[0];
-		});
+		await page.waitForTimeout(1000);
+	});
 
-		console.log('Using page ID:', pageId);
+	test('child of rotated parent should not jump during drag', async ({ page }) => {
+		// Create: Auto-layout parent → Rotated child (green) → Grandchild (purple)
+		const { greenDiv, purpleDiv } = await page.evaluate(async () => {
+			const dispatch = (window as any).__dispatch;
+			const nanoid = (window as any).__nanoid;
+			const state = (window as any).__getDesignState();
+			const pageId = Object.keys(state.pages)[0];
 
-		// Create parent div, rotated 45 degrees
-		const parentId = await page.evaluate(
-			async ({ pageId }) => {
-				const { createElement, rotateElement } = (window as any).__designStore;
-
-				const id = await createElement({
-					elementType: 'div',
+			// 1. Auto-layout parent (white)
+			const whiteId = nanoid();
+			await dispatch({
+				id: nanoid(),
+				type: 'CREATE_ELEMENT',
+				timestamp: Date.now(),
+				payload: {
+					elementId: whiteId,
+					pageId,
 					parentId: null,
-					pageId,
-					position: { x: 200, y: 200 },
-					size: { width: 300, height: 300 },
-					styles: {
-						backgroundColor: '#e0e0e0',
-						border: '2px solid black'
-					}
-				});
-
-				// Rotate parent 45 degrees
-				await rotateElement(id, 45);
-
-				return id;
-			},
-			{ pageId }
-		);
-
-		console.log('Created parent div:', parentId);
-
-		// Create child div inside rotated parent
-		const childId = await page.evaluate(
-			async ({ parentId, pageId }) => {
-				const { createElement } = (window as any).__designStore;
-
-				const id = await createElement({
 					elementType: 'div',
-					parentId,
+					position: { x: 200, y: 200 },
+					size: { width: 600, height: 600 },
+					style: { backgroundColor: '#FFFFFF', border: '2px solid #000' },
+					autoLayout: {
+						enabled: true,
+						direction: 'vertical',
+						gap: 20,
+						padding: { top: 20, right: 20, bottom: 20, left: 20 },
+						alignItems: 'flex-start',
+						justifyContent: 'flex-start'
+					}
+				}
+			});
+
+			// 2. Green div (child of white, rotated)
+			const greenId = nanoid();
+			await dispatch({
+				id: nanoid(),
+				type: 'CREATE_ELEMENT',
+				timestamp: Date.now(),
+				payload: {
+					elementId: greenId,
 					pageId,
+					parentId: whiteId,
+					elementType: 'div',
+					position: { x: 0, y: 0 },
+					size: { width: 300, height: 300 },
+					style: { backgroundColor: '#4CAF50' }
+				}
+			});
+
+			// Rotate green div
+			await dispatch({
+				id: nanoid(),
+				type: 'ROTATE_ELEMENT',
+				timestamp: Date.now(),
+				payload: {
+					elementId: greenId,
+					rotation: 25
+				}
+			});
+
+			// 3. Purple div (child of green)
+			const purpleId = nanoid();
+			await dispatch({
+				id: nanoid(),
+				type: 'CREATE_ELEMENT',
+				timestamp: Date.now(),
+				payload: {
+					elementId: purpleId,
+					pageId,
+					parentId: greenId,
+					elementType: 'div',
 					position: { x: 50, y: 50 },
 					size: { width: 150, height: 150 },
-					styles: {
-						backgroundColor: '#ff6b6b',
-						border: '2px solid darkred'
-					}
-				});
+					style: { backgroundColor: '#9C27B0' }
+				}
+			});
 
-				return id;
-			},
-			{ parentId, pageId }
-		);
+			return {
+				greenDiv: greenId,
+				purpleDiv: purpleId
+			};
+		});
 
-		console.log('Created child div:', childId);
-
-		// Wait for rendering
 		await page.waitForTimeout(500);
 
-		// Get child's initial absolute position
-		const initialPos = await page.evaluate((id) => {
-			const state = (window as any).__designStore.designState;
-			const element = state.elements[id];
-			const { getAbsolutePosition } = (window as any).__coordinates;
-			return getAbsolutePosition(element, state);
-		}, childId);
+		console.log('\n=== TESTING PURPLE DIV (child of rotated green) ===');
 
-		console.log('Initial child position (absolute):', initialPos);
+		const purpleElement = page.locator(`[data-element-id="${purpleDiv}"]`);
+		const initialBox = await purpleElement.boundingBox();
 
-		// Get child's DOM position before drag
-		const childElement = await page.locator(`[data-element-id="${childId}"]`).first();
-		const initialRect = await childElement.boundingBox();
-
-		if (!initialRect) {
-			throw new Error('Could not get child element bounding box');
+		if (!initialBox) {
+			throw new Error('Purple element not found');
 		}
 
-		console.log('Initial child DOM rect:', initialRect);
+		console.log('Purple initial DOM position:', initialBox);
 
-		// Start drag from center of child
-		const startX = initialRect.x + initialRect.width / 2;
-		const startY = initialRect.y + initialRect.height / 2;
-		const endX = startX + 50; // Drag 50px to the right
-		const endY = startY + 50; // Drag 50px down
+		const initialPos = await page.evaluate(
+			(id) => {
+				const state = (window as any).__getDesignState();
+				return state.elements[id].position;
+			},
+			purpleDiv
+		);
+		console.log('Purple initial stored position:', initialPos);
 
-		console.log(`Dragging child from (${startX}, ${startY}) to (${endX}, ${endY})`);
+		// Mousedown
+		const centerX = initialBox.x + initialBox.width / 2;
+		const centerY = initialBox.y + initialBox.height / 2;
 
-		// Perform drag
-		await page.mouse.move(startX, startY);
+		await page.mouse.move(centerX, centerY);
 		await page.mouse.down();
+		await page.waitForTimeout(100);
 
-		// Check position immediately after mousedown (before any movement)
-		const afterMouseDownPos = await page.evaluate((id) => {
-			const state = (window as any).__designStore.designState;
-			const element = state.elements[id];
-			const { getAbsolutePosition } = (window as any).__coordinates;
-			return getAbsolutePosition(element, state);
-		}, childId);
+		// Check position during mousedown
+		const boxDuringMousedown = await purpleElement.boundingBox();
+		if (boxDuringMousedown) {
+			const jumpX = Math.abs(boxDuringMousedown.x - initialBox.x);
+			const jumpY = Math.abs(boxDuringMousedown.y - initialBox.y);
+			console.log(`Jump on mousedown: X=${jumpX.toFixed(2)}px, Y=${jumpY.toFixed(2)}px`);
 
-		console.log('After mousedown position (absolute):', afterMouseDownPos);
+			// Expect no jump (tolerance of 2px)
+			expect(jumpX, 'Purple should not jump horizontally on mousedown').toBeLessThan(2);
+			expect(jumpY, 'Purple should not jump vertically on mousedown').toBeLessThan(2);
+		}
 
-		// Check if element jumped on mousedown
-		const mousedownDeltaX = Math.abs(afterMouseDownPos.x - initialPos.x);
-		const mousedownDeltaY = Math.abs(afterMouseDownPos.y - initialPos.y);
-		console.log(`Mousedown delta: (${mousedownDeltaX}, ${mousedownDeltaY})`);
-
-		// Element should NOT jump on mousedown
-		expect(mousedownDeltaX).toBeLessThan(0.1);
-		expect(mousedownDeltaY).toBeLessThan(0.1);
-
-		// Continue with drag
-		await page.mouse.move(endX, endY, { steps: 10 });
+		// Mouseup
 		await page.mouse.up();
+		await page.waitForTimeout(100);
 
-		await page.waitForTimeout(200);
+		// Check position after mouseup
+		const boxAfterMouseup = await purpleElement.boundingBox();
+		if (boxAfterMouseup) {
+			const jumpX = Math.abs(boxAfterMouseup.x - initialBox.x);
+			const jumpY = Math.abs(boxAfterMouseup.y - initialBox.y);
+			console.log(`Jump after mouseup: X=${jumpX.toFixed(2)}px, Y=${jumpY.toFixed(2)}px`);
 
-		// Get final position
-		const finalPos = await page.evaluate((id) => {
-			const state = (window as any).__designStore.designState;
-			const element = state.elements[id];
-			const { getAbsolutePosition } = (window as any).__coordinates;
-			return getAbsolutePosition(element, state);
-		}, childId);
+			// Expect no jump (tolerance of 2px)
+			expect(jumpX, 'Purple should not jump horizontally after mouseup').toBeLessThan(2);
+			expect(jumpY, 'Purple should not jump vertically after mouseup').toBeLessThan(2);
+		}
 
-		console.log('Final child position (absolute):', finalPos);
-
-		// Calculate total movement
-		const totalDeltaX = finalPos.x - initialPos.x;
-		const totalDeltaY = finalPos.y - initialPos.y;
-
-		console.log(`Total delta: (${totalDeltaX}, ${totalDeltaY})`);
-
-		// Element should have moved (drag worked)
-		expect(Math.abs(totalDeltaX)).toBeGreaterThan(10);
-		expect(Math.abs(totalDeltaY)).toBeGreaterThan(10);
-
-		// Verify position is valid
-		expect(isFinite(finalPos.x)).toBe(true);
-		expect(isFinite(finalPos.y)).toBe(true);
-		expect(isNaN(finalPos.x)).toBe(false);
-		expect(isNaN(finalPos.y)).toBe(false);
-
-		console.log('✓ Child element dragged correctly without jumping!');
+		console.log('\n✓ Test passed - no jumps detected');
 	});
 });

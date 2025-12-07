@@ -1734,14 +1734,11 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 					// For grandchildren, we need to use element.size (not getActualSize) to match CanvasElement calculation
 					const elementRect = elementDom.getBoundingClientRect();
 					const state = get(designState);
-					const parent = element.parentId ? state.elements[element.parentId] : null;
 
-					// Check if this element has any auto-layout ancestor
-					const elementHasAutoLayoutAncestor = parent ? hasAutoLayoutAncestor(element, state) : false;
-
-					// For elements with auto-layout ancestors, use element.size to match CanvasElement calculation
-					// For other elements, use getActualSize
-					const elementSize = elementHasAutoLayoutAncestor ? element.size : getActualSize(element);
+					// CRITICAL: Always use element.size to match CanvasElement rendering
+					// CanvasElement always uses element.size (never getActualSize), so we must do the same
+					// for coordinate calculations to be consistent
+					const elementSize = element.size;
 					const totalRotation = getCumulativeRotation(element) + (element.rotation || 0);
 					
 					// Calculate actual top-left position accounting for rotation
