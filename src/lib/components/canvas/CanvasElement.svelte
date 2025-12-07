@@ -32,12 +32,36 @@ type DocumentWithCaret = Document & {
 };
 	import { currentTool } from '$lib/stores/tool-store';
 	import { get } from 'svelte/store';
-	import type { Element } from '$lib/types/events';
+	import type { Element, DesignState } from '$lib/types/events';
+
+	/**
+	 * Check if an element has any auto-layout ancestor in its parent chain
+	 */
+	function hasAutoLayoutAncestor(element: Element, state: DesignState): boolean {
+		let current = element;
+		while (current.parentId) {
+			const parent = state.elements[current.parentId];
+			if (!parent) break;
+
+			// Check if current element is an auto-layout child
+			const parentHasAutoLayout = parent.autoLayout?.enabled || false;
+			const currentIgnoresAutoLayout = current.autoLayout?.ignoreAutoLayout || false;
+			const isAutoLayoutChild = parentHasAutoLayout && !currentIgnoresAutoLayout;
+
+			if (isAutoLayoutChild) {
+				return true;
+			}
+
+			current = parent;
+		}
+		return false;
+	}
 
 	export let element: Element;
 	export let onStartDrag: ((e: MouseEvent, element: Element, handle?: string, selectedElements?: Element[]) => void) | undefined = undefined;
 	export let isPanning: boolean = false;
 	export let isDragging: boolean = false;
+	export let viewport: { x: number; y: number; scale: number } = { x: 0, y: 0, scale: 1 };
 
 	// Check if this element is a text element (used for cursor and editing)
 	$: isTextElement = ['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'span', 'a', 'button', 'label'].includes(element.type);
@@ -523,21 +547,96 @@ type DocumentWithCaret = Document & {
 				const currentSize = $interactionState.pendingSize || element.size;
 				const state = get(designState);
 				const parentEl = state.elements[element.parentId];
-				
+
 				if (!parentEl) {
 					// Parent not found - fallback
 					return $interactionState.pendingPosition;
 				}
-				
-				// For rotated parents, we need to account for center-based rotation
-				// Use the coordinate utility which now handles this correctly
+
+				// Calculate center in world space (absolute)
 				const centerWorld = {
 					x: $interactionState.pendingPosition.x + currentSize.width / 2,
 					y: $interactionState.pendingPosition.y + currentSize.height / 2
 				};
-				
-				const centerLocal = absoluteToRelative(centerWorld, parentEl, state);
-				
+
+				// CRITICAL FIX: Check if parent has auto-layout ancestor
+				// If so, we MUST get parent's actual DOM position (not calculated from state)
+				// because auto-layout positioning affects the DOM but not stored positions
+				// The parent's stored position is (0,0) but its actual position is determined by flexbox
+				const parentHasAutoLayoutAncestor = hasAutoLayoutAncestor(parentEl, state);
+
+				let centerLocal;
+
+				if (parentHasAutoLayoutAncestor) {
+					// Parent is in auto-layout: get its actual DOM position
+					// This works for both rotated and non-rotated cases
+					const parentDom = document.querySelector(`[data-element-id="${parentEl.id}"]`);
+					const canvasElement = document.querySelector('.canvas');
+
+					if (parentDom && canvasElement) {
+						const parentRect = parentDom.getBoundingClientRect();
+						const canvasRect = canvasElement.getBoundingClientRect();
+
+						// Get parent's actual center from DOM
+						// For rotated elements, getBoundingClientRect returns the bounding box,
+						// and the center of the bounding box IS the element's center (CSS rotates around center)
+						const parentCenterX = parentRect.left + parentRect.width / 2;
+						const parentCenterY = parentRect.top + parentRect.height / 2;
+						const parentCenterAbs = {
+							x: (parentCenterX - canvasRect.left - viewport.x) / viewport.scale,
+							y: (parentCenterY - canvasRect.top - viewport.y) / viewport.scale
+						};
+
+						// Calculate vector from parent center to element center
+						const dx = centerWorld.x - parentCenterAbs.x;
+						const dy = centerWorld.y - parentCenterAbs.y;
+
+						// Get parent's cumulative rotation
+						const parentRot = (() => {
+							let total = 0;
+							let current = parentEl;
+							while (current) {
+								total += current.rotation || 0;
+								if (!current.parentId) break;
+								current = state.elements[current.parentId];
+								if (!current) break;
+							}
+							return total;
+						})();
+
+						// Rotate vector by -parentRotation to get local coordinates
+						if (parentRot && Math.abs(parentRot % 360) > 0.1) {
+							const angleRad = (-parentRot * Math.PI) / 180;
+							const cos = Math.cos(angleRad);
+							const sin = Math.sin(angleRad);
+							const localDx = dx * cos - dy * sin;
+							const localDy = dx * sin + dy * cos;
+
+							// Convert to local center position (measured from parent's top-left)
+							const parentHalfW = parentEl.size.width / 2;
+							const parentHalfH = parentEl.size.height / 2;
+							centerLocal = {
+								x: parentHalfW + localDx,
+								y: parentHalfH + localDy
+							};
+						} else {
+							// No rotation: simple translation
+							const parentHalfW = parentEl.size.width / 2;
+							const parentHalfH = parentEl.size.height / 2;
+							centerLocal = {
+								x: parentHalfW + dx,
+								y: parentHalfH + dy
+							};
+						}
+					} else {
+						// Fallback: use coordinate utility
+						centerLocal = absoluteToRelative(centerWorld, parentEl, state);
+					}
+				} else {
+					// No auto-layout ancestor: use standard coordinate conversion
+					centerLocal = absoluteToRelative(centerWorld, parentEl, state);
+				}
+
 				return {
 					x: centerLocal.x - currentSize.width / 2,
 					y: centerLocal.y - currentSize.height / 2
@@ -981,7 +1080,7 @@ function handleContextMenu(e: MouseEvent) {
 		<!-- Render children recursively -->
 		{#each element.children as childId}
 			{#if $designState.elements[childId]}
-				<svelte:self element={$designState.elements[childId]} {isPanning} {isDragging} {onStartDrag} />
+				<svelte:self element={$designState.elements[childId]} {isPanning} {isDragging} {viewport} {onStartDrag} />
 			{/if}
 		{/each}
 </div>
