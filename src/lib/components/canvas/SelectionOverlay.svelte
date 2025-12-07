@@ -1735,14 +1735,13 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 					const elementRect = elementDom.getBoundingClientRect();
 					const state = get(designState);
 					const parent = element.parentId ? state.elements[element.parentId] : null;
-					const grandparent = parent?.parentId ? state.elements[parent.parentId] : null;
-					const grandparentHasAutoLayout = grandparent?.autoLayout?.enabled || false;
-					const parentIgnoresAutoLayout = parent?.autoLayout?.ignoreAutoLayout || false;
-					const parentIsInAutoLayout = hasAutoLayoutAncestor(parent, state);
-					
-					// For grandchildren, use element.size to match CanvasElement calculation
+
+					// Check if this element has any auto-layout ancestor
+					const elementHasAutoLayoutAncestor = parent ? hasAutoLayoutAncestor(element, state) : false;
+
+					// For elements with auto-layout ancestors, use element.size to match CanvasElement calculation
 					// For other elements, use getActualSize
-					const elementSize = parentIsInAutoLayout ? element.size : getActualSize(element);
+					const elementSize = elementHasAutoLayoutAncestor ? element.size : getActualSize(element);
 					const totalRotation = getCumulativeRotation(element) + (element.rotation || 0);
 					
 					// Calculate actual top-left position accounting for rotation
