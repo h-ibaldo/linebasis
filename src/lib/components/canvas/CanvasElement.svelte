@@ -506,19 +506,92 @@ type DocumentWithCaret = Document & {
 			// If element has a parent, convert absolute to parent-relative
 			if (element.parentId) {
 				const currentSize = groupTransform.size || element.size;
+				const state = get(designState);
+				const parentEl = state.elements[element.parentId];
 
-				// 1. Calculate center in world space (absolute)
+				if (!parentEl) {
+					// Parent not found - fallback
+					return absolutePos;
+				}
+
+				// Calculate center in world space (absolute)
 				const centerWorld = {
 					x: absolutePos.x + currentSize.width / 2,
 					y: absolutePos.y + currentSize.height / 2
 				};
 
-				// 2. Transform center to local space (parent-relative)
-				const state = get(designState);
-				const parent = state.elements[element.parentId];
-				const centerLocal = absoluteToRelative(centerWorld, parent || null, state);
+				// CRITICAL FIX: Check if parent has auto-layout ancestor (same as drag fix)
+				const parentHasAutoLayoutAncestor = hasAutoLayoutAncestor(parentEl, state);
 
-				// 3. Convert back to top-left in local space
+				let centerLocal;
+
+				if (parentHasAutoLayoutAncestor) {
+					// Parent is in auto-layout: get its actual DOM position
+					const parentDom = document.querySelector(`[data-element-id="${parentEl.id}"]`);
+					const canvasElement = document.querySelector('.canvas');
+
+					if (parentDom && canvasElement) {
+						const parentRect = parentDom.getBoundingClientRect();
+						const canvasRect = canvasElement.getBoundingClientRect();
+
+						// Get parent's actual center from DOM
+						const parentCenterX = parentRect.left + parentRect.width / 2;
+						const parentCenterY = parentRect.top + parentRect.height / 2;
+						const parentCenterAbs = {
+							x: (parentCenterX - canvasRect.left - viewport.x) / viewport.scale,
+							y: (parentCenterY - canvasRect.top - viewport.y) / viewport.scale
+						};
+
+						// Calculate vector from parent center to element center
+						const dx = centerWorld.x - parentCenterAbs.x;
+						const dy = centerWorld.y - parentCenterAbs.y;
+
+						// Get parent's cumulative rotation
+						const parentRot = (() => {
+							let total = 0;
+							let current = parentEl;
+							while (current) {
+								total += current.rotation || 0;
+								if (!current.parentId) break;
+								current = state.elements[current.parentId];
+								if (!current) break;
+							}
+							return total;
+						})();
+
+						// Rotate vector by -parentRotation to get local coordinates
+						if (parentRot && Math.abs(parentRot % 360) > 0.1) {
+							const angleRad = (-parentRot * Math.PI) / 180;
+							const cos = Math.cos(angleRad);
+							const sin = Math.sin(angleRad);
+							const localDx = dx * cos - dy * sin;
+							const localDy = dx * sin + dy * cos;
+
+							const parentHalfW = parentEl.size.width / 2;
+							const parentHalfH = parentEl.size.height / 2;
+							centerLocal = {
+								x: parentHalfW + localDx,
+								y: parentHalfH + localDy
+							};
+						} else {
+							// No rotation: simple translation
+							const parentHalfW = parentEl.size.width / 2;
+							const parentHalfH = parentEl.size.height / 2;
+							centerLocal = {
+								x: parentHalfW + dx,
+								y: parentHalfH + dy
+							};
+						}
+					} else {
+						// Fallback: use coordinate utility
+						centerLocal = absoluteToRelative(centerWorld, parentEl, state);
+					}
+				} else {
+					// No auto-layout ancestor: use standard coordinate conversion
+					centerLocal = absoluteToRelative(centerWorld, parentEl, state);
+				}
+
+				// Convert back to top-left in local space
 				return {
 					x: centerLocal.x - currentSize.width / 2,
 					y: centerLocal.y - currentSize.height / 2
