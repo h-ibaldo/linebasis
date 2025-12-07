@@ -50,6 +50,41 @@ import type {
 } from '$lib/types/events';
 import { invalidateTransformCache } from '$lib/utils/coordinates';
 
+// ============================================================================
+// Rounding Utilities
+// ============================================================================
+
+/**
+ * Round position coordinates to integers
+ */
+function roundPosition(position: { x: number; y: number }): { x: number; y: number } {
+	return {
+		x: Math.round(position.x),
+		y: Math.round(position.y)
+	};
+}
+
+/**
+ * Round size dimensions to integers
+ */
+function roundSize(size: { width: number; height: number }): { width: number; height: number } {
+	return {
+		width: Math.round(size.width),
+		height: Math.round(size.height)
+	};
+}
+
+/**
+ * Round rotation angle to integer
+ */
+function roundRotation(rotation: number): number {
+	return Math.round(rotation);
+}
+
+// ============================================================================
+// Initial State
+// ============================================================================
+
 /**
  * Initial empty state
  */
@@ -218,8 +253,8 @@ function handleCreateElement(state: DesignState, event: CreateElementEvent): Des
 		parentId,
 		pageId,
 		positionMode: 'absolute', // Default: absolute positioning
-		position,
-		size,
+		position: roundPosition(position),
+		size: roundSize(size),
 		styles: styles || {},
 		typography: {},
 		spacing: {},
@@ -497,7 +532,7 @@ function handleMoveElement(state: DesignState, event: MoveElementEvent): DesignS
 			...state.elements,
 			[elementId]: {
 				...element,
-				position
+				position: roundPosition(position)
 			}
 		}
 	};
@@ -519,9 +554,9 @@ function handleResizeElement(state: DesignState, event: ResizeElementEvent): Des
 			...state.elements,
 			[elementId]: {
 				...element,
-				size,
+				size: roundSize(size),
 				// Update position if provided (for N/W handles)
-				...(position && { position })
+				...(position && { position: roundPosition(position) })
 			}
 		}
 	};
@@ -543,7 +578,7 @@ function handleRotateElement(state: DesignState, event: RotateElementEvent): Des
 			...state.elements,
 			[elementId]: {
 				...element,
-				rotation
+				rotation: roundRotation(rotation)
 			}
 		}
 	};
@@ -837,7 +872,7 @@ function handleGroupMoveElements(state: DesignState, event: GroupMoveElementsEve
 		if (element) {
 			newElements[elementId] = {
 				...element,
-				position
+				position: roundPosition(position)
 			};
 
 			// Track groups that contain this element
@@ -876,8 +911,8 @@ function handleGroupResizeElements(state: DesignState, event: GroupResizeElement
 		if (element) {
 			newElements[elementId] = {
 				...element,
-				size,
-				...(position && { position })
+				size: roundSize(size),
+				...(position && { position: roundPosition(position) })
 			};
 
 			// Track groups that contain this element
@@ -916,8 +951,8 @@ function handleGroupRotateElements(state: DesignState, event: GroupRotateElement
 		if (element) {
 			newElements[elementId] = {
 				...element,
-				rotation,
-				position
+				rotation: roundRotation(rotation),
+				position: roundPosition(position)
 			};
 
 			// Track groups that contain this element
