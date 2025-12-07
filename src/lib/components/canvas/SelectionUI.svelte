@@ -23,6 +23,9 @@
 	export let isPanning: boolean = false;
 	export let onMouseDown: (e: MouseEvent, handle?: string) => void;
 
+	// Feature flags
+	const SHOW_SELECTION_BORDER = false; // Set to true to show selection border
+
 	// Determine cursor based on tool and panning state
 	$: dragCursor = $currentTool === 'hand' || isPanning ? 'grab' : $currentTool === 'scale' ? 'crosshair' : 'default';
 
@@ -208,6 +211,7 @@
 			"
 		>
 			<!-- Selection border -->
+	{#if SHOW_SELECTION_BORDER}
 	<div
 		class="selection-border"
 		style="
@@ -221,6 +225,7 @@
 			box-sizing: border-box;
 		"
 	/>
+	{/if}
 
 	<!-- Draggable area (invisible, covers element) -->
 	<!-- NOTE: pointer-events: none allows clicks to pass through to elements with higher z-index -->
@@ -634,6 +639,7 @@
 		"
 	>
 		<!-- Selection border -->
+		{#if SHOW_SELECTION_BORDER}
 		<div
 			class="selection-border"
 			style="
@@ -647,6 +653,7 @@
 				box-sizing: border-box;
 			"
 		/>
+		{/if}
 
 		<!-- Draggable area (invisible, covers element) -->
 		<!-- NOTE: pointer-events: none allows clicks to pass through to elements with higher z-index -->

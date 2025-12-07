@@ -24,6 +24,9 @@
 	export let selectedElements: Element[];
 	export let isPanning: boolean = false;
 
+	// Feature flags
+	const SHOW_HOVER_BORDER = false; // Set to true to enable hover borders
+
 	/**
 	 * Check if any ancestor of the element (parent, grandparent, etc.) is an auto-layout child
 	 * This is needed for deep nesting scenarios (great-grandchildren, etc.)
@@ -4166,7 +4169,7 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 <!-- Hover border - show border on hover (like Figma/Framer) -->
 <!-- Hide during dragging to avoid showing wrapper borders -->
 <!-- For grouped elements, show group border instead of individual element border -->
-{#if hoveredElementId && interactionMode === 'idle' && !$interactionState.hiddenDuringTransition}
+{#if SHOW_HOVER_BORDER && hoveredElementId && interactionMode === 'idle' && !$interactionState.hiddenDuringTransition}
 	{@const hoveredElement = $designState.elements[hoveredElementId]}
 	{@const isHoveredSelected = selectedElements.some(el => el.id === hoveredElementId)}
 	{#if hoveredElement && !isHoveredSelected && $interactionState.mode !== 'editing-text'}
