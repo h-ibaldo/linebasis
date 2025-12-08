@@ -2096,17 +2096,10 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 			const effectiveToParent = potentialDropParentId || reorderParentId; // Where it's going
 			const isChangingParents = effectiveFromParent !== effectiveToParent;
 
-			// Check if the target index is different from where we started
-			// This prevents reordering when just clicking (which might calculate same index)
-			const isActuallyReordering = reorderTargetIndex !== reorderOriginalIndex;
-
-			// Apply live reordering if:
-			// 1. Changing parents (always show feedback), OR
-			// 2. Same parent but actually moving to a different index
-			if (isChangingParents || isActuallyReordering) {
-				lastAppliedIndex = reorderTargetIndex;
-				applyReorder(activeElementId, targetParent, reorderTargetIndex);
-			}
+			// Always allow reordering to any index (including back to original)
+			// The applyReorder function will handle skipping no-op reorders (current === target)
+			lastAppliedIndex = reorderTargetIndex;
+			applyReorder(activeElementId, targetParent, reorderTargetIndex);
 		}
 	}
 
