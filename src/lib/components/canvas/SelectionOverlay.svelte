@@ -1810,6 +1810,10 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 					reorderParentId = parent.id;
 					reorderOriginalIndex = parent.children?.indexOf(element.id) ?? null;
 
+					// Set reorderTargetIndex immediately to the element's current position
+					// This makes the blue placeholder appear on mousedown instead of waiting for drag
+					reorderTargetIndex = reorderOriginalIndex;
+
 					// Get element's current visual position from DOM
 					const domElement = document.querySelector(`[data-element-id="${element.id}"]`);
 					if (domElement) {
