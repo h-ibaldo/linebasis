@@ -3252,6 +3252,11 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 									// Parent not yet changed OR we didn't move beyond threshold (clicked without dragging)
 									// Need to finalize the parent change
 
+									// CRITICAL: Hide element during transition to prevent flash at wrong position
+									updateInteractionStateImmediate({
+										hiddenDuringTransition: activeElementId
+									});
+
 									// CRITICAL: Clear pending position BEFORE reordering
 									pendingPosition = null;
 
@@ -3260,12 +3265,19 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 									// Wait for Svelte to update DOM with new flexbox position
 									await tick();
 
-									// Wait for browser to complete TWO frames of layout
+									// Wait for browser to complete multiple frames of layout
 									await new Promise(resolve => requestAnimationFrame(() => {
 										requestAnimationFrame(() => {
-											requestAnimationFrame(resolve);
+											requestAnimationFrame(() => {
+												requestAnimationFrame(resolve);
+											});
 										});
 									}));
+
+									// Show element again after layout is complete
+									updateInteractionStateImmediate({
+										hiddenDuringTransition: null
+									});
 								}
 								// No need to call moveElement - auto layout will position it
 							} else {
@@ -3307,6 +3319,11 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 								if (!reorderParentId || potentialDropParentId !== (get(designState).elements[activeElementId]?.parentId)) {
 									// Parent not yet changed, or changed to different parent than current
 
+									// CRITICAL: Hide element during transition to prevent flash at wrong position
+									updateInteractionStateImmediate({
+										hiddenDuringTransition: activeElementId
+									});
+
 									// CRITICAL: Clear pending position BEFORE reordering
 									pendingPosition = null;
 
@@ -3315,12 +3332,19 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 									// Wait for Svelte to update DOM with new flexbox position
 									await tick();
 
-									// Wait for browser to complete TWO frames of layout
+									// Wait for browser to complete multiple frames of layout
 									await new Promise(resolve => requestAnimationFrame(() => {
 										requestAnimationFrame(() => {
-											requestAnimationFrame(resolve);
+											requestAnimationFrame(() => {
+												requestAnimationFrame(resolve);
+											});
 										});
 									}));
+
+									// Show element again after layout is complete
+									updateInteractionStateImmediate({
+										hiddenDuringTransition: null
+									});
 								}
 								await moveElement(activeElementId, relativePos);
 							}
@@ -3331,6 +3355,11 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 								// Note: We disabled live reordering - reordering only happens here
 								if (reorderTargetIndex !== null) {
 									const reorderedElementId = activeElementId;
+
+									// CRITICAL: Hide element during transition to prevent flash at wrong position
+									updateInteractionStateImmediate({
+										hiddenDuringTransition: activeElementId
+									});
 
 									// CRITICAL: Clear pending position BEFORE reordering
 									// This prevents SelectionUI from using stale pendingPosition
@@ -3350,6 +3379,11 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 											});
 										});
 									}));
+
+									// Show element again after layout is complete
+									updateInteractionStateImmediate({
+										hiddenDuringTransition: null
+									});
 
 									// Force SelectionUI to recalculate by updating interaction state
 									// This triggers reactive statements that depend on interactionState
