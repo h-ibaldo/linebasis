@@ -1166,13 +1166,13 @@ function handleContextMenu(e: MouseEvent) {
 						class="auto-layout-placeholder"
 						style="
 							flex-shrink: 0;
-							width: {draggedRect?.width || 0}px;
-							height: {draggedRect?.height || 0}px;
-							background-color: rgba(59, 130, 246, 0.2);
-							border: 2px solid #3b82f6;
-							border-radius: 4px;
+							width: {(draggedRect?.width || 0)}px;
+							height: {(draggedRect?.height || 0)}px;
+							background-color: rgba(59, 130, 246, 0.5);
+							border: none;
+							border-radius: 0;
 							pointer-events: none;
-							box-shadow: 0 0 8px rgba(59, 130, 246, 0.3);
+							box-shadow: none;
 						"
 					></div>
 				{/if}
@@ -1188,13 +1188,13 @@ function handleContextMenu(e: MouseEvent) {
 					class="auto-layout-placeholder"
 					style="
 						flex-shrink: 0;
-						width: {draggedRect?.width || 0}px;
-						height: {draggedRect?.height || 0}px;
-						background-color: rgba(59, 130, 246, 0.2);
-						border: 2px solid #3b82f6;
-						border-radius: 4px;
+						width: {(draggedRect?.width || 0)}px;
+						height: {(draggedRect?.height || 0)}px;
+						background-color: rgba(59, 130, 246, 0.5);
+						border: none;
+						border-radius: 0;
 						pointer-events: none;
-						box-shadow: 0 0 8px rgba(59, 130, 246, 0.3);
+						box-shadow: none;
 					"
 				></div>
 			{/if}
