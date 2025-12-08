@@ -3244,8 +3244,9 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 									// Parent not yet changed OR we didn't move beyond threshold (clicked without dragging)
 									// Need to finalize the parent change
 									await reorderElement(activeElementId, potentialDropParentId, reorderTargetIndex ?? 0);
-									// Clear pending position immediately to prevent SelectionUI from showing at wrong position
+									// Clear pending position and wait for DOM update
 									pendingPosition = null;
+									await tick(); // Force Svelte to update DOM with new flexbox position
 								}
 								// No need to call moveElement - auto layout will position it
 							} else {
@@ -3287,8 +3288,9 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 								if (!reorderParentId || potentialDropParentId !== (get(designState).elements[activeElementId]?.parentId)) {
 									// Parent not yet changed, or changed to different parent than current
 									await reorderElement(activeElementId, potentialDropParentId, reorderTargetIndex ?? 0);
-									// Clear pending position immediately to prevent SelectionUI from showing at wrong position
+									// Clear pending position and wait for DOM update
 									pendingPosition = null;
+									await tick(); // Force Svelte to update DOM with new flexbox position
 								}
 								await moveElement(activeElementId, relativePos);
 							}
@@ -3299,8 +3301,9 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 								// Note: We disabled live reordering - reordering only happens here
 								if (reorderTargetIndex !== null) {
 									await reorderElement(activeElementId, reorderParentId, reorderTargetIndex);
-									// Clear pending position immediately to prevent SelectionUI from showing at wrong position
+									// Clear pending position and wait for DOM update
 									pendingPosition = null;
+									await tick(); // Force Svelte to update DOM with new flexbox position
 								}
 							} else {
 								// Not in auto layout - move the element
