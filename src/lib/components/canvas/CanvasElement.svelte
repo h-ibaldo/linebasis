@@ -1149,12 +1149,77 @@ function handleContextMenu(e: MouseEvent) {
 		{/if}
 		{/key}
 
-		<!-- Render children recursively -->
-		{#each element.children as childId}
-			{#if $designState.elements[childId]}
-				<svelte:self element={$designState.elements[childId]} {isPanning} {isDragging} {viewport} {onStartDrag} />
+		<!-- Render children recursively with placeholder injection for auto-layout reordering -->
+		{#if element.autoLayout?.enabled && $interactionState.activeElementId && $interactionState.reorderParentId === element.id && $interactionState.reorderTargetIndex !== null}
+			{@const activeId = $interactionState.activeElementId}
+			{@const reorderTarget = $interactionState.reorderTargetIndex}
+			{@const draggedElement = $designState.elements[activeId]}
+			{@const draggedDom = typeof document !== 'undefined' ? document.querySelector(`[data-element-id="${activeId}"]`) : null}
+			{@const draggedRect = draggedDom?.getBoundingClientRect()}
+			{@const siblings = element.children.filter(id => id !== activeId)}
+			{@const _ = console.log('[CanvasElement] Rendering placeholder:', { elementId: element.id, reorderTarget, siblingsCount: siblings.length, draggedRect })}
+
+			{#each siblings as childId, index}
+				<!-- Inject placeholder before the target child -->
+				{#if index === reorderTarget}
+					<div
+						class="auto-layout-placeholder"
+						style="
+							flex-shrink: 0;
+							width: {draggedRect?.width || 0}px;
+							height: {draggedRect?.height || 0}px;
+							background-color: rgba(59, 130, 246, 0.2);
+							border: 2px solid #3b82f6;
+							border-radius: 4px;
+							pointer-events: none;
+							box-shadow: 0 0 8px rgba(59, 130, 246, 0.3);
+						"
+					></div>
+				{/if}
+
+				{#if $designState.elements[childId]}
+					<svelte:self element={$designState.elements[childId]} {isPanning} {isDragging} {viewport} {onStartDrag} />
+				{/if}
+			{/each}
+
+			<!-- If inserting at the end (after all siblings) -->
+			{#if reorderTarget >= siblings.length}
+				<div
+					class="auto-layout-placeholder"
+					style="
+						flex-shrink: 0;
+						width: {draggedRect?.width || 0}px;
+						height: {draggedRect?.height || 0}px;
+						background-color: rgba(59, 130, 246, 0.2);
+						border: 2px solid #3b82f6;
+						border-radius: 4px;
+						pointer-events: none;
+						box-shadow: 0 0 8px rgba(59, 130, 246, 0.3);
+					"
+				></div>
 			{/if}
-		{/each}
+
+			<!-- Render the dragged element itself (it stays visible during drag) -->
+			{#if draggedElement}
+				<svelte:self element={draggedElement} {isPanning} {isDragging} {viewport} {onStartDrag} />
+			{/if}
+		{:else}
+			<!-- Normal rendering without placeholder -->
+			{@const _ = element.autoLayout?.enabled && $interactionState.activeElementId && console.log('❌ [CanvasElement] NO PLACEHOLDER:', {
+				elementId: element.id,
+				isAutoLayout: element.autoLayout?.enabled,
+				hasActive: !!$interactionState.activeElementId,
+				activeId: $interactionState.activeElementId,
+				reorderParent: $interactionState.reorderParentId,
+				isThisParent: $interactionState.reorderParentId === element.id,
+				targetIndex: $interactionState.reorderTargetIndex
+			})}
+			{#each element.children as childId}
+				{#if $designState.elements[childId]}
+					<svelte:self element={$designState.elements[childId]} {isPanning} {isDragging} {viewport} {onStartDrag} />
+				{/if}
+			{/each}
+		{/if}
 </div>
 
 <style>

@@ -116,6 +116,14 @@
 	let currentMouseScreen: { x: number; y: number } = { x: 0, y: 0 }; // Current mouse position for debug
 	let hasMovedBeyondThreshold: boolean = false; // Track if we've moved past the drag threshold
 
+	// Sync auto-layout reordering state to interaction store
+	$: {
+		updateInteractionStateThrottled({
+			reorderParentId,
+			reorderTargetIndex
+		});
+	}
+
 	// Screen-space debug helpers for rotation visualization (account for canvas DOM offset)
 	let debugCenterScreen: { x: number; y: number } | null = null;
 	let debugCornerScreen: { x: number; y: number } | null = null;
@@ -3243,10 +3251,21 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 								if (currentParent !== potentialDropParentId || !hasMovedBeyondThreshold) {
 									// Parent not yet changed OR we didn't move beyond threshold (clicked without dragging)
 									// Need to finalize the parent change
-									await reorderElement(activeElementId, potentialDropParentId, reorderTargetIndex ?? 0);
-									// Clear pending position and wait for DOM update
+
+									// CRITICAL: Clear pending position BEFORE reordering
 									pendingPosition = null;
-									await tick(); // Force Svelte to update DOM with new flexbox position
+
+									await reorderElement(activeElementId, potentialDropParentId, reorderTargetIndex ?? 0);
+
+									// Wait for Svelte to update DOM with new flexbox position
+									await tick();
+
+									// Wait for browser to complete TWO frames of layout
+									await new Promise(resolve => requestAnimationFrame(() => {
+										requestAnimationFrame(() => {
+											requestAnimationFrame(resolve);
+										});
+									}));
 								}
 								// No need to call moveElement - auto layout will position it
 							} else {
@@ -3287,10 +3306,21 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 								// during the drag via the reactive statement, so we only need to call moveElement here
 								if (!reorderParentId || potentialDropParentId !== (get(designState).elements[activeElementId]?.parentId)) {
 									// Parent not yet changed, or changed to different parent than current
-									await reorderElement(activeElementId, potentialDropParentId, reorderTargetIndex ?? 0);
-									// Clear pending position and wait for DOM update
+
+									// CRITICAL: Clear pending position BEFORE reordering
 									pendingPosition = null;
-									await tick(); // Force Svelte to update DOM with new flexbox position
+
+									await reorderElement(activeElementId, potentialDropParentId, reorderTargetIndex ?? 0);
+
+									// Wait for Svelte to update DOM with new flexbox position
+									await tick();
+
+									// Wait for browser to complete TWO frames of layout
+									await new Promise(resolve => requestAnimationFrame(() => {
+										requestAnimationFrame(() => {
+											requestAnimationFrame(resolve);
+										});
+									}));
 								}
 								await moveElement(activeElementId, relativePos);
 							}
@@ -3300,10 +3330,36 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 								// In auto layout - apply final reorder index on mouseup
 								// Note: We disabled live reordering - reordering only happens here
 								if (reorderTargetIndex !== null) {
-									await reorderElement(activeElementId, reorderParentId, reorderTargetIndex);
-									// Clear pending position and wait for DOM update
+									const reorderedElementId = activeElementId;
+
+									// CRITICAL: Clear pending position BEFORE reordering
+									// This prevents SelectionUI from using stale pendingPosition
 									pendingPosition = null;
-									await tick(); // Force Svelte to update DOM with new flexbox position
+
+									await reorderElement(activeElementId, reorderParentId, reorderTargetIndex);
+
+									// Wait for Svelte to update DOM with new flexbox position
+									await tick();
+
+									// Wait for browser to complete multiple frames of layout:
+									// This ensures the browser has fully calculated and painted the new flexbox positions
+									await new Promise(resolve => requestAnimationFrame(() => {
+										requestAnimationFrame(() => {
+											requestAnimationFrame(() => {
+												requestAnimationFrame(resolve);
+											});
+										});
+									}));
+
+									// Force SelectionUI to recalculate by updating interaction state
+									// This triggers reactive statements that depend on interactionState
+									updateInteractionStateImmediate({
+										reorderParentId: null,
+										reorderTargetIndex: null
+									});
+
+									// Wait one more tick for SelectionUI to re-render with new positions
+									await tick();
 								}
 							} else {
 								// Not in auto layout - move the element
@@ -4700,97 +4756,7 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 	</div>
 {/if}
 
-<!-- Auto layout reordering: Blue placeholder indicator -->
-{#if interactionMode === 'dragging' && reorderParentId && activeElementId && reorderTargetIndex !== null}
-	{@const state = $designState}
-	{@const targetParentId = potentialDropParentId || reorderParentId}
-	{@const targetParent = state.elements[targetParentId]}
-	{#if targetParent && targetParent.autoLayout?.enabled}
-		{@const flexDirection = targetParent.autoLayout.direction || 'row'}
-		{@const allChildren = targetParent.children || []}
-		{@const siblings = allChildren.filter(id => id !== activeElementId)}
-		{@const gap = parseInt(targetParent.autoLayout.gap || '0px') || 0}
-
-		<!-- Calculate placeholder position based on target index -->
-		{@const placeholderInfo = (() => {
-			// Get dragged element's size from DOM
-			const draggedDom = document.querySelector(`[data-element-id="${activeElementId}"]`);
-			if (!draggedDom) return null;
-			const draggedRect = draggedDom.getBoundingClientRect();
-
-			// Get sibling at target index (this is where element will be inserted BEFORE)
-			// Note: siblings array excludes the dragged element, so index is relative to other elements
-			const targetSiblingId = siblings[reorderTargetIndex];
-
-			// If inserting at the end, use the last sibling's position + its size
-			if (!targetSiblingId || reorderTargetIndex >= siblings.length) {
-				const lastSiblingId = siblings[siblings.length - 1];
-				if (!lastSiblingId) return null;
-
-				const lastDom = document.querySelector(`[data-element-id="${lastSiblingId}"]`);
-				if (!lastDom) return null;
-
-				const rect = lastDom.getBoundingClientRect();
-
-				if (flexDirection === 'row' || flexDirection === 'row-wrap') {
-					return {
-						left: rect.right + gap,
-						top: rect.top,
-						width: draggedRect.width,
-						height: draggedRect.height
-					};
-				} else {
-					return {
-						left: rect.left,
-						top: rect.bottom + gap,
-						width: draggedRect.width,
-						height: draggedRect.height
-					};
-				}
-			}
-
-			// Otherwise, use the target sibling's position (insert before it)
-			const targetDom = document.querySelector(`[data-element-id="${targetSiblingId}"]`);
-			if (!targetDom) return null;
-
-			const rect = targetDom.getBoundingClientRect();
-
-			if (flexDirection === 'row' || flexDirection === 'row-wrap') {
-				return {
-					left: rect.left - gap - draggedRect.width,
-					top: rect.top,
-					width: draggedRect.width,
-					height: draggedRect.height
-				};
-			} else {
-				return {
-					left: rect.left,
-					top: rect.top - gap - draggedRect.height,
-					width: draggedRect.width,
-					height: draggedRect.height
-				};
-			}
-		})()}
-
-		{#if placeholderInfo}
-			<div
-				style="
-					position: fixed;
-					left: {placeholderInfo.left}px;
-					top: {placeholderInfo.top}px;
-					width: {placeholderInfo.width}px;
-					height: {placeholderInfo.height}px;
-					background-color: rgba(59, 130, 246, 0.2);
-					border: 2px solid #3b82f6;
-					border-radius: 4px;
-					pointer-events: none;
-					z-index: 9999;
-					box-shadow: 0 0 8px rgba(59, 130, 246, 0.3);
-				"
-			></div>
-		{/if}
-	{/if}
-{/if}
+<!-- Auto layout reordering placeholder is now rendered inline in CanvasElement.svelte -->
 
 <!-- DEBUG: Rotation visualization -->
 {#if interactionMode === 'rotating' && debugCenterScreen && debugCornerScreen && debugCursorScreen}
