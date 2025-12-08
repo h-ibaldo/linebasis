@@ -780,12 +780,13 @@ type DocumentWithCaret = Document & {
 		const useRelativePosition = positionMode === 'flex-item' || (parentHasAutoLayout && !childIgnoresAutoLayout);
 
 		// Position and size - use pending values during interaction
-		if (isBeingDragged && !isAutoLayoutChildDragging) {
+		if (isBeingDragged) {
 			// Element being dragged: use absolute positioning to follow cursor
-			// Note: DOM order determines stacking, no z-index manipulation needed
+			// This applies to ALL drags including auto-layout children
 			styles.push(`position: absolute`);
 			styles.push(`left: ${displayPosition.x}px`);
 			styles.push(`top: ${displayPosition.y}px`);
+			styles.push(`z-index: 10000`); // Ensure dragged element is on top
 		} else if (useRelativePosition) {
 			// Flex item: use relative positioning (CSS flexbox handles layout)
 			styles.push(`position: relative`);
@@ -795,10 +796,8 @@ type DocumentWithCaret = Document & {
 			styles.push(`flex-shrink: 0`);
 			styles.push(`flex-grow: 0`);
 
-			// If being dragged, dim the original (ghost will follow cursor at full opacity)
-			if (isAutoLayoutChildDragging) {
-				styles.push(`opacity: 0.3`);
-			}
+			// Note: Removed opacity dimming - element is dragged at full opacity
+			// A blue placeholder indicator shows where element will be inserted instead
 		} else {
 			// Absolute positioning: use explicit coordinates
 			styles.push(`position: absolute`);

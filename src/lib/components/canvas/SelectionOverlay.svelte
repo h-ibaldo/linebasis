@@ -1802,62 +1802,41 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 					reorderParentId = parent.id;
 					reorderOriginalIndex = parent.children?.indexOf(element.id) ?? null;
 
-					// Store the offset from cursor to element's top-left in SCREEN space
-					// We'll use screen coordinates for ghost positioning to avoid coordinate conversion issues
+					// Get element's current visual position from DOM
 					const domElement = document.querySelector(`[data-element-id="${element.id}"]`);
 					if (domElement) {
 						const rect = domElement.getBoundingClientRect();
+						const canvasElement = document.querySelector('.canvas');
+						const canvasRect = canvasElement?.getBoundingClientRect();
 
-						// Store element rotation and size for recalculation during drag
-						// Use getActualSize directly to ensure we use the CURRENT element being dragged
-						// (displaySizeForSelection might be stale if selection just changed)
-						reorderElementRotation = element.rotation || 0;
-						const elementDisplaySize = getActualSize(element);
-						reorderElementSize = { ...elementDisplaySize };
+						if (canvasRect) {
+							// Convert screen position to canvas coordinates
+							// This is the element's top-left in canvas space
+							const elementCanvasX = (rect.left - canvasRect.left - viewport.x) / viewport.scale;
+							const elementCanvasY = (rect.top - canvasRect.top - viewport.y) / viewport.scale;
 
-						// Calculate actual top-left position accounting for rotation
-						const actualPos = calculateActualTopLeftForRotated(
-							rect,
-							elementDisplaySize,
-							// Use total cumulative rotation here, just like the ghost element renderer
-							getCumulativeRotation(element) + (element.rotation || 0),
-							viewport.scale
-						);
+							// Store offset from cursor to element's top-left IN CANVAS SPACE
+							const cursorCanvasX = (e.clientX - canvasRect.left - viewport.x) / viewport.scale;
+							const cursorCanvasY = (e.clientY - canvasRect.top - viewport.y) / viewport.scale;
 
-						// Offset from mouse to element's actual top-left (rotation origin) in screen pixels
-						reorderGhostOffset = {
-							x: actualPos.left - e.clientX,
-							y: actualPos.top - e.clientY
-						};
-
-						// Get all children positions at start
-						const allChildren = parent?.children?.map(childId => {
-							const child = state.elements[childId];
-							const domEl = document.querySelector(`[data-element-id="${childId}"]`);
-							if (!domEl || !child) return null;
-							const childRect = domEl.getBoundingClientRect();
-							return {
-								id: childId,
-								isBeingDragged: childId === element.id,
-								screenPos: { left: childRect.left, top: childRect.top },
-								size: { width: childRect.width, height: childRect.height }
+							reorderGhostOffset = {
+								x: elementCanvasX - cursorCanvasX,
+								y: elementCanvasY - cursorCanvasY
 							};
-						}).filter(Boolean) || [];
 
+							// Store element size for placeholder
+							reorderElementSize = {
+								width: rect.width / viewport.scale,
+								height: rect.height / viewport.scale
+							};
 
-						// Calculate initial ghost position at drag start
-						const initialGhostScreenX = e.clientX + reorderGhostOffset.x;
-						const initialGhostScreenY = e.clientY + reorderGhostOffset.y;
-						const initialGhostCanvasX = (initialGhostScreenX - viewport.x) / viewport.scale;
-						const initialGhostCanvasY = (initialGhostScreenY - viewport.y) / viewport.scale;
-
-
-						// Initialize pendingPosition to the actual DOM position in canvas coordinates
-						// This ensures the ghost starts at the element's visual position
-						pendingPosition = {
-							x: initialGhostCanvasX,
-							y: initialGhostCanvasY
-						};
+							// Initialize pendingPosition to element's current visual position
+							// This prevents jump when drag starts
+							pendingPosition = {
+								x: elementCanvasX,
+								y: elementCanvasY
+							};
+						}
 					}
 				} else {
 					reorderParentId = null;
@@ -2084,24 +2063,24 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 		return null;
 	}
 
-	// Live reordering: reorder elements as user drags
-	// Use potentialDropParentId if available (dragging to different parent), otherwise use reorderParentId
-	// Only apply if we've moved beyond the threshold to avoid reordering on clicks
-	$: if (interactionMode === 'dragging' && reorderTargetIndex !== null &&
-		reorderTargetIndex !== lastAppliedIndex && activeElementId && hasMovedBeyondThreshold) {
-		const targetParent = potentialDropParentId || reorderParentId;
-		if (targetParent) {
-			// Check if changing parents (dragging from one auto-layout to another)
-			const effectiveFromParent = reorderParentId; // Where element started
-			const effectiveToParent = potentialDropParentId || reorderParentId; // Where it's going
-			const isChangingParents = effectiveFromParent !== effectiveToParent;
-
-			// Always allow reordering to any index (including back to original)
-			// The applyReorder function will handle skipping no-op reorders (current === target)
-			lastAppliedIndex = reorderTargetIndex;
-			applyReorder(activeElementId, targetParent, reorderTargetIndex);
-		}
-	}
+	// DISABLED: Live reordering during drag
+	// New UX: Element stays in place, blue placeholder shows drop position
+	// Reordering only happens on mouseup
+	// $: if (interactionMode === 'dragging' && reorderTargetIndex !== null &&
+	// 	reorderTargetIndex !== lastAppliedIndex && activeElementId && hasMovedBeyondThreshold) {
+	// 	const targetParent = potentialDropParentId || reorderParentId;
+	// 	if (targetParent) {
+	// 		// Check if changing parents (dragging from one auto-layout to another)
+	// 		const effectiveFromParent = reorderParentId; // Where element started
+	// 		const effectiveToParent = potentialDropParentId || reorderParentId; // Where it's going
+	// 		const isChangingParents = effectiveFromParent !== effectiveToParent;
+	//
+	// 		// Always allow reordering to any index (including back to original)
+	// 		// The applyReorder function will handle skipping no-op reorders (current === target)
+	// 		lastAppliedIndex = reorderTargetIndex;
+	// 		applyReorder(activeElementId, targetParent, reorderTargetIndex);
+	// 	}
+	// }
 
 	/**
 	 * Handle Alt key press/release during drag to enable/disable duplication mode
@@ -2187,19 +2166,23 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 			if (reorderParentId && activeElementId) {
 				currentMouseScreen = { x: e.clientX, y: e.clientY }; // Store for debug
 
-				const mouseCanvasX = (e.clientX - viewport.x) / viewport.scale;
-				const mouseCanvasY = (e.clientY - viewport.y) / viewport.scale;
+				// Get cursor position in canvas space
+				const canvasElement = document.querySelector('.canvas') as HTMLElement | null;
+				const canvasRect = canvasElement?.getBoundingClientRect();
+				if (!canvasRect) return;
 
-				// For auto layout reordering, calculate ghost position using the stored offset
-				// The offset accounts for rotation and was calculated at drag start
-				const ghostScreenX = e.clientX + reorderGhostOffset.x;
-				const ghostScreenY = e.clientY + reorderGhostOffset.y;
+				const cursorCanvasX = (e.clientX - canvasRect.left - viewport.x) / viewport.scale;
+				const cursorCanvasY = (e.clientY - canvasRect.top - viewport.y) / viewport.scale;
 
-				// Convert to canvas coordinates
+				// Calculate element position by adding the offset (cursor + offset = element top-left)
 				pendingPosition = {
-					x: (ghostScreenX - viewport.x) / viewport.scale,
-					y: (ghostScreenY - viewport.y) / viewport.scale
+					x: cursorCanvasX + reorderGhostOffset.x,
+					y: cursorCanvasY + reorderGhostOffset.y
 				};
+
+				// Also calculate mouse position for reorder index calculation
+				const mouseCanvasX = cursorCanvasX;
+				const mouseCanvasY = cursorCanvasY;
 
 				// Only check for parent changes and calculate reorder index if we've moved beyond threshold
 				// This prevents unwanted reordering on small mouse movements (clicks)
@@ -3261,6 +3244,8 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 									// Parent not yet changed OR we didn't move beyond threshold (clicked without dragging)
 									// Need to finalize the parent change
 									await reorderElement(activeElementId, potentialDropParentId, reorderTargetIndex ?? 0);
+									// Clear pending position immediately to prevent SelectionUI from showing at wrong position
+									pendingPosition = null;
 								}
 								// No need to call moveElement - auto layout will position it
 							} else {
@@ -3302,17 +3287,20 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 								if (!reorderParentId || potentialDropParentId !== (get(designState).elements[activeElementId]?.parentId)) {
 									// Parent not yet changed, or changed to different parent than current
 									await reorderElement(activeElementId, potentialDropParentId, reorderTargetIndex ?? 0);
+									// Clear pending position immediately to prevent SelectionUI from showing at wrong position
+									pendingPosition = null;
 								}
 								await moveElement(activeElementId, relativePos);
 							}
 						} else {
 							// Parent didn't change - just move within same parent
 							if (reorderParentId) {
-								// In auto layout - apply final reorder index
-								// We skipped live reordering to avoid unwanted reordering from clicks
-								// Now apply the final index on mouseup
-								if (reorderTargetIndex !== null && reorderTargetIndex !== reorderOriginalIndex) {
+								// In auto layout - apply final reorder index on mouseup
+								// Note: We disabled live reordering - reordering only happens here
+								if (reorderTargetIndex !== null) {
 									await reorderElement(activeElementId, reorderParentId, reorderTargetIndex);
+									// Clear pending position immediately to prevent SelectionUI from showing at wrong position
+									pendingPosition = null;
 								}
 							} else {
 								// Not in auto layout - move the element
@@ -4709,48 +4697,95 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 	</div>
 {/if}
 
-<!-- Auto layout reordering: Ghost element following cursor -->
-{#if interactionMode === 'dragging' && reorderParentId && activeElementId}
-	{@const draggedElement = selectedElements.find(el => el.id === activeElementId)}
-	{#if draggedElement && pendingPosition}
-		{@const ghostSize = displaySizeForSelection || draggedElement.size}
-		<!-- Use pendingPosition which is already being updated to follow cursor during reordering -->
-		{@const ghostPos = pendingPosition}
+<!-- Auto layout reordering: Blue placeholder indicator -->
+{#if interactionMode === 'dragging' && reorderParentId && activeElementId && reorderTargetIndex !== null}
+	{@const state = $designState}
+	{@const targetParentId = potentialDropParentId || reorderParentId}
+	{@const targetParent = state.elements[targetParentId]}
+	{#if targetParent && targetParent.autoLayout?.enabled}
+		{@const flexDirection = targetParent.autoLayout.direction || 'row'}
+		{@const allChildren = targetParent.children || []}
+		{@const siblings = allChildren.filter(id => id !== activeElementId)}
+		{@const gap = parseInt(targetParent.autoLayout.gap || '0px') || 0}
 
-		<!-- Ghost element with visual preview -->
-		{@const totalRotation = getCumulativeRotation(draggedElement) + (draggedElement.rotation || 0)}
+		<!-- Calculate placeholder position based on target index -->
+		{@const placeholderInfo = (() => {
+			// Get dragged element's size from DOM
+			const draggedDom = document.querySelector(`[data-element-id="${activeElementId}"]`);
+			if (!draggedDom) return null;
+			const draggedRect = draggedDom.getBoundingClientRect();
 
-		{@const ghostScreenLeft = viewport.x + ghostPos.x * viewport.scale}
-		{@const ghostScreenTop = viewport.y + ghostPos.y * viewport.scale}
-		{@const ghostWidth = ghostSize.width * viewport.scale}
-		{@const ghostHeight = ghostSize.height * viewport.scale}
+			// Get sibling at target index (this is where element will be inserted BEFORE)
+			// Note: siblings array excludes the dragged element, so index is relative to other elements
+			const targetSiblingId = siblings[reorderTargetIndex];
 
-		<div
-			style="
-				position: fixed;
-				left: {ghostScreenLeft}px;
-				top: {ghostScreenTop}px;
-				width: {ghostWidth}px;
-				height: {ghostHeight}px;
-				background-color: {draggedElement.styles?.backgroundColor || '#f5f5f5'};
-				border: {draggedElement.styles?.borderWidth || '0px'} {draggedElement.styles?.borderStyle || 'solid'} {draggedElement.styles?.borderColor || 'transparent'};
-				border-radius: {draggedElement.styles?.borderRadius || '0px'};
-				opacity: 0.9;
-				pointer-events: none;
-				z-index: 10000;
-				box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-				transform: rotate({totalRotation}deg);
-				transform-origin: center center;
-			"
-		>
-			{#if draggedElement.type === 'img'}
-				<img
-					src={draggedElement.src || ''}
-					alt={draggedElement.alt || ''}
-					style="width: 100%; height: 100%; object-fit: {draggedElement.styles?.objectFit || 'cover'};"
-				/>
-			{/if}
-		</div>
+			// If inserting at the end, use the last sibling's position + its size
+			if (!targetSiblingId || reorderTargetIndex >= siblings.length) {
+				const lastSiblingId = siblings[siblings.length - 1];
+				if (!lastSiblingId) return null;
+
+				const lastDom = document.querySelector(`[data-element-id="${lastSiblingId}"]`);
+				if (!lastDom) return null;
+
+				const rect = lastDom.getBoundingClientRect();
+
+				if (flexDirection === 'row' || flexDirection === 'row-wrap') {
+					return {
+						left: rect.right + gap,
+						top: rect.top,
+						width: draggedRect.width,
+						height: draggedRect.height
+					};
+				} else {
+					return {
+						left: rect.left,
+						top: rect.bottom + gap,
+						width: draggedRect.width,
+						height: draggedRect.height
+					};
+				}
+			}
+
+			// Otherwise, use the target sibling's position (insert before it)
+			const targetDom = document.querySelector(`[data-element-id="${targetSiblingId}"]`);
+			if (!targetDom) return null;
+
+			const rect = targetDom.getBoundingClientRect();
+
+			if (flexDirection === 'row' || flexDirection === 'row-wrap') {
+				return {
+					left: rect.left - gap - draggedRect.width,
+					top: rect.top,
+					width: draggedRect.width,
+					height: draggedRect.height
+				};
+			} else {
+				return {
+					left: rect.left,
+					top: rect.top - gap - draggedRect.height,
+					width: draggedRect.width,
+					height: draggedRect.height
+				};
+			}
+		})()}
+
+		{#if placeholderInfo}
+			<div
+				style="
+					position: fixed;
+					left: {placeholderInfo.left}px;
+					top: {placeholderInfo.top}px;
+					width: {placeholderInfo.width}px;
+					height: {placeholderInfo.height}px;
+					background-color: rgba(59, 130, 246, 0.2);
+					border: 2px solid #3b82f6;
+					border-radius: 4px;
+					pointer-events: none;
+					z-index: 9999;
+					box-shadow: 0 0 8px rgba(59, 130, 246, 0.3);
+				"
+			></div>
+		{/if}
 	{/if}
 {/if}
 
