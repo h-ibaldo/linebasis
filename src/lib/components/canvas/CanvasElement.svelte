@@ -1154,10 +1154,23 @@ function handleContextMenu(e: MouseEvent) {
 			{@const activeId = $interactionState.activeElementId}
 			{@const reorderTarget = $interactionState.reorderTargetIndex}
 			{@const draggedElement = $designState.elements[activeId]}
-			{@const draggedDom = typeof document !== 'undefined' ? document.querySelector(`[data-element-id="${activeId}"]`) : null}
-			{@const draggedRect = draggedDom?.getBoundingClientRect()}
 			{@const siblings = element.children.filter(id => id !== activeId)}
-			{@const _ = console.log('[CanvasElement] Rendering placeholder:', { elementId: element.id, reorderTarget, siblingsCount: siblings.length, draggedRect })}
+			{@const draggedSize = draggedElement?.size || { width: 0, height: 0 }}
+			{@const draggedRotation = draggedElement?.rotation || 0}
+			{@const placeholderSize = (() => {
+				// For rotated elements, calculate bounding box size (same as element margin calculation)
+				if (draggedRotation && draggedRotation !== 0) {
+					const angleRad = draggedRotation * (Math.PI / 180);
+					const cos = Math.abs(Math.cos(angleRad));
+					const sin = Math.abs(Math.sin(angleRad));
+					const boundingWidth = draggedSize.width * cos + draggedSize.height * sin;
+					const boundingHeight = draggedSize.width * sin + draggedSize.height * cos;
+					return { width: boundingWidth, height: boundingHeight };
+				}
+				// Non-rotated: use actual size
+				return draggedSize;
+			})()}
+			{@const _ = console.log('[CanvasElement] Rendering placeholder:', { elementId: element.id, reorderTarget, siblingsCount: siblings.length, placeholderSize })}
 
 			{#each siblings as childId, index}
 				<!-- Inject placeholder before the target child -->
@@ -1166,8 +1179,8 @@ function handleContextMenu(e: MouseEvent) {
 						class="auto-layout-placeholder"
 						style="
 							flex-shrink: 0;
-							width: {(draggedRect?.width || 0)}px;
-							height: {(draggedRect?.height || 0)}px;
+							width: {placeholderSize.width}px;
+							height: {placeholderSize.height}px;
 							background-color: rgba(59, 130, 246, 0.5);
 							border: none;
 							border-radius: 0;
@@ -1188,8 +1201,8 @@ function handleContextMenu(e: MouseEvent) {
 					class="auto-layout-placeholder"
 					style="
 						flex-shrink: 0;
-						width: {(draggedRect?.width || 0)}px;
-						height: {(draggedRect?.height || 0)}px;
+						width: {placeholderSize.width}px;
+						height: {placeholderSize.height}px;
 						background-color: rgba(59, 130, 246, 0.5);
 						border: none;
 						border-radius: 0;
