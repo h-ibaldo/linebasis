@@ -222,40 +222,6 @@ export interface GroupUpdateStylesEvent extends BaseEvent {
 }
 
 // ============================================================================
-// Group Events (DEPRECATED - groups are now regular div elements)
-// ============================================================================
-
-// DEPRECATED: Use CREATE_ELEMENT with type='div' and children instead
-// export interface GroupElementsEvent extends BaseEvent {
-// 	type: 'GROUP_ELEMENTS';
-// 	payload: {
-// 		groupId: string;
-// 		elementIds: string[];
-// 	};
-// }
-
-// DEPRECATED: Use DELETE_ELEMENT on the wrapper div instead
-// export interface UngroupElementsEvent extends BaseEvent {
-// 	type: 'UNGROUP_ELEMENTS';
-// 	payload: {
-// 		groupId: string;
-// 	};
-// }
-
-// DEPRECATED: Use CREATE_ELEMENT with type='div' and children instead
-// export interface CreateGroupWrapperEvent extends BaseEvent {
-// 	type: 'CREATE_GROUP_WRAPPER';
-// 	payload: {
-// 		groupId: string;
-// 		wrapperId: string;
-// 		elementIds: string[];
-// 		wrapperPosition: Position;
-// 		wrapperSize: Size;
-// 		memberOffsets: Record<string, Position>;
-// 		parentId: string | null;
-// 		pageId: string;
-// 	};
-// }
 
 // ============================================================================
 // Style Events
@@ -402,10 +368,6 @@ export type DesignEvent =
 	| GroupResizeElementsEvent
 	| GroupRotateElementsEvent
 	| GroupUpdateStylesEvent
-	// DEPRECATED: Group events removed (groups are now regular divs)
-	// | GroupElementsEvent
-	// | UngroupElementsEvent
-	// | CreateGroupWrapperEvent
 	| UpdateStylesEvent
 	| UpdateTypographyEvent
 	| UpdateSpacingEvent

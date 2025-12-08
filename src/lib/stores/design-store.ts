@@ -1173,8 +1173,6 @@ export function manualSave(): void {
 let clipboard: Element[] = [];
 // Track if clipboard contains cut elements (vs copied elements)
 let isClipboardFromCut = false;
-// DEPRECATED: Groups are now just div elements, no separate group records needed
-// let clipboardGroups: Record<string, Group> = {};
 
 /**
  * Helper: Get the four corners of a rotated rectangle in world space
@@ -1888,11 +1886,9 @@ export function copyElements(): void {
 	isClipboardFromCut = false;
 
 	// DEPRECATED: No need to copy group records - groups are just divs now
-	// clipboardGroups = {};
 	// const elementIds = new Set(clipboard.map(el => el.id));
 	// for (const [groupId, group] of Object.entries(state.groups)) {
 	// 	if (group.wrapperId && elementIds.has(group.wrapperId)) {
-	// 		clipboardGroups[groupId] = { ...group };
 	// 	}
 	// }
 }
@@ -1919,11 +1915,9 @@ export async function cutElements(): Promise<void> {
 	isClipboardFromCut = true;
 
 	// DEPRECATED: No need to copy group records - groups are just divs now
-	// clipboardGroups = {};
 	// const elementIds = new Set(clipboard.map(el => el.id));
 	// for (const [groupId, group] of Object.entries(state.groups)) {
 	// 	if (group.wrapperId && elementIds.has(group.wrapperId)) {
-	// 		clipboardGroups[groupId] = { ...group };
 	// 	}
 	// }
 
