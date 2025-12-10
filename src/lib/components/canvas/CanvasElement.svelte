@@ -611,10 +611,9 @@ type DocumentWithCaret = Document & {
 			const isAutoLayoutReorder = parent?.autoLayout?.enabled && !element.autoLayout?.ignoreAutoLayout;
 
 			if (isAutoLayoutReorder) {
-				// Auto layout reordering: convert to relative
-				const state = get(designState);
-				const parentEl = element.parentId ? state.elements[element.parentId] : null;
-				return absoluteToRelative($interactionState.pendingPosition, parentEl, state);
+				// Auto layout reordering: pendingPosition is already in parent-relative coords
+				// SelectionOverlay calculates this from DOM to account for flexbox and rotation
+				return $interactionState.pendingPosition;
 			} else if (element.parentId) {
 				// Nested element drag: convert absolute position to parent-relative
 				const currentSize = $interactionState.pendingSize || element.size;
