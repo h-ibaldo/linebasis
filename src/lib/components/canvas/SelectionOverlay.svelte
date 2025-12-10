@@ -1822,10 +1822,24 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 						const canvasRect = canvasElement?.getBoundingClientRect();
 
 						if (canvasRect) {
+							// Calculate element's actual top-left position accounting for rotation
+							// For rotated elements (or children of rotated parents), getBoundingClientRect
+							// returns the bounding box, not the actual element position
+							const totalRotation = getCumulativeRotation(element) + (element.rotation || 0);
+							const elementSize = element.size;
+
+							// Get actual top-left position accounting for rotation
+							const actualTopLeft = calculateActualTopLeftForRotated(
+								rect,
+								elementSize,
+								totalRotation,
+								viewport.scale
+							);
+
 							// Convert screen position to canvas coordinates
 							// This is the element's top-left in canvas space
-							const elementCanvasX = (rect.left - canvasRect.left - viewport.x) / viewport.scale;
-							const elementCanvasY = (rect.top - canvasRect.top - viewport.y) / viewport.scale;
+							const elementCanvasX = (actualTopLeft.left - canvasRect.left - viewport.x) / viewport.scale;
+							const elementCanvasY = (actualTopLeft.top - canvasRect.top - viewport.y) / viewport.scale;
 
 							// Store offset from cursor to element's top-left IN CANVAS SPACE
 							const cursorCanvasX = (e.clientX - canvasRect.left - viewport.x) / viewport.scale;
@@ -1837,9 +1851,10 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 							};
 
 							// Store element size for placeholder
+							// For rotated elements, use actual element size, not bounding box size
 							reorderElementSize = {
-								width: rect.width / viewport.scale,
-								height: rect.height / viewport.scale
+								width: elementSize.width,
+								height: elementSize.height
 							};
 
 							// Initialize pendingPosition to element's current visual position
