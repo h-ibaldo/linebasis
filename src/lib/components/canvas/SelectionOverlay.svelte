@@ -1896,10 +1896,6 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 							};
 
 							// Initialize pendingPosition to element's position in parent's local space
-							console.log('=== AUTO-LAYOUT CHILD MOUSEDOWN ===');
-							console.log('Element ID: ' + element.id);
-							console.log('Parent-relative position X: ' + parentRelativeX + ' Y: ' + parentRelativeY);
-							console.log('Setting pendingPosition to parent-relative coords');
 							pendingPosition = {
 								x: parentRelativeX,
 								y: parentRelativeY
