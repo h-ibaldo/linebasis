@@ -1873,8 +1873,26 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 							const localDy = canvasDx * sin + canvasDy * cos;
 
 							// Convert from center-relative to top-left-relative
-							const parentRelativeX = localDx + parentSize.width / 2 - elementSize.width / 2;
-							const parentRelativeY = localDy + parentSize.height / 2 - elementSize.height / 2;
+							let parentRelativeX = localDx + parentSize.width / 2 - elementSize.width / 2;
+							let parentRelativeY = localDy + parentSize.height / 2 - elementSize.height / 2;
+
+							// CRITICAL FIX: Account for margin on rotated auto-layout children
+							// Before drag: element has position:relative with margin for bounding box
+							// After drag: element has position:absolute with NO margin
+							// The margin pushes the element inward, so when we remove it with absolute positioning,
+							// we need to subtract the margin to keep the element in the same visual position
+							if (element.rotation && element.rotation !== 0) {
+								const angleRad = element.rotation * (Math.PI / 180);
+								const cos = Math.abs(Math.cos(angleRad));
+								const sin = Math.abs(Math.sin(angleRad));
+								const boundingWidth = elementSize.width * cos + elementSize.height * sin;
+								const boundingHeight = elementSize.width * sin + elementSize.height * cos;
+								const marginX = (boundingWidth - elementSize.width) / 2;
+								const marginY = (boundingHeight - elementSize.height) / 2;
+
+								parentRelativeX -= marginX;
+								parentRelativeY -= marginY;
+							}
 
 							// Convert screen position to canvas coordinates (for cursor offset calculation)
 							const elementCanvasX = (actualTopLeft.left - canvasRect.left - viewport.x) / viewport.scale;
@@ -2286,8 +2304,23 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 						const localDy = canvasDx * sin + canvasDy * cos;
 
 						// Convert from center-relative to top-left-relative
-						const parentRelativeX = localDx + parent.size.width / 2 - draggedElement.size.width / 2;
-						const parentRelativeY = localDy + parent.size.height / 2 - draggedElement.size.height / 2;
+						let parentRelativeX = localDx + parent.size.width / 2 - draggedElement.size.width / 2;
+						let parentRelativeY = localDy + parent.size.height / 2 - draggedElement.size.height / 2;
+
+						// CRITICAL FIX: Account for margin on rotated auto-layout children
+						// Same fix as mousedown handler - subtract margin to compensate for position change
+						if (draggedElement.rotation && draggedElement.rotation !== 0) {
+							const angleRad = draggedElement.rotation * (Math.PI / 180);
+							const cos = Math.abs(Math.cos(angleRad));
+							const sin = Math.abs(Math.sin(angleRad));
+							const boundingWidth = draggedElement.size.width * cos + draggedElement.size.height * sin;
+							const boundingHeight = draggedElement.size.width * sin + draggedElement.size.height * cos;
+							const marginX = (boundingWidth - draggedElement.size.width) / 2;
+							const marginY = (boundingHeight - draggedElement.size.height) / 2;
+
+							parentRelativeX -= marginX;
+							parentRelativeY -= marginY;
+						}
 
 						// Set pending position to parent-relative coordinates
 						pendingPosition = {
