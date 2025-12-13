@@ -486,6 +486,37 @@
 			</div>
 		{:else}
 			<div class="layers-tree">
+				<!-- Drop zone above first item (for groups at top) -->
+				{#if draggedElementId && layerItems.length > 0}
+					<div
+						class="top-drop-zone"
+						class:drop-target={dropTarget?.elementId === 'TOP' && dropTarget?.position === 'before'}
+						on:dragover={(e) => {
+							e.preventDefault();
+							dropTarget = { elementId: 'TOP', position: 'before' };
+						}}
+						on:drop={async (e) => {
+							e.preventDefault();
+							if (!draggedElementId) return;
+
+							// Get the first item (will be the target)
+							const firstItem = layerItems[0];
+							const firstElementId = firstItem.type === 'group'
+								? firstItem.groupElements?.[0]?.id
+								: firstItem.element?.id;
+
+							if (firstElementId) {
+								// Drop before the first element
+								await handleDrop(firstElementId, 'before');
+							}
+						}}
+					>
+						{#if dropTarget?.elementId === 'TOP'}
+							<div class="drop-indicator"></div>
+						{/if}
+					</div>
+				{/if}
+
 				{#each layerItems as item (item.id)}
 					{#if item.type === 'group' && item.groupElements}
 						<!-- Group item -->
@@ -596,6 +627,26 @@
 
 	.layers-tree {
 		padding: 8px 0;
+	}
+
+	.top-drop-zone {
+		height: 8px;
+		width: 100%;
+		position: relative;
+	}
+
+	.top-drop-zone .drop-indicator {
+		position: absolute;
+		top: 0;
+		left: 8px;
+		right: 8px;
+		height: 2px;
+		background-color: #007aff;
+		border-radius: 1px;
+	}
+
+	.top-drop-zone.drop-target {
+		background-color: rgba(0, 122, 255, 0.1);
 	}
 
 	.group-item {
