@@ -156,7 +156,7 @@ type DocumentWithCaret = Document & {
 
 			// If clicking a group element while another element from the same group is isolated,
 			// isolate this element too (sticky isolation for multi-selection)
-			if (groupId && state.groups[groupId] &&
+			if (groupId &&
 			    currentlyIsolatedElement &&
 			    currentlyIsolatedElement.groupId === groupId &&
 			    currentlyIsolatedId !== element.id) {
@@ -198,7 +198,7 @@ type DocumentWithCaret = Document & {
 		let elementsToDrag: Element[] = [];
 
 		// PRIORITY 1: Double-click on grouped element = ALWAYS isolate it
-		if (mightBeDoubleClick && groupId && state.groups[groupId]) {
+		if (mightBeDoubleClick && groupId) {
 			// Set isolation BEFORE selection to ensure SelectionOverlay sees it immediately
 			isIsolatedFromGroup = true;
 			isolateElementFromGroup(element.id);
@@ -210,7 +210,7 @@ type DocumentWithCaret = Document & {
 		else if (isIsolatedFromGroup && currentSelection.includes(element.id)) {
 			// If multiple elements are selected and they're all from the same group,
 			// drag all of them together (sticky isolation mode)
-			if (isPartOfMultiSelection && groupId && state.groups[groupId]) {
+			if (isPartOfMultiSelection && groupId) {
 				const allFromSameGroup = currentSelection.every(id => {
 					const el = state.elements[id];
 					return el?.groupId === groupId;
@@ -227,7 +227,7 @@ type DocumentWithCaret = Document & {
 		// PRIORITY 2.5: Sticky isolation mode - clicking another element from the same group
 		// while an element is already isolated should isolate the clicked element
 		// This MUST come before multi-selection check to prevent group UI flash
-		else if (groupId && state.groups[groupId]) {
+		else if (groupId) {
 			const currentlyIsolatedId = $interactionState.isolatedElementId;
 			const currentlyIsolatedElement = currentlyIsolatedId ? state.elements[currentlyIsolatedId] : null;
 
@@ -245,7 +245,10 @@ type DocumentWithCaret = Document & {
 			}
 			// PRIORITY 4: First click on grouped element = select entire group
 			else {
-				const groupElementIds = state.groups[groupId].elementIds;
+				// Find all elements with the same groupId
+				const groupElementIds = Object.values(state.elements)
+					.filter(el => el.groupId === groupId)
+					.map(el => el.id);
 				selectElements(groupElementIds);
 				isIsolatedFromGroup = false;
 				elementsToDrag = groupElementIds
