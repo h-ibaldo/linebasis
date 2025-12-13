@@ -582,7 +582,9 @@
 							>
 								<button
 									class="expand-btn"
+									draggable={false}
 									on:click={(e) => toggleGroupExpanded(item.id, e)}
+									on:mousedown={(e) => e.stopPropagation()}
 									aria-label={!collapsedGroups[item.id] ? 'Collapse' : 'Expand'}
 								>
 									<span class="arrow" class:expanded={!collapsedGroups[item.id]}>▸</span>
