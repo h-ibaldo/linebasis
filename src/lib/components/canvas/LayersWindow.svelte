@@ -579,7 +579,9 @@
 
 									if (!draggedGroupId || !dropTarget || !item.groupElements || item.groupElements.length === 0) return;
 
-									handleGroupDrop(item.groupElements[0].id, dropTarget.position as 'before' | 'after');
+									// dropTarget.position is always 'before' or 'after' for groups (never 'inside')
+									if (dropTarget.position === 'inside') return;
+									handleGroupDrop(item.groupElements[0].id, dropTarget.position);
 								}}
 							>
 								<button

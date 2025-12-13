@@ -1032,7 +1032,6 @@ function handleUngroupElements(state: DesignState, event: UngroupElementsEvent):
 
 function handleReorderGroup(state: DesignState, event: ReorderGroupEvent): DesignState {
 	const { groupId, targetElementId, position } = event.payload;
-	console.log('🟣 handleReorderGroup:', { groupId, targetElementId, position });
 
 	// Get all elements in the group
 	const groupElements = Object.values(state.elements)
@@ -1046,10 +1045,7 @@ function handleReorderGroup(state: DesignState, event: ReorderGroupEvent): Desig
 			return aIndex - bIndex;
 		});
 
-	console.log('🟣 Group elements found:', groupElements.length, groupElements.map(el => el.id));
-
 	if (groupElements.length === 0) {
-		console.log('🔴 No group elements found, returning state unchanged');
 		return state;
 	}
 
@@ -1062,25 +1058,40 @@ function handleReorderGroup(state: DesignState, event: ReorderGroupEvent): Desig
 	if (!page) return state;
 
 	const newPages = { ...state.pages };
-	let canvasElements = [...page.canvasElements];
+	const canvasElements = [...page.canvasElements];
+	const groupElementIds = groupElements.map(el => el.id);
 
-	// Remove all group elements from current positions
-	canvasElements = canvasElements.filter(id => !groupElements.some(el => el.id === id));
-
-	// Find target index
+	// Find target index BEFORE removing group elements
 	const targetIndex = canvasElements.indexOf(targetElementId);
 	if (targetIndex === -1) return state;
 
+	// Remove all group elements from current positions
+	const filteredElements = canvasElements.filter(id => !groupElementIds.includes(id));
+
+	// Find the NEW target index after removal (it may have shifted)
+	const newTargetIndex = filteredElements.indexOf(targetElementId);
+	if (newTargetIndex === -1) return state;
+
 	// Calculate insertion index based on position
-	const insertIndex = position === 'before' ? targetIndex + 1 : targetIndex;
+	// Array: [A(0), B(1), C(2)] where 0=bottom layer, 2=top layer
+	// Visual display (reversed): C, B, A (top layer C shows first)
+	//
+	// When hovering over B in the UI:
+	//   - Mouse in TOP half: position='before', wants ABOVE B visually
+	//     → Between C and B in UI → Array: [A, B, ★, C] → Index = targetIndex + 1
+	//   - Mouse in BOTTOM half: position='after', wants BELOW B visually
+	//     → Between B and A in UI → Array: [A, ★, B, C] → Index = targetIndex
+	//
+	// After removing group elements, we use newTargetIndex (target's position in filtered array)
+	// No adjustment needed because newTargetIndex already accounts for the removed elements
+	const insertIndex = position === 'before' ? newTargetIndex + 1 : newTargetIndex;
 
 	// Insert all group elements at the new position
-	const groupElementIds = groupElements.map(el => el.id);
-	canvasElements.splice(insertIndex, 0, ...groupElementIds);
+	filteredElements.splice(insertIndex, 0, ...groupElementIds);
 
 	newPages[firstElement.pageId] = {
 		...page,
-		canvasElements
+		canvasElements: filteredElements
 	};
 
 	return {
