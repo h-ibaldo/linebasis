@@ -500,7 +500,7 @@
 		{:else}
 			<div class="layers-tree">
 				<!-- Drop zone above first item (for groups at top) -->
-				{#if draggedElementId && layerItems.length > 0}
+				{#if (draggedElementId || draggedGroupId) && layerItems.length > 0}
 					<div
 						class="top-drop-zone"
 						class:drop-target={dropTarget?.elementId === 'TOP' && dropTarget?.position === 'before'}
@@ -510,7 +510,6 @@
 						}}
 						on:drop={async (e) => {
 							e.preventDefault();
-							if (!draggedElementId) return;
 
 							// Get the first item (will be the target)
 							const firstItem = layerItems[0];
@@ -520,7 +519,11 @@
 
 							if (firstElementId) {
 								// Drop before the first element
-								await handleDrop(firstElementId, 'before');
+								if (draggedGroupId) {
+									await handleGroupDrop(firstElementId, 'before');
+								} else if (draggedElementId) {
+									await handleDrop(firstElementId, 'before');
+								}
 							}
 						}}
 					>
@@ -603,7 +606,9 @@
 										onDragEnd={handleDragEnd}
 										onDragOver={handleDragOver}
 										onDrop={handleDrop}
+										onGroupDrop={handleGroupDrop}
 										{draggedElementId}
+										{draggedGroupId}
 										{dropTarget}
 										depth={1}
 										on:contextmenu={handleContextMenuOpen}
@@ -627,7 +632,9 @@
 							onDragEnd={handleDragEnd}
 							onDragOver={handleDragOver}
 							onDrop={handleDrop}
+							onGroupDrop={handleGroupDrop}
 							{draggedElementId}
+							{draggedGroupId}
 							{dropTarget}
 							on:contextmenu={handleContextMenuOpen}
 						/>

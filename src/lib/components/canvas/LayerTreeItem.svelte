@@ -27,7 +27,9 @@
 	export let onDragEnd: () => void;
 	export let onDragOver: (targetElementId: string, position: 'before' | 'after' | 'inside') => void;
 	export let onDrop: (targetElementId: string, position: 'before' | 'after' | 'inside') => void;
+	export let onGroupDrop: ((targetElementId: string, position: 'before' | 'after') => void) | undefined = undefined;
 	export let draggedElementId: string | null = null;
+	export let draggedGroupId: string | null = null;
 	export let dropTarget: { elementId: string; position: 'before' | 'after' | 'inside' } | null = null;
 	export let depth: number = 0;
 	export let onSelectGroup: ((groupId: string) => void) | undefined = undefined;
@@ -229,13 +231,11 @@
 		e.preventDefault();
 		e.stopPropagation();
 
-		if (!draggedElementId || draggedElementId === element.id) return;
+		// Accept either element or group drags
+		if ((!draggedElementId && !draggedGroupId) || draggedElementId === element.id) return;
 
-		// Prevent dropping parent into its own child
-		if (isAncestor(draggedElementId, element.id)) return;
-
-		const draggedElement = elements[draggedElementId];
-		if (!draggedElement) return;
+		// Prevent dropping parent into its own child (only for elements, not groups)
+		if (draggedElementId && isAncestor(draggedElementId, element.id)) return;
 
 		// Determine drop position based on mouse Y position
 		const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -244,19 +244,29 @@
 
 		let position: 'before' | 'after' | 'inside';
 
-		// Check if dragged element and target element are siblings (same parent)
-		const areSiblings = draggedElement.parentId === element.parentId;
+		// Groups can only be dropped before/after (not inside)
+		if (draggedGroupId) {
+			position = y < height / 2 ? 'before' : 'after';
+		} else if (draggedElementId) {
+			const draggedElement = elements[draggedElementId];
+			if (!draggedElement) return;
 
-		// Only allow "inside" drop if:
-		// 1. Element has children and is expanded
-		// 2. Mouse is in the middle zone (30-70%)
-		// 3. Elements are NOT siblings (different parents or dragging root into nested)
-		if (hasChildren && isExpanded && y > height * 0.3 && y < height * 0.7 && !areSiblings) {
-			position = 'inside';
-		} else if (y < height / 2) {
-			position = 'before';
+			// Check if dragged element and target element are siblings (same parent)
+			const areSiblings = draggedElement.parentId === element.parentId;
+
+			// Only allow "inside" drop if:
+			// 1. Element has children and is expanded
+			// 2. Mouse is in the middle zone (30-70%)
+			// 3. Elements are NOT siblings (different parents or dragging root into nested)
+			if (hasChildren && isExpanded && y > height * 0.3 && y < height * 0.7 && !areSiblings) {
+				position = 'inside';
+			} else if (y < height / 2) {
+				position = 'before';
+			} else {
+				position = 'after';
+			}
 		} else {
-			position = 'after';
+			return;
 		}
 
 		onDragOver(element.id, position);
@@ -266,11 +276,18 @@
 		e.preventDefault();
 		e.stopPropagation();
 
-		if (!draggedElementId || draggedElementId === element.id) return;
-		if (isAncestor(draggedElementId, element.id)) return;
+		if ((!draggedElementId && !draggedGroupId) || draggedElementId === element.id) return;
+		if (draggedElementId && isAncestor(draggedElementId, element.id)) return;
 
 		if (dropPosition) {
-			onDrop(element.id, dropPosition);
+			// Handle group drops
+			if (draggedGroupId && onGroupDrop && (dropPosition === 'before' || dropPosition === 'after')) {
+				onGroupDrop(element.id, dropPosition);
+			}
+			// Handle element drops
+			else if (draggedElementId) {
+				onDrop(element.id, dropPosition);
+			}
 		}
 	}
 
@@ -428,7 +445,9 @@
 								{onDragEnd}
 								{onDragOver}
 								{onDrop}
+								{onGroupDrop}
 								{draggedElementId}
+								{draggedGroupId}
 								{dropTarget}
 								depth={depth + 2}
 								{onSelectGroup}
@@ -452,7 +471,9 @@
 					{onDragEnd}
 					{onDragOver}
 					{onDrop}
+					{onGroupDrop}
 					{draggedElementId}
+					{draggedGroupId}
 					{dropTarget}
 					depth={depth + 1}
 					{onSelectGroup}
