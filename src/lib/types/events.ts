@@ -27,10 +27,9 @@ export type EventType =
 	| 'GROUP_MOVE_ELEMENTS'
 	| 'GROUP_RESIZE_ELEMENTS'
 	| 'GROUP_ROTATE_ELEMENTS'
-	// Group operations (DEPRECATED - groups are now regular divs)
-	// | 'GROUP_ELEMENTS'
-	// | 'UNGROUP_ELEMENTS'
-	// | 'CREATE_GROUP_WRAPPER'
+	// Group operations
+	| 'CREATE_GROUP'
+	| 'UNGROUP_ELEMENTS'
 	// Style operations
 	| 'UPDATE_STYLES'
 	| 'GROUP_UPDATE_STYLES'
@@ -221,7 +220,20 @@ export interface GroupUpdateStylesEvent extends BaseEvent {
 	};
 }
 
-// ============================================================================
+export interface CreateGroupEvent extends BaseEvent {
+	type: 'CREATE_GROUP';
+	payload: {
+		groupId: string;
+		elementIds: string[];
+	};
+}
+
+export interface UngroupElementsEvent extends BaseEvent {
+	type: 'UNGROUP_ELEMENTS';
+	payload: {
+		groupId: string;
+	};
+}
 
 // ============================================================================
 // Style Events
@@ -368,6 +380,8 @@ export type DesignEvent =
 	| GroupResizeElementsEvent
 	| GroupRotateElementsEvent
 	| GroupUpdateStylesEvent
+	| CreateGroupEvent
+	| UngroupElementsEvent
 	| UpdateStylesEvent
 	| UpdateTypographyEvent
 	| UpdateSpacingEvent

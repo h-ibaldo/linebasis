@@ -31,9 +31,8 @@ import type {
 	GroupResizeElementsEvent,
 	GroupRotateElementsEvent,
 	GroupUpdateStylesEvent,
-	// GroupElementsEvent, // DEPRECATED
-	// UngroupElementsEvent, // DEPRECATED
-	// CreateGroupWrapperEvent, // DEPRECATED
+	CreateGroupEvent,
+	UngroupElementsEvent,
 	UpdateStylesEvent,
 	UpdateTypographyEvent,
 	UpdateSpacingEvent,
@@ -188,13 +187,11 @@ export function reduceEvent(state: DesignState, event: DesignEvent): DesignState
 		case 'GROUP_UPDATE_STYLES':
 			return handleGroupUpdateStyles(state, event);
 
-		// Group operations (DEPRECATED - groups are now regular divs)
-		// case 'GROUP_ELEMENTS':
-		// 	return handleGroupElements(state, event);
-		// case 'UNGROUP_ELEMENTS':
-		// 	return handleUngroupElements(state, event);
-		// case 'CREATE_GROUP_WRAPPER':
-		// 	return handleCreateGroupWrapper(state, event);
+		// Group operations
+		case 'CREATE_GROUP':
+			return handleCreateGroup(state, event);
+		case 'UNGROUP_ELEMENTS':
+			return handleUngroupElements(state, event);
 
 		// Style operations
 		case 'UPDATE_STYLES':
@@ -999,6 +996,35 @@ function handleGroupUpdateStyles(state: DesignState, event: GroupUpdateStylesEve
 		...state,
 		elements: newElements
 	};
+}
+
+function handleCreateGroup(state: DesignState, event: CreateGroupEvent): DesignState {
+	const { groupId, elementIds } = event.payload;
+	const newElements = { ...state.elements };
+
+	// Simply assign the same groupId to all elements
+	for (const id of elementIds) {
+		const el = newElements[id];
+		if (el) {
+			newElements[id] = { ...el, groupId };
+		}
+	}
+
+	return { ...state, elements: newElements };
+}
+
+function handleUngroupElements(state: DesignState, event: UngroupElementsEvent): DesignState {
+	const { groupId } = event.payload;
+	const newElements = { ...state.elements };
+
+	// Remove groupId from all elements with matching groupId
+	for (const el of Object.values(newElements)) {
+		if (el.groupId === groupId) {
+			newElements[el.id] = { ...el, groupId: null };
+		}
+	}
+
+	return { ...state, elements: newElements };
 }
 
 // ============================================================================

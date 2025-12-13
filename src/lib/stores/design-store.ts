@@ -1530,98 +1530,24 @@ export async function unwrapSelectedDiv(): Promise<void> {
 
 /**
  * Group selected elements
- * Grouped elements behave as if they are selected together - property changes affect all group members
+ * Simply assigns the same groupId to all selected elements
  */
-// DEPRECATED: Groups are now regular divs - use CREATE_ELEMENT instead
 export async function groupElements(): Promise<void> {
 	const selected = get(selectedElements);
 	if (selected.length < 2) return; // Need at least 2 elements to group
 
-	const state = get(designState);
-	const pageId = state.currentPageId;
-	if (!pageId) return;
-
-	// Check if any selected element is a group wrapper (not allowed)
-	const hasGroupWrapper = selected.some(el => el.isGroupWrapper);
-	if (hasGroupWrapper) {
-		console.error('Cannot group a group wrapper. Ungroup first.');
-		return;
-	}
-
-	// Find the common parent of all selected elements
-	const firstParentId = selected[0].parentId;
-	const commonParent = selected.every(el => el.parentId === firstParentId)
-		? firstParentId
-		: null;
-
-	// Calculate bounding box of all selected elements (accounting for rotation)
-	let minX = Infinity;
-	let minY = Infinity;
-	let maxX = -Infinity;
-	let maxY = -Infinity;
-
-	for (const el of selected) {
-		const rotation = el.rotation || 0;
-
-		if (rotation !== 0) {
-			// For rotated elements, get all four corners and find their bounds
-			const corners = getRotatedCorners({
-				x: el.position.x,
-				y: el.position.y,
-				width: el.size.width || 0,
-				height: el.size.height || 0,
-				rotation
-			});
-
-			// Find min/max across all corners
-			for (const corner of corners) {
-				minX = Math.min(minX, corner.x);
-				minY = Math.min(minY, corner.y);
-				maxX = Math.max(maxX, corner.x);
-				maxY = Math.max(maxY, corner.y);
-			}
-		} else {
-			// For non-rotated elements, use simple bounds
-			minX = Math.min(minX, el.position.x);
-			minY = Math.min(minY, el.position.y);
-			maxX = Math.max(maxX, el.position.x + (el.size.width || 0));
-			maxY = Math.max(maxY, el.position.y + (el.size.height || 0));
-		}
-	}
-
-	const wrapperWidth = maxX - minX;
-	const wrapperHeight = maxY - minY;
-
-	// Calculate member offsets (position relative to wrapper)
-	const memberOffsets: Record<string, { x: number; y: number }> = {};
-	for (const el of selected) {
-		memberOffsets[el.id] = {
-			x: el.position.x - minX,
-			y: el.position.y - minY
-		};
-	}
-
-	// Generate IDs
-	const groupId = uuidv4();
-	const wrapperId = uuidv4();
 	const elementIds = selected.map(el => el.id);
+	const groupId = uuidv4();
 
-	// Dispatch CREATE_GROUP_WRAPPER event
 	await dispatch({
 		id: uuidv4(),
-		type: 'CREATE_GROUP_WRAPPER',
+		type: 'CREATE_GROUP',
 		timestamp: Date.now(),
-		payload: {
-			groupId,
-			wrapperId,
-			elementIds,
-			wrapperPosition: { x: minX, y: minY },
-			wrapperSize: { width: wrapperWidth, height: wrapperHeight },
-			memberOffsets,
-			parentId: commonParent,
-			pageId
-		}
+		payload: { groupId, elementIds }
 	});
+
+	// Keep selection on the grouped elements
+	selectElements(elementIds);
 }
 
 /**
