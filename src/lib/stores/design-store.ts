@@ -1587,6 +1587,7 @@ export async function reorderGroup(
 	targetElementId: string,
 	position: 'before' | 'after'
 ): Promise<void> {
+	console.log('🔵 reorderGroup called:', { groupId, targetElementId, position });
 	await dispatch({
 		id: uuidv4(),
 		type: 'REORDER_GROUP',
@@ -1597,6 +1598,7 @@ export async function reorderGroup(
 			position
 		}
 	});
+	console.log('🔵 reorderGroup dispatched');
 }
 
 /**

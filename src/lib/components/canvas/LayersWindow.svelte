@@ -218,10 +218,12 @@
 
 	// Group drag handlers
 	function handleGroupDragStart(groupId: string) {
+		console.log('🟢 Group drag started:', groupId);
 		draggedGroupId = groupId;
 	}
 
 	async function handleGroupDrop(targetElementId: string, position: 'before' | 'after') {
+		console.log('🟢 Group drop:', { draggedGroupId, targetElementId, position });
 		if (!draggedGroupId) return;
 		await reorderGroup(draggedGroupId, targetElementId, position);
 		handleDragEnd();

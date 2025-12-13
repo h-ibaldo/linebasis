@@ -1032,6 +1032,7 @@ function handleUngroupElements(state: DesignState, event: UngroupElementsEvent):
 
 function handleReorderGroup(state: DesignState, event: ReorderGroupEvent): DesignState {
 	const { groupId, targetElementId, position } = event.payload;
+	console.log('🟣 handleReorderGroup:', { groupId, targetElementId, position });
 
 	// Get all elements in the group
 	const groupElements = Object.values(state.elements)
@@ -1045,7 +1046,12 @@ function handleReorderGroup(state: DesignState, event: ReorderGroupEvent): Desig
 			return aIndex - bIndex;
 		});
 
-	if (groupElements.length === 0) return state;
+	console.log('🟣 Group elements found:', groupElements.length, groupElements.map(el => el.id));
+
+	if (groupElements.length === 0) {
+		console.log('🔴 No group elements found, returning state unchanged');
+		return state;
+	}
 
 	const targetElement = state.elements[targetElementId];
 	if (!targetElement) return state;
