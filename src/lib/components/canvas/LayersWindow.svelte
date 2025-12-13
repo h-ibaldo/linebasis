@@ -242,6 +242,23 @@
 
 		if (!draggedElement || !targetElement) return;
 
+		// Check if target is in a group and we're dropping before/after it
+		// If so, add dragged element to the same group
+		if ((position === 'before' || position === 'after') && targetElement.groupId) {
+			// If dragged element is not already in this group, add it
+			if (draggedElement.groupId !== targetElement.groupId) {
+				await dispatch({
+					id: uuidv4(),
+					type: 'UPDATE_ELEMENT',
+					timestamp: Date.now(),
+					payload: {
+						elementId: draggedElementId,
+						changes: { groupId: targetElement.groupId }
+					}
+				});
+			}
+		}
+
 		let newParentId: string | null;
 		let newIndex: number;
 
