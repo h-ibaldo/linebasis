@@ -12,13 +12,14 @@
 	 * - Drag to reorder (array position changes, not z-index)
 	 */
 
-	import { designState, selectElement, selectElements, toggleVisibility, toggleLock, renameElement, shiftElementLayer, reorderElement, toggleView } from '$lib/stores/design-store';
+	import { designState, selectElement, selectElements, toggleVisibility, toggleLock, renameElement, shiftElementLayer, reorderElement, toggleView, dispatch } from '$lib/stores/design-store';
 	import { isolateElementFromGroup } from '$lib/stores/interaction-store';
 	import FloatingWindow from '$lib/components/ui/FloatingWindow.svelte';
 	import LayerTreeItem from './LayerTreeItem.svelte';
 	import ContextMenu from '$lib/components/ui/ContextMenu.svelte';
 	import type { Element, Group } from '$lib/types/events';
 	import { onMount, tick } from 'svelte';
+	import { v4 as uuidv4 } from 'uuid';
 
 	interface MenuItem {
 		id: string;
@@ -211,6 +212,26 @@
 
 	function handleDragOver(targetElementId: string, position: 'before' | 'after' | 'inside') {
 		dropTarget = { elementId: targetElementId, position };
+	}
+
+	async function handleDropOntoGroup(groupId: string) {
+		if (!draggedElementId) return;
+
+		const draggedElement = $designState.elements[draggedElementId];
+		if (!draggedElement) return;
+
+		// Add element to group by setting its groupId
+		await dispatch({
+			id: uuidv4(),
+			type: 'UPDATE_ELEMENT',
+			timestamp: Date.now(),
+			payload: {
+				elementId: draggedElementId,
+				changes: { groupId }
+			}
+		});
+
+		handleDragEnd();
 	}
 
 	async function handleDrop(targetElementId: string, position: 'before' | 'after' | 'inside') {
@@ -462,10 +483,19 @@
 							<div
 								class="group-header"
 								class:selected={item.groupElements.some(el => selectedIds.includes(el.id))}
+								class:drop-target={draggedElementId && dropTarget?.elementId === item.id}
 								on:click={() => handleSelectGroup(item.id)}
+								on:dragover={(e) => {
+									e.preventDefault();
+									dropTarget = { elementId: item.id, position: 'inside' };
+								}}
+								on:drop={(e) => {
+									e.preventDefault();
+									handleDropOntoGroup(item.id);
+								}}
 							>
-								<button 
-									class="expand-btn" 
+								<button
+									class="expand-btn"
 									on:click={(e) => toggleGroupExpanded(item.id, e)}
 									aria-label={!collapsedGroups[item.id] ? 'Collapse' : 'Expand'}
 								>
@@ -637,5 +667,10 @@
 	.group-children {
 		/* LayerTreeItem handles its own depth padding */
 		padding: 0;
+	}
+
+	.group-header.drop-target {
+		background-color: rgba(66, 133, 244, 0.2);
+		border: 1px solid rgba(66, 133, 244, 0.5);
 	}
 </style>
