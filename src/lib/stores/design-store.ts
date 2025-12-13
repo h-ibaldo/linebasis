@@ -2815,6 +2815,13 @@ export function setupKeyboardShortcuts(): (() => void) | undefined {
 				moveLayerForward(selected);
 			}
 		}
+		// Cmd+G - Group selected elements
+		if ((e.metaKey || e.ctrlKey) && e.key === 'g' && !isTyping) {
+			e.preventDefault();
+			groupElements();
+			return;
+		}
+
 		// Cmd+Backspace (Mac) or Ctrl+Backspace (Windows) - Unwrap selected div
 		if (
 			(e.metaKey || e.ctrlKey) &&
