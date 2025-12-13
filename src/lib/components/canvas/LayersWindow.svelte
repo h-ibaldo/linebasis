@@ -242,18 +242,31 @@
 
 		if (!draggedElement || !targetElement) return;
 
-		// Check if target is in a group and we're dropping before/after it
-		// If so, add dragged element to the same group
-		if ((position === 'before' || position === 'after') && targetElement.groupId) {
-			// If dragged element is not already in this group, add it
-			if (draggedElement.groupId !== targetElement.groupId) {
+		// Handle group membership when dropping before/after
+		if (position === 'before' || position === 'after') {
+			// If target is in a group, add dragged element to the same group
+			if (targetElement.groupId) {
+				if (draggedElement.groupId !== targetElement.groupId) {
+					await dispatch({
+						id: uuidv4(),
+						type: 'UPDATE_ELEMENT',
+						timestamp: Date.now(),
+						payload: {
+							elementId: draggedElementId,
+							changes: { groupId: targetElement.groupId }
+						}
+					});
+				}
+			}
+			// If target is NOT in a group but dragged element IS in a group, remove from group
+			else if (draggedElement.groupId) {
 				await dispatch({
 					id: uuidv4(),
 					type: 'UPDATE_ELEMENT',
 					timestamp: Date.now(),
 					payload: {
 						elementId: draggedElementId,
-						changes: { groupId: targetElement.groupId }
+						changes: { groupId: null }
 					}
 				});
 			}
