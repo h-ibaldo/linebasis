@@ -30,6 +30,7 @@ export type EventType =
 	// Group operations
 	| 'CREATE_GROUP'
 	| 'UNGROUP_ELEMENTS'
+	| 'REORDER_GROUP'
 	// Style operations
 	| 'UPDATE_STYLES'
 	| 'GROUP_UPDATE_STYLES'
@@ -235,6 +236,15 @@ export interface UngroupElementsEvent extends BaseEvent {
 	};
 }
 
+export interface ReorderGroupEvent extends BaseEvent {
+	type: 'REORDER_GROUP';
+	payload: {
+		groupId: string;
+		targetElementId: string; // Element to reorder relative to
+		position: 'before' | 'after'; // Where to place group relative to target
+	};
+}
+
 // ============================================================================
 // Style Events
 // ============================================================================
@@ -382,6 +392,7 @@ export type DesignEvent =
 	| GroupUpdateStylesEvent
 	| CreateGroupEvent
 	| UngroupElementsEvent
+	| ReorderGroupEvent
 	| UpdateStylesEvent
 	| UpdateTypographyEvent
 	| UpdateSpacingEvent

@@ -1580,6 +1580,26 @@ export async function ungroupElements(): Promise<void> {
 }
 
 /**
+ * Reorder an entire group to a new position in the DOM
+ */
+export async function reorderGroup(
+	groupId: string,
+	targetElementId: string,
+	position: 'before' | 'after'
+): Promise<void> {
+	await dispatch({
+		id: uuidv4(),
+		type: 'REORDER_GROUP',
+		timestamp: Date.now(),
+		payload: {
+			groupId,
+			targetElementId,
+			position
+		}
+	});
+}
+
+/**
  * Toggle auto-layout on selected elements
  * - If one div is selected: toggle its auto-layout property
  * - If multiple elements are selected: wrap them in a div with auto-layout enabled

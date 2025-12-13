@@ -12,7 +12,7 @@
 	 * - Drag to reorder (array position changes, not z-index)
 	 */
 
-	import { designState, selectElement, selectElements, toggleVisibility, toggleLock, renameElement, shiftElementLayer, reorderElement, toggleView, dispatch } from '$lib/stores/design-store';
+	import { designState, selectElement, selectElements, toggleVisibility, toggleLock, renameElement, shiftElementLayer, reorderElement, toggleView, dispatch, reorderGroup } from '$lib/stores/design-store';
 	import { isolateElementFromGroup } from '$lib/stores/interaction-store';
 	import FloatingWindow from '$lib/components/ui/FloatingWindow.svelte';
 	import LayerTreeItem from './LayerTreeItem.svelte';
@@ -68,6 +68,7 @@
 
 	// Drag and drop state
 	let draggedElementId: string | null = null;
+	let draggedGroupId: string | null = null; // Track when dragging a group
 	let draggedParentId: string | null = null;
 	let dropTargetIndex: number | null = null;
 	let dropTarget: { elementId: string; position: 'before' | 'after' | 'inside' } | null = null;
@@ -205,6 +206,7 @@
 
 	function handleDragEnd() {
 		draggedElementId = null;
+		draggedGroupId = null;
 		draggedParentId = null;
 		dropTarget = null;
 		dropTargetIndex = null;
@@ -212,6 +214,17 @@
 
 	function handleDragOver(targetElementId: string, position: 'before' | 'after' | 'inside') {
 		dropTarget = { elementId: targetElementId, position };
+	}
+
+	// Group drag handlers
+	function handleGroupDragStart(groupId: string) {
+		draggedGroupId = groupId;
+	}
+
+	async function handleGroupDrop(targetElementId: string, position: 'before' | 'after') {
+		if (!draggedGroupId) return;
+		await reorderGroup(draggedGroupId, targetElementId, position);
+		handleDragEnd();
 	}
 
 	async function handleDrop(targetElementId: string, position: 'before' | 'after' | 'inside') {
@@ -524,7 +537,45 @@
 							<div
 								class="group-header"
 								class:selected={item.groupElements.some(el => selectedIds.includes(el.id))}
+								class:dragging={draggedGroupId === item.id}
+								draggable={true}
 								on:click={() => handleSelectGroup(item.id)}
+								on:dragstart={(e) => {
+									e.stopPropagation();
+									if (e.dataTransfer) {
+										e.dataTransfer.effectAllowed = 'move';
+										e.dataTransfer.setData('text/plain', item.id);
+									}
+									handleGroupDragStart(item.id);
+								}}
+								on:dragend={(e) => {
+									e.stopPropagation();
+									handleDragEnd();
+								}}
+								on:dragover={(e) => {
+									e.preventDefault();
+									e.stopPropagation();
+
+									if (!draggedGroupId || draggedGroupId === item.id) return;
+									if (!item.groupElements || item.groupElements.length === 0) return;
+
+									// Determine drop position based on mouse Y
+									const rect = e.currentTarget.getBoundingClientRect();
+									const y = e.clientY - rect.top;
+									const height = rect.height;
+									const position = y < height / 2 ? 'before' : 'after';
+
+									// Use first element of group as reference
+									dropTarget = { elementId: item.groupElements[0].id, position };
+								}}
+								on:drop={(e) => {
+									e.preventDefault();
+									e.stopPropagation();
+
+									if (!draggedGroupId || !dropTarget || !item.groupElements || item.groupElements.length === 0) return;
+
+									handleGroupDrop(item.groupElements[0].id, dropTarget.position as 'before' | 'after');
+								}}
 							>
 								<button
 									class="expand-btn"
@@ -657,10 +708,18 @@
 		display: flex;
 		align-items: center;
 		padding: 4px 8px;
-		cursor: pointer;
+		cursor: grab;
 		user-select: none;
 		border-radius: 4px;
 		transition: background-color 0.1s;
+	}
+
+	.group-header:active {
+		cursor: grabbing;
+	}
+
+	.group-header.dragging {
+		opacity: 0.5;
 	}
 
 	.group-header:hover {

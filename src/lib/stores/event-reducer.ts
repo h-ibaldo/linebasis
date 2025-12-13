@@ -33,6 +33,7 @@ import type {
 	GroupUpdateStylesEvent,
 	CreateGroupEvent,
 	UngroupElementsEvent,
+	ReorderGroupEvent,
 	UpdateStylesEvent,
 	UpdateTypographyEvent,
 	UpdateSpacingEvent,
@@ -192,6 +193,8 @@ export function reduceEvent(state: DesignState, event: DesignEvent): DesignState
 			return handleCreateGroup(state, event);
 		case 'UNGROUP_ELEMENTS':
 			return handleUngroupElements(state, event);
+		case 'REORDER_GROUP':
+			return handleReorderGroup(state, event);
 
 		// Style operations
 		case 'UPDATE_STYLES':
@@ -1025,6 +1028,59 @@ function handleUngroupElements(state: DesignState, event: UngroupElementsEvent):
 	}
 
 	return { ...state, elements: newElements };
+}
+
+function handleReorderGroup(state: DesignState, event: ReorderGroupEvent): DesignState {
+	const { groupId, targetElementId, position } = event.payload;
+
+	// Get all elements in the group
+	const groupElements = Object.values(state.elements)
+		.filter(el => el.groupId === groupId)
+		.sort((a, b) => {
+			// Sort by current DOM order in the page's canvasElements
+			const page = state.pages[a.pageId];
+			if (!page) return 0;
+			const aIndex = page.canvasElements.indexOf(a.id);
+			const bIndex = page.canvasElements.indexOf(b.id);
+			return aIndex - bIndex;
+		});
+
+	if (groupElements.length === 0) return state;
+
+	const targetElement = state.elements[targetElementId];
+	if (!targetElement) return state;
+
+	// All group elements must be root-level (no parent) for now
+	const firstElement = groupElements[0];
+	const page = state.pages[firstElement.pageId];
+	if (!page) return state;
+
+	const newPages = { ...state.pages };
+	let canvasElements = [...page.canvasElements];
+
+	// Remove all group elements from current positions
+	canvasElements = canvasElements.filter(id => !groupElements.some(el => el.id === id));
+
+	// Find target index
+	const targetIndex = canvasElements.indexOf(targetElementId);
+	if (targetIndex === -1) return state;
+
+	// Calculate insertion index based on position
+	const insertIndex = position === 'before' ? targetIndex + 1 : targetIndex;
+
+	// Insert all group elements at the new position
+	const groupElementIds = groupElements.map(el => el.id);
+	canvasElements.splice(insertIndex, 0, ...groupElementIds);
+
+	newPages[firstElement.pageId] = {
+		...page,
+		canvasElements
+	};
+
+	return {
+		...state,
+		pages: newPages
+	};
 }
 
 // ============================================================================
