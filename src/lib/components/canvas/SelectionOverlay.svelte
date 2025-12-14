@@ -3408,32 +3408,24 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 									// Parent not yet changed OR we didn't move beyond threshold (clicked without dragging)
 									// Need to finalize the parent change
 
-									// CRITICAL: Hide element during transition to prevent flash at wrong position
-									updateInteractionStateImmediate({
-										hiddenDuringTransition: activeElementId
-									});
-
-									// CRITICAL: Clear pending position BEFORE reordering
-									pendingPosition = null;
-
+									// Reorder in the DOM/state (keep pendingPosition to show element during transition)
 									await reorderElement(activeElementId, potentialDropParentId, reorderTargetIndex ?? 0);
 
 									// Wait for Svelte to update DOM with new flexbox position
 									await tick();
 
-									// Wait for browser to complete multiple frames of layout
+									// Wait for browser to complete layout calculation
 									await new Promise(resolve => requestAnimationFrame(() => {
-										requestAnimationFrame(() => {
-											requestAnimationFrame(() => {
-												requestAnimationFrame(resolve);
-											});
-										});
+										requestAnimationFrame(resolve);
 									}));
 
-									// Show element again after layout is complete
+									// Clear pending position to let element snap to flexbox position
+									pendingPosition = null;
 									updateInteractionStateImmediate({
-										hiddenDuringTransition: null
+										pendingPosition: null
 									});
+
+									await tick();
 								}
 								// No need to call moveElement - auto layout will position it
 							} else {
@@ -3475,32 +3467,24 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 								if (!reorderParentId || potentialDropParentId !== (get(designState).elements[activeElementId]?.parentId)) {
 									// Parent not yet changed, or changed to different parent than current
 
-									// CRITICAL: Hide element during transition to prevent flash at wrong position
-									updateInteractionStateImmediate({
-										hiddenDuringTransition: activeElementId
-									});
-
-									// CRITICAL: Clear pending position BEFORE reordering
-									pendingPosition = null;
-
+									// Reorder (keep pendingPosition to show element during transition)
 									await reorderElement(activeElementId, potentialDropParentId, reorderTargetIndex ?? 0);
 
 									// Wait for Svelte to update DOM with new flexbox position
 									await tick();
 
-									// Wait for browser to complete multiple frames of layout
+									// Wait for browser to complete layout calculation
 									await new Promise(resolve => requestAnimationFrame(() => {
-										requestAnimationFrame(() => {
-											requestAnimationFrame(() => {
-												requestAnimationFrame(resolve);
-											});
-										});
+										requestAnimationFrame(resolve);
 									}));
 
-									// Show element again after layout is complete
+									// Clear pending position
+									pendingPosition = null;
 									updateInteractionStateImmediate({
-										hiddenDuringTransition: null
+										pendingPosition: null
 									});
+
+									await tick();
 								}
 								await moveElement(activeElementId, relativePos);
 							}
@@ -3512,63 +3496,31 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 								if (reorderTargetIndex !== null) {
 									const reorderedElementId = activeElementId;
 
-									// CRITICAL: Hide element during transition to prevent flash at wrong position
-									updateInteractionStateImmediate({
-										hiddenDuringTransition: activeElementId
-									});
+									// Store the current pending position to keep element visible during transition
+									const currentPendingPosition = pendingPosition;
 
-									// CRITICAL: Clear pending position BEFORE reordering
-									// This prevents CanvasElement from using stale pendingPosition from drag
-									pendingPosition = null;
-									updateInteractionStateImmediate({
-										pendingPosition: null
-									});
-
+									// Reorder in the DOM/state
 									await reorderElement(activeElementId, reorderParentId, reorderTargetIndex);
 
 									// Wait for Svelte to update DOM with new flexbox position
 									await tick();
 
-									// Wait for browser to complete multiple frames of layout:
-									// This ensures the browser has fully calculated and painted the new flexbox positions
+									// Wait for browser to complete layout calculation
+									// Keep element at dragged position using pendingPosition during this time
 									await new Promise(resolve => requestAnimationFrame(() => {
-										requestAnimationFrame(() => {
-											requestAnimationFrame(() => {
-												requestAnimationFrame(resolve);
-											});
-										});
+										requestAnimationFrame(resolve);
 									}));
 
-									// Show element again after layout is complete
+									// NOW clear pending position to let element snap to flexbox position
+									pendingPosition = null;
 									updateInteractionStateImmediate({
-										hiddenDuringTransition: null
+										pendingPosition: null,
+										reorderParentId: null,
+										reorderTargetIndex: null
 									});
 
-								// Force SelectionUI to recalculate by updating interaction state
-								// This triggers reactive statements that depend on interactionState
-								updateInteractionStateImmediate({
-									reorderParentId: null,
-									reorderTargetIndex: null
-								});
-
-								// Wait one more tick for SelectionUI to re-render with new positions
-								await tick();
-								
-								// CRITICAL FIX: After reorder, force SelectionUI to read element's actual DOM position
-								// For auto-layout children, stored position is {0,0} (parent controls layout)
-								// But pendingPosition still has the old drag position, causing misalignment
-								// Solution: Clear pendingPosition and force reactive block to re-run
-								interactionMode = 'idle'; // Make SelectionUI visible
-								await tick();
-								
-								pendingPosition = null; // Clear stale position
-								const elementIdToRestore = activeElementId;
-								activeElementId = null; // Force reactive block to re-run
-								await tick();
-								
-								activeElementId = elementIdToRestore; // Restore selection
-								await tick();
-								await new Promise(resolve => requestAnimationFrame(resolve));
+									// Wait for final render
+									await tick();
 								}
 							} else {
 								// Not in auto layout - move the element
