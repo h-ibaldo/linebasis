@@ -1038,19 +1038,62 @@ function handleCreateGroup(state: DesignState, event: CreateGroupEvent): DesignS
 	const newElements = { ...state.elements };
 	const newGroups = { ...state.groups };
 
-	// Simply assign the same groupId to all elements
+	// Track which existing groups are being nested
+	const existingGroupIds = new Set<string>();
+	const ungroupedElementIds: string[] = [];
+
+	// Categorize elements: which are already in groups vs ungrouped
 	for (const id of elementIds) {
 		const el = newElements[id];
-		if (el) {
-			newElements[id] = { ...el, groupId };
+		if (el?.groupId) {
+			existingGroupIds.add(el.groupId);
+		} else {
+			ungroupedElementIds.push(id);
 		}
 	}
 
-	// Create the group record in state.groups
-	newGroups[groupId] = {
-		id: groupId,
-		elementIds: elementIds
-	};
+	// Determine if we're creating a nested group (grouping existing groups)
+	const isNestingGroups = existingGroupIds.size > 0;
+
+	if (isNestingGroups) {
+		// NESTED GROUP: Set parentGroupId on existing groups, don't modify element groupIds
+		for (const existingGroupId of existingGroupIds) {
+			if (newGroups[existingGroupId]) {
+				newGroups[existingGroupId] = {
+					...newGroups[existingGroupId],
+					parentGroupId: groupId
+				};
+			}
+		}
+
+		// Only assign new groupId to ungrouped elements (if any)
+		for (const id of ungroupedElementIds) {
+			const el = newElements[id];
+			if (el) {
+				newElements[id] = { ...el, groupId };
+			}
+		}
+
+		// For nested groups, elementIds should reference the child groups (via their representative elements)
+		// We'll store all selected elements but understand that some belong to child groups
+		newGroups[groupId] = {
+			id: groupId,
+			elementIds: elementIds
+		};
+	} else {
+		// SIMPLE GROUP: All elements are ungrouped, assign groupId to all
+		for (const id of elementIds) {
+			const el = newElements[id];
+			if (el) {
+				newElements[id] = { ...el, groupId };
+			}
+		}
+
+		newGroups[groupId] = {
+			id: groupId,
+			elementIds: elementIds
+		};
+	}
 
 	return { ...state, elements: newElements, groups: newGroups };
 }
@@ -1060,10 +1103,24 @@ function handleUngroupElements(state: DesignState, event: UngroupElementsEvent):
 	const newElements = { ...state.elements };
 	const newGroups = { ...state.groups };
 
+	const groupToUngroup = newGroups[groupId];
+
 	// Remove groupId from all elements with matching groupId
 	for (const el of Object.values(newElements)) {
 		if (el.groupId === groupId) {
-			newElements[el.id] = { ...el, groupId: null };
+			// If the group being ungrouped has a parent, move elements to the parent group
+			const newGroupId = groupToUngroup?.parentGroupId || null;
+			newElements[el.id] = { ...el, groupId: newGroupId };
+		}
+	}
+
+	// Clear parentGroupId from any nested child groups
+	for (const childGroup of Object.values(newGroups)) {
+		if (childGroup.parentGroupId === groupId) {
+			newGroups[childGroup.id] = {
+				...childGroup,
+				parentGroupId: groupToUngroup?.parentGroupId || undefined
+			};
 		}
 	}
 

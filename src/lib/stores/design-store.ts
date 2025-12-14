@@ -56,7 +56,7 @@ const initialStoreState: StoreState = {
 // Core Store
 // ============================================================================
 
-const storeState: Writable<StoreState> = writable(initialStoreState);
+export const storeState: Writable<StoreState> = writable(initialStoreState);
 
 // Derived stores for convenience
 export const designState: Readable<DesignState> = derived(
@@ -925,6 +925,29 @@ function expandSelectionWithGroups(elementIds: string[], state: DesignState): st
 		return el?.groupId === isolatedGroupId;
 	});
 
+	// Helper function to recursively expand a group and all its nested child groups
+	const expandGroup = (groupId: string, shouldSkip: boolean) => {
+		const group = state.groups[groupId];
+		if (!group) return;
+
+		// Add all direct members of this group
+		for (const memberId of group.elementIds) {
+			if (!seen.has(memberId) && state.elements[memberId]) {
+				seen.add(memberId);
+				expanded.push(memberId);
+			}
+		}
+
+		// Recursively expand any nested child groups (groups with this group as parent)
+		if (!shouldSkip) {
+			for (const childGroup of Object.values(state.groups)) {
+				if (childGroup.parentGroupId === groupId) {
+					expandGroup(childGroup.id, false);
+				}
+			}
+		}
+	};
+
 	for (const id of elementIds) {
 		const element = state.elements[id];
 
@@ -936,16 +959,18 @@ function expandSelectionWithGroups(elementIds: string[], state: DesignState): st
 			(element?.groupId && isAddingFromIsolatedGroup && element.groupId === isolatedGroupId);
 
 		if (element?.groupId && !shouldSkipGroupExpansion) {
-			const group = state.groups[element.groupId];
-			if (group) {
-				for (const memberId of group.elementIds) {
-					if (!seen.has(memberId) && state.elements[memberId]) {
-						seen.add(memberId);
-						expanded.push(memberId);
-					}
-				}
-				continue;
+			// Find the root parent group (traverse up the hierarchy)
+			let currentGroupId = element.groupId;
+			let group = state.groups[currentGroupId];
+
+			while (group?.parentGroupId) {
+				currentGroupId = group.parentGroupId;
+				group = state.groups[currentGroupId];
 			}
+
+			// Expand from the root parent group down (includes all nested groups)
+			expandGroup(currentGroupId, false);
+			continue;
 		}
 
 		if (!seen.has(id) && state.elements[id]) {
@@ -2829,6 +2854,39 @@ export function setupKeyboardShortcuts(): (() => void) | undefined {
 }
 
 
+/**
+ * Clean up orphaned groups (groups with no elements)
+ * This should be called periodically or after major operations
+ */
+export function cleanupOrphanedGroups(): void {
+	storeState.update((state) => {
+		const newGroups = { ...state.designState.groups };
+		let hasChanges = false;
+
+		// Find all groups that have no elements with matching groupId
+		for (const [groupId, group] of Object.entries(newGroups)) {
+			const hasElements = Object.values(state.designState.elements).some(
+				(el) => el.groupId === groupId
+			);
+
+			if (!hasElements) {
+				delete newGroups[groupId];
+				hasChanges = true;
+			}
+		}
+
+		if (!hasChanges) return state;
+
+		return {
+			...state,
+			designState: {
+				...state.designState,
+				groups: newGroups
+			}
+		};
+	});
+}
+
 // Expose for E2E testing
 if (typeof window !== 'undefined') {
 	(window as any).__designStore = {
@@ -2839,6 +2897,7 @@ if (typeof window !== 'undefined') {
 		rotateElement,
 		selectElement,
 		selectElements,
-		clearSelection
+		clearSelection,
+		cleanupOrphanedGroups
 	};
 }

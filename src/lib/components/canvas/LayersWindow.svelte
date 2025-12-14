@@ -12,7 +12,7 @@
 	 * - Drag to reorder (array position changes, not z-index)
 	 */
 
-	import { designState, selectElement, selectElements, toggleVisibility, toggleLock, renameElement, shiftElementLayer, reorderElement, toggleView, dispatch, reorderGroup } from '$lib/stores/design-store';
+	import { designState, selectElement, selectElements, toggleVisibility, toggleLock, renameElement, shiftElementLayer, reorderElement, toggleView, dispatch, reorderGroup, storeState } from '$lib/stores/design-store';
 	import { isolateElementFromGroup } from '$lib/stores/interaction-store';
 	import FloatingWindow from '$lib/components/ui/FloatingWindow.svelte';
 	import LayerTreeItem from './LayerTreeItem.svelte';
@@ -120,24 +120,57 @@
 		element?: Element;
 		group?: Group;
 		groupElements?: Element[];
+		nestedGroups?: LayerItem[]; // For nested groups - child groups of this group
 	}
 
-	function buildLayerItems(elements: Element[], groups: Record<string, Group>): LayerItem[] {
+	function buildLayerItems(elements: Element[], groups: Record<string, Group>, parentGroupId?: string): LayerItem[] {
 		const items: LayerItem[] = [];
 		const processedElementIds = new Set<string>();
 		const processedGroupIds = new Set<string>();
 
+		// First, handle child groups (groups with this parent)
+		for (const group of Object.values(groups)) {
+			if (group.parentGroupId === parentGroupId) {
+				// Get elements belonging to this group
+				const groupElements = elements.filter(el => el.groupId === group.id);
+
+				// Check if this group has any child groups (nested groups)
+				const hasChildGroups = Object.values(groups).some(g => g.parentGroupId === group.id);
+
+				// Skip empty groups ONLY if they have no elements AND no child groups
+				if (groupElements.length === 0 && !hasChildGroups) continue;
+
+				processedGroupIds.add(group.id);
+				groupElements.forEach(el => processedElementIds.add(el.id));
+
+				items.push({
+					type: 'group',
+					id: group.id,
+					groupElements,
+					nestedGroups: buildLayerItems(elements, groups, group.id) // Recursively get nested groups
+				});
+			}
+		}
+
+		// Then, handle elements at this level
 		for (const element of elements) {
 			// Skip if already processed as part of a group
 			if (processedElementIds.has(element.id)) continue;
 
-			// Check if element belongs to a group (groupId-based system)
+			// Check if element belongs to a group
 			if (element.groupId) {
-				// Skip if we already added this group
+				// Skip if this is a nested group (already processed above)
 				if (processedGroupIds.has(element.groupId)) continue;
+
+				// Skip if this group has a different parent than we're looking for
+				const group = groups[element.groupId];
+				if (group?.parentGroupId !== parentGroupId) continue;
 
 				// Find all elements with the same groupId
 				const groupElements = elements.filter(el => el.groupId === element.groupId);
+
+				// Skip empty groups (should not happen here, but safety check)
+				if (groupElements.length === 0) continue;
 
 				// Mark all group elements and the groupId as processed
 				groupElements.forEach(el => processedElementIds.add(el.id));
@@ -146,10 +179,11 @@
 				items.push({
 					type: 'group',
 					id: element.groupId,
-					groupElements
+					groupElements,
+					nestedGroups: buildLayerItems(elements, groups, element.groupId) // Recursively get nested groups
 				});
-			} else {
-				// Regular element (not in a group)
+			} else if (!parentGroupId) {
+				// Regular element (not in a group) - only show at root level
 				processedElementIds.add(element.id);
 				items.push({
 					type: 'element',
@@ -165,14 +199,57 @@
 
 
 	function handleSelectGroup(groupId: string) {
-		// Find all elements with this groupId
-		const elementIds = Object.values($designState.elements)
-			.filter(el => el.groupId === groupId)
-			.map(el => el.id);
+		// Find the root parent group (traverse up the hierarchy)
+		let currentGroupId = groupId;
+		let group = $designState.groups[currentGroupId];
+
+		while (group?.parentGroupId) {
+			currentGroupId = group.parentGroupId;
+			group = $designState.groups[currentGroupId];
+		}
+
+		// Now currentGroupId is the top-most parent group
+		// Select all elements in this group and all nested child groups recursively
+		const elementIds = getAllElementsInGroupHierarchy(currentGroupId, $designState.groups, $designState.elements);
 
 		if (elementIds.length > 0) {
-			selectElements(elementIds);
+			storeState.update((state) => ({
+				...state,
+				designState: {
+					...state.designState,
+					selectedElementIds: elementIds
+				}
+			}));
 		}
+	}
+
+	// Helper function to get all elements in a group and its nested children
+	function getAllElementsInGroupHierarchy(groupId: string, groups: Record<string, Group>, elements: Record<string, Element>): string[] {
+		const result: string[] = [];
+		const seen = new Set<string>();
+
+		// Get direct members of this group
+		for (const el of Object.values(elements)) {
+			if (el.groupId === groupId && !seen.has(el.id)) {
+				result.push(el.id);
+				seen.add(el.id);
+			}
+		}
+
+		// Get elements from all child groups recursively
+		for (const childGroup of Object.values(groups)) {
+			if (childGroup.parentGroupId === groupId) {
+				const childElements = getAllElementsInGroupHierarchy(childGroup.id, groups, elements);
+				for (const id of childElements) {
+					if (!seen.has(id)) {
+						result.push(id);
+						seen.add(id);
+					}
+				}
+			}
+		}
+
+		return result;
 	}
 
 	function handleSelectElement(elementId: string) {
@@ -657,6 +734,65 @@
 							<!-- Group members (collapsible) -->
 							{#if !collapsedGroups[item.id]}
 							<div class="group-children">
+								<!-- Nested groups first -->
+								{#if item.nestedGroups && item.nestedGroups.length > 0}
+									{#each item.nestedGroups as nestedItem (nestedItem.id)}
+										{#if nestedItem.type === 'group' && nestedItem.groupElements}
+											<div class="nested-group-wrapper" style="padding-left: 16px;">
+												<div
+													class="group-item nested-group"
+													class:selected={nestedItem.groupElements.some(el => selectedIds.includes(el.id))}
+													draggable={true}
+													on:click={() => handleSelectGroup(nestedItem.id)}
+													on:dragstart={() => {
+														draggedGroupId = nestedItem.id;
+													}}
+													on:dragend={handleDragEnd}
+												>
+													<button
+														class="expand-btn"
+														draggable={false}
+														on:click={(e) => toggleGroupExpanded(nestedItem.id, e)}
+														on:mousedown={(e) => e.stopPropagation()}
+														aria-label={!collapsedGroups[nestedItem.id] ? 'Collapse' : 'Expand'}
+													>
+														<span class="arrow" class:expanded={!collapsedGroups[nestedItem.id]}>▸</span>
+													</button>
+													<span class="group-icon">⊞</span>
+													<span class="group-name">Group (nested)</span>
+												</div>
+												<!-- Nested group members -->
+												{#if !collapsedGroups[nestedItem.id]}
+													<div class="group-children" style="padding-left: 16px;">
+														{#each nestedItem.groupElements as element (element.id)}
+															<LayerTreeItem
+																{element}
+																elements={$designState.elements}
+																{selectedIds}
+																onSelect={handleSelectElement}
+																onToggleVisibility={handleToggleVisibility}
+																onToggleLock={handleToggleLock}
+																onRename={handleRename}
+																onDragStart={handleDragStart}
+																onDragEnd={handleDragEnd}
+																onDragOver={handleDragOver}
+																onDrop={handleDrop}
+																onGroupDrop={handleGroupDrop}
+																{draggedElementId}
+																{draggedGroupId}
+																{dropTarget}
+																depth={2}
+																on:contextmenu={handleContextMenuOpen}
+															/>
+														{/each}
+													</div>
+												{/if}
+											</div>
+										{/if}
+									{/each}
+								{/if}
+
+								<!-- Regular group elements -->
 								{#each item.groupElements as element (element.id)}
 									<LayerTreeItem
 										{element}

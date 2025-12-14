@@ -576,6 +576,7 @@ export interface Group {
 	id: string;
 	elementIds: string[];
 	wrapperId?: string;
+	parentGroupId?: string; // For nested groups - the group this group belongs to
 }
 
 export interface Component {
