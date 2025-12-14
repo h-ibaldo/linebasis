@@ -3544,15 +3544,31 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 										hiddenDuringTransition: null
 									});
 
-									// Force SelectionUI to recalculate by updating interaction state
-									// This triggers reactive statements that depend on interactionState
-									updateInteractionStateImmediate({
-										reorderParentId: null,
-										reorderTargetIndex: null
-									});
+								// Force SelectionUI to recalculate by updating interaction state
+								// This triggers reactive statements that depend on interactionState
+								updateInteractionStateImmediate({
+									reorderParentId: null,
+									reorderTargetIndex: null
+								});
 
-									// Wait one more tick for SelectionUI to re-render with new positions
-									await tick();
+								// Wait one more tick for SelectionUI to re-render with new positions
+								await tick();
+								
+								// CRITICAL FIX: After reorder, force SelectionUI to read element's actual DOM position
+								// For auto-layout children, stored position is {0,0} (parent controls layout)
+								// But pendingPosition still has the old drag position, causing misalignment
+								// Solution: Clear pendingPosition and force reactive block to re-run
+								interactionMode = 'idle'; // Make SelectionUI visible
+								await tick();
+								
+								pendingPosition = null; // Clear stale position
+								const elementIdToRestore = activeElementId;
+								activeElementId = null; // Force reactive block to re-run
+								await tick();
+								
+								activeElementId = elementIdToRestore; // Restore selection
+								await tick();
+								await new Promise(resolve => requestAnimationFrame(resolve));
 								}
 							} else {
 								// Not in auto layout - move the element

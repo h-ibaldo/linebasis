@@ -1172,7 +1172,6 @@ function handleContextMenu(e: MouseEvent) {
 				// Non-rotated: use actual size
 				return draggedSize;
 			})()}
-			{@const _ = console.log('[CanvasElement] Rendering placeholder:', { elementId: element.id, reorderTarget, siblingsCount: siblings.length, placeholderSize })}
 
 			{#each siblings as childId, index}
 				<!-- Inject placeholder before the target child -->
@@ -1220,15 +1219,6 @@ function handleContextMenu(e: MouseEvent) {
 			{/if}
 		{:else}
 			<!-- Normal rendering without placeholder -->
-			{@const _ = element.autoLayout?.enabled && $interactionState.activeElementId && console.log('❌ [CanvasElement] NO PLACEHOLDER:', {
-				elementId: element.id,
-				isAutoLayout: element.autoLayout?.enabled,
-				hasActive: !!$interactionState.activeElementId,
-				activeId: $interactionState.activeElementId,
-				reorderParent: $interactionState.reorderParentId,
-				isThisParent: $interactionState.reorderParentId === element.id,
-				targetIndex: $interactionState.reorderTargetIndex
-			})}
 			{#each element.children as childId}
 				{#if $designState.elements[childId]}
 					<svelte:self element={$designState.elements[childId]} {isPanning} {isDragging} {viewport} {onStartDrag} />
