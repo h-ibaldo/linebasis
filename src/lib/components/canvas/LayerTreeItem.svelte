@@ -27,7 +27,7 @@
 	export let onDragEnd: () => void;
 	export let onDragOver: (targetElementId: string, position: 'before' | 'after' | 'inside') => void;
 	export let onDrop: (targetElementId: string, position: 'before' | 'after' | 'inside') => void;
-	export let onGroupDrop: ((targetElementId: string, position: 'before' | 'after') => void) | undefined = undefined;
+	export let onGroupDrop: ((targetElementId: string, position: 'before' | 'after' | 'inside') => void) | undefined = undefined;
 	export let draggedElementId: string | null = null;
 	export let draggedGroupId: string | null = null;
 	export let dropTarget: { elementId: string; position: 'before' | 'after' | 'inside' } | null = null;
@@ -244,9 +244,17 @@
 
 		let position: 'before' | 'after' | 'inside';
 
-		// Groups can only be dropped before/after (not inside)
+		// Both groups and elements can be dropped inside containers
 		if (draggedGroupId) {
-			position = y < height / 2 ? 'before' : 'after';
+			// Groups can be dropped inside elements with children
+			// Only allow "inside" drop if:
+			// 1. Element has children and is expanded
+			// 2. Mouse is in the middle zone (30-70%)
+			if (hasChildren && isExpanded && y > height * 0.3 && y < height * 0.7) {
+				position = 'inside';
+			} else {
+				position = y < height / 2 ? 'before' : 'after';
+			}
 		} else if (draggedElementId) {
 			const draggedElement = elements[draggedElementId];
 			if (!draggedElement) return;
@@ -280,8 +288,8 @@
 		if (draggedElementId && isAncestor(draggedElementId, element.id)) return;
 
 		if (dropPosition) {
-			// Handle group drops
-			if (draggedGroupId && onGroupDrop && (dropPosition === 'before' || dropPosition === 'after')) {
+			// Handle group drops (now supports 'inside' as well)
+			if (draggedGroupId && onGroupDrop) {
 				onGroupDrop(element.id, dropPosition);
 			}
 			// Handle element drops

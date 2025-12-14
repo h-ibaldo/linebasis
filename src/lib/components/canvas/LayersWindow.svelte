@@ -222,10 +222,68 @@
 		draggedGroupId = groupId;
 	}
 
-	async function handleGroupDrop(targetElementId: string, position: 'before' | 'after') {
+	async function handleGroupDrop(targetElementId: string, position: 'before' | 'after' | 'inside') {
 		console.log('🟢 Group drop:', { draggedGroupId, targetElementId, position });
 		if (!draggedGroupId) return;
-		await reorderGroup(draggedGroupId, targetElementId, position);
+
+		const targetElement = $designState.elements[targetElementId];
+		if (!targetElement) return;
+
+		let newParentId: string | null;
+		let newIndex: number;
+
+		if (position === 'inside') {
+			// Drop inside the target element (make group children of target)
+			newParentId = targetElementId;
+			// Add as first child (top layer)
+			newIndex = 0;
+		} else {
+			// Drop before or after the target (same parent as target)
+			newParentId = targetElement.parentId ?? null;
+
+			// Find target's position in its parent's children array
+			let siblings: string[];
+			if (newParentId) {
+				// Has a parent - get parent's children
+				const parent = $designState.elements[newParentId];
+				if (!parent) return;
+				siblings = parent.children || [];
+			} else {
+				// Root level - MUST have a page for DOM-based layer ordering
+				if (!currentPage) {
+					console.error('❌ CRITICAL: No page found for root elements. Cannot reorder layers without a page.');
+					console.error('   LAYERS ARE DOM POSITION. Root elements MUST belong to a page\'s canvas to have a DOM order.');
+					handleDragEnd();
+					return;
+				}
+
+				// Use page's canvasElements array (DOM order)
+				siblings = currentPage.canvasElements;
+			}
+
+			const targetIndex = siblings.indexOf(targetElementId);
+			if (targetIndex === -1) return;
+
+			// Calculate new index
+			// Array: [A(0), B(1), C(2)] where 0=bottom layer, 2=top layer
+			// Visual display (reversed): C, B, A (top layer C shows first)
+			//
+			// When hovering over B in the UI:
+			//   - Mouse in TOP half: position='before', wants ABOVE B visually
+			//     → Between C and B in UI → Array: [A, B, ★, C] → Index = targetIndex + 1
+			//   - Mouse in BOTTOM half: position='after', wants BELOW B visually
+			//     → Between B and A in UI → Array: [A, ★, B, C] → Index = targetIndex
+			if (position === 'before') {
+				newIndex = targetIndex + 1;
+			} else {
+				newIndex = targetIndex;
+			}
+
+			// Note: No adjustment needed for groups moving within same parent
+			// because handleReorderGroup handles this internally
+		}
+
+		await reorderGroup(draggedGroupId, newParentId, newIndex);
 		handleDragEnd();
 	}
 

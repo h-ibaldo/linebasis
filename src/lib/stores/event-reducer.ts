@@ -1031,71 +1031,130 @@ function handleUngroupElements(state: DesignState, event: UngroupElementsEvent):
 }
 
 function handleReorderGroup(state: DesignState, event: ReorderGroupEvent): DesignState {
-	const { groupId, targetElementId, position } = event.payload;
+	const { groupId, newParentId, newIndex } = event.payload;
 
 	// Get all elements in the group
 	const groupElements = Object.values(state.elements)
-		.filter(el => el.groupId === groupId)
-		.sort((a, b) => {
-			// Sort by current DOM order in the page's canvasElements
-			const page = state.pages[a.pageId];
-			if (!page) return 0;
-			const aIndex = page.canvasElements.indexOf(a.id);
-			const bIndex = page.canvasElements.indexOf(b.id);
-			return aIndex - bIndex;
-		});
+		.filter(el => el.groupId === groupId);
 
 	if (groupElements.length === 0) {
 		return state;
 	}
 
-	const targetElement = state.elements[targetElementId];
-	if (!targetElement) return state;
-
-	// All group elements must be root-level (no parent) for now
+	// Get the current parent of the group elements (they should all have the same parent)
 	const firstElement = groupElements[0];
-	const page = state.pages[firstElement.pageId];
+	const oldParentId = firstElement.parentId ?? null;
+	const pageId = firstElement.pageId;
+	const page = state.pages[pageId];
 	if (!page) return state;
 
-	const newPages = { ...state.pages };
-	const canvasElements = [...page.canvasElements];
 	const groupElementIds = groupElements.map(el => el.id);
 
-	// Find target index BEFORE removing group elements
-	const targetIndex = canvasElements.indexOf(targetElementId);
-	if (targetIndex === -1) return state;
+	// Determine source and destination arrays
+	let sourceArray: string[];
+	let destArray: string[];
 
-	// Remove all group elements from current positions
-	const filteredElements = canvasElements.filter(id => !groupElementIds.includes(id));
+	// Get source array (where group currently is)
+	if (oldParentId) {
+		const oldParent = state.elements[oldParentId];
+		if (!oldParent) return state;
+		sourceArray = [...(oldParent.children || [])];
+	} else {
+		sourceArray = [...page.canvasElements];
+	}
 
-	// Find the NEW target index after removal (it may have shifted)
-	const newTargetIndex = filteredElements.indexOf(targetElementId);
-	if (newTargetIndex === -1) return state;
+	// Get destination array (where group is moving to)
+	if (newParentId) {
+		const newParent = state.elements[newParentId];
+		if (!newParent) return state;
+		destArray = oldParentId === newParentId ? sourceArray : [...(newParent.children || [])];
+	} else {
+		destArray = oldParentId === null ? sourceArray : [...page.canvasElements];
+	}
 
-	// Calculate insertion index based on position
-	// Array: [A(0), B(1), C(2)] where 0=bottom layer, 2=top layer
-	// Visual display (reversed): C, B, A (top layer C shows first)
-	//
-	// When hovering over B in the UI:
-	//   - Mouse in TOP half: position='before', wants ABOVE B visually
-	//     → Between C and B in UI → Array: [A, B, ★, C] → Index = targetIndex + 1
-	//   - Mouse in BOTTOM half: position='after', wants BELOW B visually
-	//     → Between B and A in UI → Array: [A, ★, B, C] → Index = targetIndex
-	//
-	// After removing group elements, we use newTargetIndex (target's position in filtered array)
-	// No adjustment needed because newTargetIndex already accounts for the removed elements
-	const insertIndex = position === 'before' ? newTargetIndex + 1 : newTargetIndex;
+	// Sort group elements by their current DOM order in source array
+	const sortedGroupElementIds = groupElementIds.sort((a, b) => {
+		const aIndex = sourceArray.indexOf(a);
+		const bIndex = sourceArray.indexOf(b);
+		return aIndex - bIndex;
+	});
 
-	// Insert all group elements at the new position
-	filteredElements.splice(insertIndex, 0, ...groupElementIds);
+	// Remove group elements from source array
+	const filteredSource = sourceArray.filter(id => !groupElementIds.includes(id));
 
-	newPages[firstElement.pageId] = {
-		...page,
-		canvasElements: filteredElements
-	};
+	// If moving to a different parent, update destArray to be separate
+	let finalDestArray: string[];
+	if (oldParentId === newParentId) {
+		// Same parent - use filtered source
+		finalDestArray = filteredSource;
+	} else {
+		// Different parent - destArray already initialized
+		finalDestArray = destArray;
+	}
+
+	// Calculate adjusted insertion index
+	let adjustedIndex = newIndex;
+
+	// If moving within same parent, we need to check if any group elements were before newIndex
+	if (oldParentId === newParentId) {
+		// Count how many group elements were before the newIndex position
+		const elementsBeforeIndex = sortedGroupElementIds.filter(id => {
+			const currentIndex = sourceArray.indexOf(id);
+			return currentIndex < newIndex;
+		}).length;
+
+		// Adjust the index if elements were removed from before the insertion point
+		adjustedIndex = newIndex - elementsBeforeIndex;
+	}
+
+	// Insert group elements at the new position
+	finalDestArray.splice(adjustedIndex, 0, ...sortedGroupElementIds);
+
+	// Update state
+	const newElements = { ...state.elements };
+	const newPages = { ...state.pages };
+
+	// Update parent references for all group elements
+	for (const elementId of groupElementIds) {
+		newElements[elementId] = {
+			...state.elements[elementId],
+			parentId: newParentId
+		};
+	}
+
+	// Update source parent if it exists and changed
+	if (oldParentId && oldParentId !== newParentId) {
+		newElements[oldParentId] = {
+			...state.elements[oldParentId],
+			children: filteredSource
+		};
+	}
+
+	// Update destination parent or page
+	if (newParentId) {
+		newElements[newParentId] = {
+			...state.elements[newParentId],
+			children: finalDestArray
+		};
+	} else {
+		// Update page's canvasElements
+		newPages[pageId] = {
+			...page,
+			canvasElements: finalDestArray
+		};
+	}
+
+	// If source was page and different from dest, update source page too
+	if (!oldParentId && oldParentId !== newParentId) {
+		newPages[pageId] = {
+			...page,
+			canvasElements: filteredSource
+		};
+	}
 
 	return {
 		...state,
+		elements: newElements,
 		pages: newPages
 	};
 }

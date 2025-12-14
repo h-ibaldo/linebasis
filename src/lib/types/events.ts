@@ -240,8 +240,8 @@ export interface ReorderGroupEvent extends BaseEvent {
 	type: 'REORDER_GROUP';
 	payload: {
 		groupId: string;
-		targetElementId: string; // Element to reorder relative to
-		position: 'before' | 'after'; // Where to place group relative to target
+		newParentId: string | null; // New parent element (null for root level)
+		newIndex: number; // Index in parent's children array or page's canvasElements
 	};
 }
 

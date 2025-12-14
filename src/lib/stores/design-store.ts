@@ -1584,18 +1584,18 @@ export async function ungroupElements(): Promise<void> {
  */
 export async function reorderGroup(
 	groupId: string,
-	targetElementId: string,
-	position: 'before' | 'after'
+	newParentId: string | null,
+	newIndex: number
 ): Promise<void> {
-	console.log('🔵 reorderGroup called:', { groupId, targetElementId, position });
+	console.log('🔵 reorderGroup called:', { groupId, newParentId, newIndex });
 	await dispatch({
 		id: uuidv4(),
 		type: 'REORDER_GROUP',
 		timestamp: Date.now(),
 		payload: {
 			groupId,
-			targetElementId,
-			position
+			newParentId,
+			newIndex
 		}
 	});
 	console.log('🔵 reorderGroup dispatched');
