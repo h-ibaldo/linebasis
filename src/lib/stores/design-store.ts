@@ -1531,10 +1531,11 @@ export async function unwrapSelectedDiv(): Promise<void> {
 /**
  * Group selected elements
  * Simply assigns the same groupId to all selected elements
+ * Allows single-element groups so users can add more elements via drag-and-drop
  */
 export async function groupElements(): Promise<void> {
 	const selected = get(selectedElements);
-	if (selected.length < 2) return; // Need at least 2 elements to group
+	if (selected.length < 1) return; // Need at least 1 element to group
 
 	const elementIds = selected.map(el => el.id);
 	const groupId = uuidv4();
@@ -2242,10 +2243,8 @@ export async function pasteElements(
 				}
 			});
 		}
-		// Preserve groupId if element belongs to a group (use new group ID)
-		// BUT: Skip this if the element's parent is a group wrapper (new-style groups)
-		// DEPRECATED: No need to handle groupId - groups are just parent-child relationships now
-		// The parent-child structure was already preserved when creating the element
+		// Note: groupId will be applied after all elements are pasted
+		// (see group recreation logic after the pasteElementTree loop)
 
 		// Recursively paste children (synchronous)
 		const children = clipboard.filter(el => el.parentId === element.id);
@@ -2264,9 +2263,33 @@ export async function pasteElements(
 			newRootElementIds.push(newId);
 		}
 
-		// DEPRECATED: No need to recreate group records - groups are just divs now
-		// The tree structure (parent-child relationships) was already preserved during paste
-		// No special group logic needed
+		// Recreate groups: For each old groupId, dispatch a CREATE_GROUP event with all new element IDs
+		// that belong to that group
+		for (const [oldGroupId, newGroupId] of oldToNewGroupIdMap.entries()) {
+			// Find all pasted elements that had this groupId in the clipboard
+			const elementsInGroup: string[] = [];
+			for (const clipboardElement of clipboard) {
+				if (clipboardElement.groupId === oldGroupId) {
+					const newElementId = oldToNewIdMap.get(clipboardElement.id);
+					if (newElementId) {
+						elementsInGroup.push(newElementId);
+					}
+				}
+			}
+
+			// Only create the group if there are elements in it
+			if (elementsInGroup.length > 0) {
+				dispatch({
+					id: uuidv4(),
+					type: 'CREATE_GROUP',
+					timestamp: Date.now(),
+					payload: {
+						groupId: newGroupId,
+						elementIds: elementsInGroup
+					}
+				});
+			}
+		}
 
 		// Commit the transaction (batches all events into single undo/redo step + single IndexedDB write)
 		await commitTransaction();
@@ -2293,7 +2316,9 @@ export async function pasteElements(
  */
 export async function duplicateElements(customOffset?: { x: number; y: number } | null): Promise<void> {
 	copyElements();
-	await pasteElements(customOffset);
+	// If no custom offset provided, use default offset of 10px to make duplicates visible
+	const offset = customOffset !== undefined ? customOffset : { x: 10, y: 10 };
+	await pasteElements(offset);
 }
 
 /**

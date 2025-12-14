@@ -296,6 +296,28 @@ function handleUpdateElement(state: DesignState, event: UpdateElementEvent): Des
 
 	if (!element) return state;
 
+	// If groupId is changing, we need to update the groups state
+	let newGroups = state.groups;
+	if ('groupId' in changes && changes.groupId !== element.groupId) {
+		newGroups = { ...state.groups };
+
+		// Remove from old group if it was in one
+		if (element.groupId && newGroups[element.groupId]) {
+			newGroups[element.groupId] = {
+				...newGroups[element.groupId],
+				elementIds: newGroups[element.groupId].elementIds.filter(id => id !== elementId)
+			};
+		}
+
+		// Add to new group if there is one
+		if (changes.groupId && newGroups[changes.groupId]) {
+			newGroups[changes.groupId] = {
+				...newGroups[changes.groupId],
+				elementIds: [...newGroups[changes.groupId].elementIds, elementId]
+			};
+		}
+	}
+
 	return {
 		...state,
 		elements: {
@@ -304,7 +326,8 @@ function handleUpdateElement(state: DesignState, event: UpdateElementEvent): Des
 				...element,
 				...changes
 			}
-		}
+		},
+		groups: newGroups
 	};
 }
 
@@ -875,6 +898,9 @@ function handleGroupMoveElements(state: DesignState, event: GroupMoveElementsEve
 				position: roundPosition(position)
 			};
 
+			// Invalidate transform cache for this element and descendants
+			invalidateTransformCache(elementId, state);
+
 			// Track groups that contain this element
 			if (element.groupId) {
 				groupsToUpdate.add(element.groupId);
@@ -915,6 +941,9 @@ function handleGroupResizeElements(state: DesignState, event: GroupResizeElement
 				...(position && { position: roundPosition(position) })
 			};
 
+			// Invalidate transform cache for this element and descendants
+			invalidateTransformCache(elementId, state);
+
 			// Track groups that contain this element
 			if (element.groupId) {
 				groupsToUpdate.add(element.groupId);
@@ -954,6 +983,9 @@ function handleGroupRotateElements(state: DesignState, event: GroupRotateElement
 				rotation: roundRotation(rotation),
 				position: roundPosition(position)
 			};
+
+			// Invalidate transform cache for this element and descendants
+			invalidateTransformCache(elementId, state);
 
 			// Track groups that contain this element
 			if (element.groupId) {
@@ -1004,6 +1036,7 @@ function handleGroupUpdateStyles(state: DesignState, event: GroupUpdateStylesEve
 function handleCreateGroup(state: DesignState, event: CreateGroupEvent): DesignState {
 	const { groupId, elementIds } = event.payload;
 	const newElements = { ...state.elements };
+	const newGroups = { ...state.groups };
 
 	// Simply assign the same groupId to all elements
 	for (const id of elementIds) {
@@ -1013,12 +1046,19 @@ function handleCreateGroup(state: DesignState, event: CreateGroupEvent): DesignS
 		}
 	}
 
-	return { ...state, elements: newElements };
+	// Create the group record in state.groups
+	newGroups[groupId] = {
+		id: groupId,
+		elementIds: elementIds
+	};
+
+	return { ...state, elements: newElements, groups: newGroups };
 }
 
 function handleUngroupElements(state: DesignState, event: UngroupElementsEvent): DesignState {
 	const { groupId } = event.payload;
 	const newElements = { ...state.elements };
+	const newGroups = { ...state.groups };
 
 	// Remove groupId from all elements with matching groupId
 	for (const el of Object.values(newElements)) {
@@ -1027,7 +1067,10 @@ function handleUngroupElements(state: DesignState, event: UngroupElementsEvent):
 		}
 	}
 
-	return { ...state, elements: newElements };
+	// Remove the group record from state.groups
+	delete newGroups[groupId];
+
+	return { ...state, elements: newElements, groups: newGroups };
 }
 
 function handleReorderGroup(state: DesignState, event: ReorderGroupEvent): DesignState {

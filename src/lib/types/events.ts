@@ -84,6 +84,8 @@ export interface UpdateElementEvent extends BaseEvent {
 			alt?: string;
 			href?: string;
 			src?: string;
+			/** @deprecated Group feature removed - this property will be deleted */
+			groupId?: string | null;
 		};
 	};
 }
