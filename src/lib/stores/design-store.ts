@@ -1661,9 +1661,9 @@ export async function ungroupElements(): Promise<void> {
 
 	if (fullySelectedGroups.length === 0) return;
 
-	// Find the TOP-MOST fully selected group (the one with no parent that's also fully selected)
-	// This is the group the user actually intends to ungroup
-	let topMostGroupId: string | null = null;
+	// Find ALL top-most fully selected groups (groups with no parent that's also fully selected)
+	// If multiple top-level groups are selected, we ungroup ALL of them at once
+	const topMostGroupIds: string[] = [];
 	for (const groupId of fullySelectedGroups) {
 		const group = state.groups[groupId];
 		if (!group) continue;
@@ -1673,40 +1673,43 @@ export async function ungroupElements(): Promise<void> {
 
 		if (!hasFullySelectedParent) {
 			// This is a top-most fully selected group
-			topMostGroupId = groupId;
-			break; // Only ungroup one group at a time
+			topMostGroupIds.push(groupId);
 		}
 	}
 
-	if (!topMostGroupId) return;
+	if (topMostGroupIds.length === 0) return;
 
-	// Before ungrouping, collect the elements and child groups that will remain after ungrouping
+	// Collect all elements that will remain selected after ungrouping all top-most groups
 	const elementsToSelect: string[] = [];
 
-	// Find all direct child groups of the group being ungrouped
-	for (const [childGroupId, childGroup] of Object.entries(state.groups)) {
-		if (childGroup.parentGroupId === topMostGroupId) {
-			// This is a child group - find its elements to select
-			const childElements = Object.values(state.elements).filter(el => el.parentId === childGroupId);
-			if (childElements.length > 0) {
-				elementsToSelect.push(...childElements.map(el => el.id));
+	for (const topMostGroupId of topMostGroupIds) {
+		// Find all direct child groups of this group being ungrouped
+		for (const [childGroupId, childGroup] of Object.entries(state.groups)) {
+			if (childGroup.parentGroupId === topMostGroupId) {
+				// This is a child group - get all its elements
+				const childElements = getAllElementsInGroup(childGroupId, state);
+				elementsToSelect.push(...childElements);
 			}
+		}
+
+		// Also include any direct elements of the group being ungrouped
+		const group = state.groups[topMostGroupId];
+		if (group) {
+			elementsToSelect.push(...group.elementIds);
 		}
 	}
 
-	// Also include any direct elements of the group being ungrouped
-	const directElements = Object.values(state.elements).filter(el => el.parentId === topMostGroupId);
-	elementsToSelect.push(...directElements.map(el => el.id));
-
-	// Dispatch ungroup event for the top-most group
-	await dispatch({
-		id: uuidv4(),
-		type: 'UNGROUP_ELEMENTS',
-		timestamp: Date.now(),
-		payload: {
-			groupId: topMostGroupId
-		}
-	});
+	// Dispatch ungroup events for ALL top-most groups
+	for (const groupId of topMostGroupIds) {
+		await dispatch({
+			id: uuidv4(),
+			type: 'UNGROUP_ELEMENTS',
+			timestamp: Date.now(),
+			payload: {
+				groupId
+			}
+		});
+	}
 
 	// Select the child elements/groups that remain after ungrouping
 	// This matches Figma behavior where ungrouping maintains selection of the children
