@@ -104,7 +104,7 @@ describe('sanitizeTextContent', () => {
 	});
 
 	it('should remove inline styles', () => {
-		const input = '<p style="color: red;">Styled text</p>';
+		const input = '<p style="color: #3b82f6;">Styled text</p>';
 		const output = sanitizeTextContent(input);
 		expect(output).not.toContain('style=');
 		expect(output).toContain('Styled text');

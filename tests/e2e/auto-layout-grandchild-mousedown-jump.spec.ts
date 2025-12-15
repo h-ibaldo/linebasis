@@ -1,17 +1,20 @@
 import { test, expect } from '@playwright/test';
 
 /**
- * Test: Child of rotated parent (without auto-layout)
+ * Test: Grandchild of non-rotated auto-layout parent jumps on mousedown
  *
  * Context:
- * - White div: auto-layout parent
- * - Green div: child of white div, rotated, NOT in auto-layout
- * - Purple div: child of green div
+ * - White div: non-rotated auto-layout parent
+ * - Orange div: direct child of white (positioned by auto-layout)
+ * - Blue div: grandchild (child of orange)
  *
- * Issue: Purple div jumps on mousedown/mouseup
+ * Issue:
+ * - HOVER: Hover border is correct ✓
+ * - MOUSE DOWN: Blue element jumps to wrong position, but selection UI stays at correct position
+ * - MOUSE UP: Blue element returns to original position, selection UI is stuck at wrong position
  */
 
-test.describe('Rotated Parent Child Drag', () => {
+test.describe('Auto-Layout Grandchild Mousedown Jump', () => {
 	test.beforeEach(async ({ page }) => {
 		await page.goto('http://localhost:5173');
 		await page.waitForLoadState('networkidle');
@@ -23,15 +26,15 @@ test.describe('Rotated Parent Child Drag', () => {
 		await page.waitForTimeout(1000);
 	});
 
-	test('child of rotated parent should not jump during drag', async ({ page }) => {
-		// Create: Auto-layout parent → Rotated child (green) → Grandchild (purple)
-		const { greenDiv, purpleDiv } = await page.evaluate(async () => {
+	test('grandchild should not jump on mousedown/mouseup', async ({ page }) => {
+		// Create: Auto-layout parent (white) → Child (orange) → Grandchild (blue)
+		const { whiteDiv, orangeDiv, blueDiv } = await page.evaluate(async () => {
 			const dispatch = (window as any).__dispatch;
 			const nanoid = (window as any).__nanoid;
 			const state = (window as any).__getDesignState();
 			const pageId = Object.keys(state.pages)[0];
 
-			// 1. Auto-layout parent (white)
+			// 1. Auto-layout parent (white, NOT rotated)
 			const whiteId = nanoid();
 			await dispatch({
 				id: nanoid(),
@@ -56,78 +59,68 @@ test.describe('Rotated Parent Child Drag', () => {
 				}
 			});
 
-			// 2. Green div (child of white, rotated)
-			const greenId = nanoid();
+			// 2. Orange div (direct child of white, positioned by auto-layout)
+			const orangeId = nanoid();
 			await dispatch({
 				id: nanoid(),
 				type: 'CREATE_ELEMENT',
 				timestamp: Date.now(),
 				payload: {
-					elementId: greenId,
+					elementId: orangeId,
 					pageId,
 					parentId: whiteId,
 					elementType: 'div',
 					position: { x: 0, y: 0 },
-					size: { width: 300, height: 300 },
-					style: { backgroundColor: '#4CAF50' }
+					size: { width: 400, height: 400 },
+					style: { backgroundColor: '#FF9800' }
 				}
 			});
 
-			// Rotate green div
-			await dispatch({
-				id: nanoid(),
-				type: 'ROTATE_ELEMENT',
-				timestamp: Date.now(),
-				payload: {
-					elementId: greenId,
-					rotation: 25
-				}
-			});
-
-			// 3. Purple div (child of green)
-			const purpleId = nanoid();
+			// 3. Blue div (grandchild)
+			const blueId = nanoid();
 			await dispatch({
 				id: nanoid(),
 				type: 'CREATE_ELEMENT',
 				timestamp: Date.now(),
 				payload: {
-					elementId: purpleId,
+					elementId: blueId,
 					pageId,
-					parentId: greenId,
+					parentId: orangeId,
 					elementType: 'div',
 					position: { x: 50, y: 50 },
-					size: { width: 150, height: 150 },
-					style: { backgroundColor: '#9C27B0' }
+					size: { width: 200, height: 200 },
+					style: { backgroundColor: '#2196F3' }
 				}
 			});
 
 			return {
-				greenDiv: greenId,
-				purpleDiv: purpleId
+				whiteDiv: whiteId,
+				orangeDiv: orangeId,
+				blueDiv: blueId
 			};
 		});
 
 		await page.waitForTimeout(500);
 
-		console.log('\n=== TESTING PURPLE DIV (child of rotated green) ===');
+		console.log('\n=== TESTING BLUE DIV (grandchild of auto-layout) ===');
 
-		const purpleElement = page.locator(`[data-element-id="${purpleDiv}"]`);
-		const initialBox = await purpleElement.boundingBox();
+		const blueElement = page.locator(`[data-element-id="${blueDiv}"]`);
+		const initialBox = await blueElement.boundingBox();
 
 		if (!initialBox) {
-			throw new Error('Purple element not found');
+			throw new Error('Blue element not found');
 		}
 
-		console.log('Purple initial DOM position:', initialBox);
+		console.log('Blue initial DOM position:', initialBox);
 
 		const initialPos = await page.evaluate(
 			(id) => {
 				const state = (window as any).__getDesignState();
 				return state.elements[id].position;
 			},
-			purpleDiv
+			blueDiv
 		);
-		console.log('Purple initial stored position:', initialPos);
+		console.log('Blue initial stored position:', initialPos);
 
 		// Mousedown
 		const centerX = initialBox.x + initialBox.width / 2;
@@ -138,15 +131,15 @@ test.describe('Rotated Parent Child Drag', () => {
 		await page.waitForTimeout(100);
 
 		// Check position during mousedown
-		const boxDuringMousedown = await purpleElement.boundingBox();
+		const boxDuringMousedown = await blueElement.boundingBox();
 		if (boxDuringMousedown) {
 			const jumpX = Math.abs(boxDuringMousedown.x - initialBox.x);
 			const jumpY = Math.abs(boxDuringMousedown.y - initialBox.y);
 			console.log(`Jump on mousedown: X=${jumpX.toFixed(2)}px, Y=${jumpY.toFixed(2)}px`);
 
 			// Expect no jump (tolerance of 2px)
-			expect(jumpX, 'Purple should not jump horizontally on mousedown').toBeLessThan(2);
-			expect(jumpY, 'Purple should not jump vertically on mousedown').toBeLessThan(2);
+			expect(jumpX, 'Blue should not jump horizontally on mousedown').toBeLessThan(2);
+			expect(jumpY, 'Blue should not jump vertically on mousedown').toBeLessThan(2);
 		}
 
 		// Mouseup
@@ -154,15 +147,15 @@ test.describe('Rotated Parent Child Drag', () => {
 		await page.waitForTimeout(100);
 
 		// Check position after mouseup
-		const boxAfterMouseup = await purpleElement.boundingBox();
+		const boxAfterMouseup = await blueElement.boundingBox();
 		if (boxAfterMouseup) {
 			const jumpX = Math.abs(boxAfterMouseup.x - initialBox.x);
 			const jumpY = Math.abs(boxAfterMouseup.y - initialBox.y);
 			console.log(`Jump after mouseup: X=${jumpX.toFixed(2)}px, Y=${jumpY.toFixed(2)}px`);
 
 			// Expect no jump (tolerance of 2px)
-			expect(jumpX, 'Purple should not jump horizontally after mouseup').toBeLessThan(2);
-			expect(jumpY, 'Purple should not jump vertically after mouseup').toBeLessThan(2);
+			expect(jumpX, 'Blue should not jump horizontally after mouseup').toBeLessThan(2);
+			expect(jumpY, 'Blue should not jump vertically after mouseup').toBeLessThan(2);
 		}
 
 		console.log('\n✓ Test passed - no jumps detected');

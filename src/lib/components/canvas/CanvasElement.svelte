@@ -32,12 +32,36 @@ type DocumentWithCaret = Document & {
 };
 	import { currentTool } from '$lib/stores/tool-store';
 	import { get } from 'svelte/store';
-	import type { Element } from '$lib/types/events';
+	import type { Element, DesignState } from '$lib/types/events';
+
+	/**
+	 * Check if an element has any auto-layout ancestor in its parent chain
+	 */
+	function hasAutoLayoutAncestor(element: Element, state: DesignState): boolean {
+		let current = element;
+		while (current.parentId) {
+			const parent = state.elements[current.parentId];
+			if (!parent) break;
+
+			// Check if current element is an auto-layout child
+			const parentHasAutoLayout = parent.autoLayout?.enabled || false;
+			const currentIgnoresAutoLayout = current.autoLayout?.ignoreAutoLayout || false;
+			const isAutoLayoutChild = parentHasAutoLayout && !currentIgnoresAutoLayout;
+
+			if (isAutoLayoutChild) {
+				return true;
+			}
+
+			current = parent;
+		}
+		return false;
+	}
 
 	export let element: Element;
 	export let onStartDrag: ((e: MouseEvent, element: Element, handle?: string, selectedElements?: Element[]) => void) | undefined = undefined;
 	export let isPanning: boolean = false;
 	export let isDragging: boolean = false;
+	export let viewport: { x: number; y: number; scale: number } = { x: 0, y: 0, scale: 1 };
 
 	// Check if this element is a text element (used for cursor and editing)
 	$: isTextElement = ['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'span', 'a', 'button', 'label'].includes(element.type);
@@ -132,7 +156,7 @@ type DocumentWithCaret = Document & {
 
 			// If clicking a group element while another element from the same group is isolated,
 			// isolate this element too (sticky isolation for multi-selection)
-			if (groupId && state.groups[groupId] &&
+			if (groupId &&
 			    currentlyIsolatedElement &&
 			    currentlyIsolatedElement.groupId === groupId &&
 			    currentlyIsolatedId !== element.id) {
@@ -174,7 +198,7 @@ type DocumentWithCaret = Document & {
 		let elementsToDrag: Element[] = [];
 
 		// PRIORITY 1: Double-click on grouped element = ALWAYS isolate it
-		if (mightBeDoubleClick && groupId && state.groups[groupId]) {
+		if (mightBeDoubleClick && groupId) {
 			// Set isolation BEFORE selection to ensure SelectionOverlay sees it immediately
 			isIsolatedFromGroup = true;
 			isolateElementFromGroup(element.id);
@@ -186,7 +210,7 @@ type DocumentWithCaret = Document & {
 		else if (isIsolatedFromGroup && currentSelection.includes(element.id)) {
 			// If multiple elements are selected and they're all from the same group,
 			// drag all of them together (sticky isolation mode)
-			if (isPartOfMultiSelection && groupId && state.groups[groupId]) {
+			if (isPartOfMultiSelection && groupId) {
 				const allFromSameGroup = currentSelection.every(id => {
 					const el = state.elements[id];
 					return el?.groupId === groupId;
@@ -203,7 +227,7 @@ type DocumentWithCaret = Document & {
 		// PRIORITY 2.5: Sticky isolation mode - clicking another element from the same group
 		// while an element is already isolated should isolate the clicked element
 		// This MUST come before multi-selection check to prevent group UI flash
-		else if (groupId && state.groups[groupId]) {
+		else if (groupId) {
 			const currentlyIsolatedId = $interactionState.isolatedElementId;
 			const currentlyIsolatedElement = currentlyIsolatedId ? state.elements[currentlyIsolatedId] : null;
 
@@ -221,7 +245,10 @@ type DocumentWithCaret = Document & {
 			}
 			// PRIORITY 4: First click on grouped element = select entire group
 			else {
-				const groupElementIds = state.groups[groupId].elementIds;
+				// Find all elements with the same groupId
+				const groupElementIds = Object.values(state.elements)
+					.filter(el => el.groupId === groupId)
+					.map(el => el.id);
 				selectElements(groupElementIds);
 				isIsolatedFromGroup = false;
 				elementsToDrag = groupElementIds
@@ -482,19 +509,92 @@ type DocumentWithCaret = Document & {
 			// If element has a parent, convert absolute to parent-relative
 			if (element.parentId) {
 				const currentSize = groupTransform.size || element.size;
+				const state = get(designState);
+				const parentEl = state.elements[element.parentId];
 
-				// 1. Calculate center in world space (absolute)
+				if (!parentEl) {
+					// Parent not found - fallback
+					return absolutePos;
+				}
+
+				// Calculate center in world space (absolute)
 				const centerWorld = {
 					x: absolutePos.x + currentSize.width / 2,
 					y: absolutePos.y + currentSize.height / 2
 				};
 
-				// 2. Transform center to local space (parent-relative)
-				const state = get(designState);
-				const parent = state.elements[element.parentId];
-				const centerLocal = absoluteToRelative(centerWorld, parent || null, state);
+				// CRITICAL FIX: Check if parent has auto-layout ancestor (same as drag fix)
+				const parentHasAutoLayoutAncestor = hasAutoLayoutAncestor(parentEl, state);
 
-				// 3. Convert back to top-left in local space
+				let centerLocal;
+
+				if (parentHasAutoLayoutAncestor) {
+					// Parent is in auto-layout: get its actual DOM position
+					const parentDom = document.querySelector(`[data-element-id="${parentEl.id}"]`);
+					const canvasElement = document.querySelector('.canvas');
+
+					if (parentDom && canvasElement) {
+						const parentRect = parentDom.getBoundingClientRect();
+						const canvasRect = canvasElement.getBoundingClientRect();
+
+						// Get parent's actual center from DOM
+						const parentCenterX = parentRect.left + parentRect.width / 2;
+						const parentCenterY = parentRect.top + parentRect.height / 2;
+						const parentCenterAbs = {
+							x: (parentCenterX - canvasRect.left - viewport.x) / viewport.scale,
+							y: (parentCenterY - canvasRect.top - viewport.y) / viewport.scale
+						};
+
+						// Calculate vector from parent center to element center
+						const dx = centerWorld.x - parentCenterAbs.x;
+						const dy = centerWorld.y - parentCenterAbs.y;
+
+						// Get parent's cumulative rotation
+						const parentRot = (() => {
+							let total = 0;
+							let current = parentEl;
+							while (current) {
+								total += current.rotation || 0;
+								if (!current.parentId) break;
+								current = state.elements[current.parentId];
+								if (!current) break;
+							}
+							return total;
+						})();
+
+						// Rotate vector by -parentRotation to get local coordinates
+						if (parentRot && Math.abs(parentRot % 360) > 0.1) {
+							const angleRad = (-parentRot * Math.PI) / 180;
+							const cos = Math.cos(angleRad);
+							const sin = Math.sin(angleRad);
+							const localDx = dx * cos - dy * sin;
+							const localDy = dx * sin + dy * cos;
+
+							const parentHalfW = parentEl.size.width / 2;
+							const parentHalfH = parentEl.size.height / 2;
+							centerLocal = {
+								x: parentHalfW + localDx,
+								y: parentHalfH + localDy
+							};
+						} else {
+							// No rotation: simple translation
+							const parentHalfW = parentEl.size.width / 2;
+							const parentHalfH = parentEl.size.height / 2;
+							centerLocal = {
+								x: parentHalfW + dx,
+								y: parentHalfH + dy
+							};
+						}
+					} else {
+						// Fallback: use coordinate utility
+						centerLocal = absoluteToRelative(centerWorld, parentEl, state);
+					}
+				} else {
+					// No auto-layout ancestor: use standard coordinate conversion
+					centerLocal = absoluteToRelative(centerWorld, parentEl, state);
+				}
+
+				// Convert back to top-left in local space
 				return {
 					x: centerLocal.x - currentSize.width / 2,
 					y: centerLocal.y - currentSize.height / 2
@@ -514,30 +614,104 @@ type DocumentWithCaret = Document & {
 			const isAutoLayoutReorder = parent?.autoLayout?.enabled && !element.autoLayout?.ignoreAutoLayout;
 
 			if (isAutoLayoutReorder) {
-				// Auto layout reordering: convert to relative
-				const state = get(designState);
-				const parentEl = element.parentId ? state.elements[element.parentId] : null;
-				return absoluteToRelative($interactionState.pendingPosition, parentEl, state);
+				// Auto layout reordering: pendingPosition is already in parent-relative coords
+				// SelectionOverlay calculates this from DOM to account for flexbox and rotation
+				return $interactionState.pendingPosition;
 			} else if (element.parentId) {
 				// Nested element drag: convert absolute position to parent-relative
 				const currentSize = $interactionState.pendingSize || element.size;
 				const state = get(designState);
 				const parentEl = state.elements[element.parentId];
-				
+
 				if (!parentEl) {
 					// Parent not found - fallback
 					return $interactionState.pendingPosition;
 				}
-				
-				// For rotated parents, we need to account for center-based rotation
-				// Use the coordinate utility which now handles this correctly
+
+				// Calculate center in world space (absolute)
 				const centerWorld = {
 					x: $interactionState.pendingPosition.x + currentSize.width / 2,
 					y: $interactionState.pendingPosition.y + currentSize.height / 2
 				};
-				
-				const centerLocal = absoluteToRelative(centerWorld, parentEl, state);
-				
+
+				// CRITICAL FIX: Check if parent has auto-layout ancestor
+				// If so, we MUST get parent's actual DOM position (not calculated from state)
+				// because auto-layout positioning affects the DOM but not stored positions
+				// The parent's stored position is (0,0) but its actual position is determined by flexbox
+				const parentHasAutoLayoutAncestor = hasAutoLayoutAncestor(parentEl, state);
+
+				let centerLocal;
+
+				if (parentHasAutoLayoutAncestor) {
+					// Parent is in auto-layout: get its actual DOM position
+					// This works for both rotated and non-rotated cases
+					const parentDom = document.querySelector(`[data-element-id="${parentEl.id}"]`);
+					const canvasElement = document.querySelector('.canvas');
+
+					if (parentDom && canvasElement) {
+						const parentRect = parentDom.getBoundingClientRect();
+						const canvasRect = canvasElement.getBoundingClientRect();
+
+						// Get parent's actual center from DOM
+						// For rotated elements, getBoundingClientRect returns the bounding box,
+						// and the center of the bounding box IS the element's center (CSS rotates around center)
+						const parentCenterX = parentRect.left + parentRect.width / 2;
+						const parentCenterY = parentRect.top + parentRect.height / 2;
+						const parentCenterAbs = {
+							x: (parentCenterX - canvasRect.left - viewport.x) / viewport.scale,
+							y: (parentCenterY - canvasRect.top - viewport.y) / viewport.scale
+						};
+
+						// Calculate vector from parent center to element center
+						const dx = centerWorld.x - parentCenterAbs.x;
+						const dy = centerWorld.y - parentCenterAbs.y;
+
+						// Get parent's cumulative rotation
+						const parentRot = (() => {
+							let total = 0;
+							let current = parentEl;
+							while (current) {
+								total += current.rotation || 0;
+								if (!current.parentId) break;
+								current = state.elements[current.parentId];
+								if (!current) break;
+							}
+							return total;
+						})();
+
+						// Rotate vector by -parentRotation to get local coordinates
+						if (parentRot && Math.abs(parentRot % 360) > 0.1) {
+							const angleRad = (-parentRot * Math.PI) / 180;
+							const cos = Math.cos(angleRad);
+							const sin = Math.sin(angleRad);
+							const localDx = dx * cos - dy * sin;
+							const localDy = dx * sin + dy * cos;
+
+							// Convert to local center position (measured from parent's top-left)
+							const parentHalfW = parentEl.size.width / 2;
+							const parentHalfH = parentEl.size.height / 2;
+							centerLocal = {
+								x: parentHalfW + localDx,
+								y: parentHalfH + localDy
+							};
+						} else {
+							// No rotation: simple translation
+							const parentHalfW = parentEl.size.width / 2;
+							const parentHalfH = parentEl.size.height / 2;
+							centerLocal = {
+								x: parentHalfW + dx,
+								y: parentHalfH + dy
+							};
+						}
+					} else {
+						// Fallback: use coordinate utility
+						centerLocal = absoluteToRelative(centerWorld, parentEl, state);
+					}
+				} else {
+					// No auto-layout ancestor: use standard coordinate conversion
+					centerLocal = absoluteToRelative(centerWorld, parentEl, state);
+				}
+
 				return {
 					x: centerLocal.x - currentSize.width / 2,
 					y: centerLocal.y - currentSize.height / 2
@@ -608,12 +782,13 @@ type DocumentWithCaret = Document & {
 		const useRelativePosition = positionMode === 'flex-item' || (parentHasAutoLayout && !childIgnoresAutoLayout);
 
 		// Position and size - use pending values during interaction
-		if (isBeingDragged && !isAutoLayoutChildDragging) {
+		if (isBeingDragged) {
 			// Element being dragged: use absolute positioning to follow cursor
-			// Note: DOM order determines stacking, no z-index manipulation needed
+			// This applies to ALL drags including auto-layout children
 			styles.push(`position: absolute`);
 			styles.push(`left: ${displayPosition.x}px`);
 			styles.push(`top: ${displayPosition.y}px`);
+			styles.push(`z-index: 10000`); // Ensure dragged element is on top
 		} else if (useRelativePosition) {
 			// Flex item: use relative positioning (CSS flexbox handles layout)
 			styles.push(`position: relative`);
@@ -623,10 +798,8 @@ type DocumentWithCaret = Document & {
 			styles.push(`flex-shrink: 0`);
 			styles.push(`flex-grow: 0`);
 
-			// If being dragged, dim the original (ghost will follow cursor at full opacity)
-			if (isAutoLayoutChildDragging) {
-				styles.push(`opacity: 0.3`);
-			}
+			// Note: Removed opacity dimming - element is dragged at full opacity
+			// A blue placeholder indicator shows where element will be inserted instead
 		} else {
 			// Absolute positioning: use explicit coordinates
 			styles.push(`position: absolute`);
@@ -978,12 +1151,80 @@ function handleContextMenu(e: MouseEvent) {
 		{/if}
 		{/key}
 
-		<!-- Render children recursively -->
-		{#each element.children as childId}
-			{#if $designState.elements[childId]}
-				<svelte:self element={$designState.elements[childId]} {isPanning} {isDragging} {onStartDrag} />
+		<!-- Render children recursively with placeholder injection for auto-layout reordering -->
+		{#if element.autoLayout?.enabled && $interactionState.activeElementId && $interactionState.reorderParentId === element.id && $interactionState.reorderTargetIndex !== null}
+			{@const activeId = $interactionState.activeElementId}
+			{@const reorderTarget = $interactionState.reorderTargetIndex}
+			{@const draggedElement = $designState.elements[activeId]}
+			{@const siblings = element.children.filter(id => id !== activeId)}
+			{@const draggedSize = draggedElement?.size || { width: 0, height: 0 }}
+			{@const draggedRotation = draggedElement?.rotation || 0}
+			{@const placeholderSize = (() => {
+				// For rotated elements, calculate bounding box size (same as element margin calculation)
+				if (draggedRotation && draggedRotation !== 0) {
+					const angleRad = draggedRotation * (Math.PI / 180);
+					const cos = Math.abs(Math.cos(angleRad));
+					const sin = Math.abs(Math.sin(angleRad));
+					const boundingWidth = draggedSize.width * cos + draggedSize.height * sin;
+					const boundingHeight = draggedSize.width * sin + draggedSize.height * cos;
+					return { width: boundingWidth, height: boundingHeight };
+				}
+				// Non-rotated: use actual size
+				return draggedSize;
+			})()}
+
+			{#each siblings as childId, index}
+				<!-- Inject placeholder before the target child -->
+				{#if index === reorderTarget}
+					<div
+						class="auto-layout-placeholder"
+						style="
+							flex-shrink: 0;
+							width: {placeholderSize.width}px;
+							height: {placeholderSize.height}px;
+							background-color: rgba(59, 130, 246, 0.5);
+							border: none;
+							border-radius: 0;
+							pointer-events: none;
+							box-shadow: none;
+						"
+					></div>
+				{/if}
+
+				{#if $designState.elements[childId]}
+					<svelte:self element={$designState.elements[childId]} {isPanning} {isDragging} {viewport} {onStartDrag} />
+				{/if}
+			{/each}
+
+			<!-- If inserting at the end (after all siblings) -->
+			{#if reorderTarget >= siblings.length}
+				<div
+					class="auto-layout-placeholder"
+					style="
+						flex-shrink: 0;
+						width: {placeholderSize.width}px;
+						height: {placeholderSize.height}px;
+						background-color: rgba(59, 130, 246, 0.5);
+						border: none;
+						border-radius: 0;
+						pointer-events: none;
+						box-shadow: none;
+					"
+				></div>
 			{/if}
-		{/each}
+
+			<!-- Render the dragged element itself (it stays visible during drag) -->
+			{#if draggedElement}
+				<svelte:self element={draggedElement} {isPanning} {isDragging} {viewport} {onStartDrag} />
+			{/if}
+		{:else}
+			<!-- Normal rendering without placeholder -->
+			{#each element.children as childId}
+				{#if $designState.elements[childId]}
+					<svelte:self element={$designState.elements[childId]} {isPanning} {isDragging} {viewport} {onStartDrag} />
+				{/if}
+			{/each}
+		{/if}
 </div>
 
 <style>

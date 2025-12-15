@@ -31,9 +31,9 @@ import type {
 	GroupResizeElementsEvent,
 	GroupRotateElementsEvent,
 	GroupUpdateStylesEvent,
-	// GroupElementsEvent, // DEPRECATED
-	// UngroupElementsEvent, // DEPRECATED
-	// CreateGroupWrapperEvent, // DEPRECATED
+	CreateGroupEvent,
+	UngroupElementsEvent,
+	ReorderGroupEvent,
 	UpdateStylesEvent,
 	UpdateTypographyEvent,
 	UpdateSpacingEvent,
@@ -49,6 +49,41 @@ import type {
 	MigrateToUnifiedPositioningEvent
 } from '$lib/types/events';
 import { invalidateTransformCache } from '$lib/utils/coordinates';
+
+// ============================================================================
+// Rounding Utilities
+// ============================================================================
+
+/**
+ * Round position coordinates to integers
+ */
+function roundPosition(position: { x: number; y: number }): { x: number; y: number } {
+	return {
+		x: Math.round(position.x),
+		y: Math.round(position.y)
+	};
+}
+
+/**
+ * Round size dimensions to integers
+ */
+function roundSize(size: { width: number; height: number }): { width: number; height: number } {
+	return {
+		width: Math.round(size.width),
+		height: Math.round(size.height)
+	};
+}
+
+/**
+ * Round rotation angle to integer
+ */
+function roundRotation(rotation: number): number {
+	return Math.round(rotation);
+}
+
+// ============================================================================
+// Initial State
+// ============================================================================
 
 /**
  * Initial empty state
@@ -153,13 +188,13 @@ export function reduceEvent(state: DesignState, event: DesignEvent): DesignState
 		case 'GROUP_UPDATE_STYLES':
 			return handleGroupUpdateStyles(state, event);
 
-		// Group operations (DEPRECATED - groups are now regular divs)
-		// case 'GROUP_ELEMENTS':
-		// 	return handleGroupElements(state, event);
-		// case 'UNGROUP_ELEMENTS':
-		// 	return handleUngroupElements(state, event);
-		// case 'CREATE_GROUP_WRAPPER':
-		// 	return handleCreateGroupWrapper(state, event);
+		// Group operations
+		case 'CREATE_GROUP':
+			return handleCreateGroup(state, event);
+		case 'UNGROUP_ELEMENTS':
+			return handleUngroupElements(state, event);
+		case 'REORDER_GROUP':
+			return handleReorderGroup(state, event);
 
 		// Style operations
 		case 'UPDATE_STYLES':
@@ -218,8 +253,8 @@ function handleCreateElement(state: DesignState, event: CreateElementEvent): Des
 		parentId,
 		pageId,
 		positionMode: 'absolute', // Default: absolute positioning
-		position,
-		size,
+		position: roundPosition(position),
+		size: roundSize(size),
 		styles: styles || {},
 		typography: {},
 		spacing: {},
@@ -261,6 +296,28 @@ function handleUpdateElement(state: DesignState, event: UpdateElementEvent): Des
 
 	if (!element) return state;
 
+	// If groupId is changing, we need to update the groups state
+	let newGroups = state.groups;
+	if ('groupId' in changes && changes.groupId !== element.groupId) {
+		newGroups = { ...state.groups };
+
+		// Remove from old group if it was in one
+		if (element.groupId && newGroups[element.groupId]) {
+			newGroups[element.groupId] = {
+				...newGroups[element.groupId],
+				elementIds: newGroups[element.groupId].elementIds.filter(id => id !== elementId)
+			};
+		}
+
+		// Add to new group if there is one
+		if (changes.groupId && newGroups[changes.groupId]) {
+			newGroups[changes.groupId] = {
+				...newGroups[changes.groupId],
+				elementIds: [...newGroups[changes.groupId].elementIds, elementId]
+			};
+		}
+	}
+
 	return {
 		...state,
 		elements: {
@@ -269,7 +326,8 @@ function handleUpdateElement(state: DesignState, event: UpdateElementEvent): Des
 				...element,
 				...changes
 			}
-		}
+		},
+		groups: newGroups
 	};
 }
 
@@ -425,15 +483,23 @@ function handleGroupDeleteElements(state: DesignState, event: GroupDeleteElement
 		}
 	}
 
-	// For each affected group, check if all elements are being deleted
+	// For each affected group, check if all elements and child groups are being deleted
 	for (const groupId of groupsToCheck) {
 		const group = state.groups[groupId];
 		if (!group) continue;
 
-		// Check if all group elements are being deleted
+		// Check if all direct group elements are being deleted
 		const allElementsDeleted = group.elementIds.every(id => idsToDelete.has(id));
 
-		if (allElementsDeleted) {
+		// Check if all child groups are being deleted (for nested groups)
+		const childGroups = Object.values(state.groups).filter(g => g.parentGroupId === groupId);
+		const allChildGroupsDeleted = childGroups.length === 0 || childGroups.every(childGroup =>
+			// A child group is considered deleted if it's in groupsToCheck and will be deleted
+			groupsToCheck.has(childGroup.id) &&
+			childGroup.elementIds.every(id => idsToDelete.has(id))
+		);
+
+		if (allElementsDeleted && allChildGroupsDeleted) {
 			// All group elements are being deleted - also delete the wrapper if it exists
 			if (group.wrapperId && !idsToDelete.has(group.wrapperId)) {
 				// Wrapper is not in the deletion list, add it
@@ -497,7 +563,7 @@ function handleMoveElement(state: DesignState, event: MoveElementEvent): DesignS
 			...state.elements,
 			[elementId]: {
 				...element,
-				position
+				position: roundPosition(position)
 			}
 		}
 	};
@@ -519,9 +585,9 @@ function handleResizeElement(state: DesignState, event: ResizeElementEvent): Des
 			...state.elements,
 			[elementId]: {
 				...element,
-				size,
+				size: roundSize(size),
 				// Update position if provided (for N/W handles)
-				...(position && { position })
+				...(position && { position: roundPosition(position) })
 			}
 		}
 	};
@@ -543,7 +609,7 @@ function handleRotateElement(state: DesignState, event: RotateElementEvent): Des
 			...state.elements,
 			[elementId]: {
 				...element,
-				rotation
+				rotation: roundRotation(rotation)
 			}
 		}
 	};
@@ -837,8 +903,11 @@ function handleGroupMoveElements(state: DesignState, event: GroupMoveElementsEve
 		if (element) {
 			newElements[elementId] = {
 				...element,
-				position
+				position: roundPosition(position)
 			};
+
+			// Invalidate transform cache for this element and descendants
+			invalidateTransformCache(elementId, state);
 
 			// Track groups that contain this element
 			if (element.groupId) {
@@ -876,9 +945,12 @@ function handleGroupResizeElements(state: DesignState, event: GroupResizeElement
 		if (element) {
 			newElements[elementId] = {
 				...element,
-				size,
-				...(position && { position })
+				size: roundSize(size),
+				...(position && { position: roundPosition(position) })
 			};
+
+			// Invalidate transform cache for this element and descendants
+			invalidateTransformCache(elementId, state);
 
 			// Track groups that contain this element
 			if (element.groupId) {
@@ -916,9 +988,12 @@ function handleGroupRotateElements(state: DesignState, event: GroupRotateElement
 		if (element) {
 			newElements[elementId] = {
 				...element,
-				rotation,
-				position
+				rotation: roundRotation(rotation),
+				position: roundPosition(position)
 			};
+
+			// Invalidate transform cache for this element and descendants
+			invalidateTransformCache(elementId, state);
 
 			// Track groups that contain this element
 			if (element.groupId) {
@@ -966,405 +1041,242 @@ function handleGroupUpdateStyles(state: DesignState, event: GroupUpdateStylesEve
 	};
 }
 
-// ============================================================================
-// Group Handlers
-// ============================================================================
+function handleCreateGroup(state: DesignState, event: CreateGroupEvent): DesignState {
+	const { groupId, elementIds, parentGroupId } = event.payload;
+	const newElements = { ...state.elements };
+	const newGroups = { ...state.groups };
 
-// DEPRECATED: Group handlers removed - groups are now regular divs
-/*
-function handleGroupElements(state: DesignState, event: GroupElementsEvent): DesignState {
-	const { groupId, elementIds } = event.payload;
+	// Track which existing ROOT groups are being nested
+	const rootGroupIds = new Set<string>();
+	const ungroupedElementIds: string[] = [];
 
-	// Check if group already exists - if so, add elements to it instead of replacing
-	const existingGroup = state.groups[groupId];
-	const group: Group = existingGroup
-		? {
-				id: groupId,
-				elementIds: [...existingGroup.elementIds, ...elementIds]
-		  }
-		: {
-				id: groupId,
-				elementIds
-		  };
+	// Categorize elements: find root groups vs ungrouped elements
+	for (const id of elementIds) {
+		const el = newElements[id];
+		if (el?.groupId) {
+			// Find the root parent group (traverse up the hierarchy)
+			let currentGroupId = el.groupId;
+			let group = newGroups[currentGroupId];
 
-	const elementsToGroup = elementIds
-		.map(id => state.elements[id])
-		.filter(Boolean);
+			while (group?.parentGroupId) {
+				currentGroupId = group.parentGroupId;
+				group = newGroups[currentGroupId];
+			}
 
-	if (elementsToGroup.length === 0) return state;
-
-	// Check if elements have a common parent
-	const parentId = elementsToGroup[0].parentId;
-	const allSameParent = elementsToGroup.every(el => el.parentId === parentId);
-
-	let newPages = state.pages;
-	let newElements = { ...state.elements };
-
-	if (allSameParent && parentId) {
-		// Elements have a parent - reorder in parent's children array
-		const parent = state.elements[parentId];
-		if (parent) {
-			const allChildIds = [...parent.children];
-
-			// Find the highest array position (topmost layer) among grouped elements
-			const groupedIndices = elementIds.map(id => allChildIds.indexOf(id)).filter(i => i !== -1);
-			const topmostIndex = Math.max(...groupedIndices);
-
-			// Remove grouped element IDs
-			const filteredChildIds = allChildIds.filter(id => !elementIds.includes(id));
-
-			// Insert grouped elements as a sequence at the topmost position
-			// Elements inserted maintain their relative order from elementIds array
-			const newChildIds = [
-				...filteredChildIds.slice(0, topmostIndex),
-				...elementIds,
-				...filteredChildIds.slice(topmostIndex)
-			];
-
-			// Update parent's children array
-			newElements[parentId] = {
-				...parent,
-				children: newChildIds
-			};
-		}
-	} else if (allSameParent && !parentId) {
-		// Root elements - reorder in page's canvasElements array
-		const pageId = elementsToGroup[0].pageId;
-		const page = state.pages[pageId];
-
-		if (page) {
-			const allRootIds = [...page.canvasElements];
-
-			// Find the highest array position (topmost layer) among grouped elements
-			const groupedIndices = elementIds.map(id => allRootIds.indexOf(id)).filter(i => i !== -1);
-			const topmostIndex = Math.max(...groupedIndices);
-
-			// Remove grouped element IDs
-			const filteredRootIds = allRootIds.filter(id => !elementIds.includes(id));
-
-			// Insert grouped elements as a sequence at the topmost position
-			// Elements inserted maintain their relative order from elementIds array
-			const newRootIds = [
-				...filteredRootIds.slice(0, topmostIndex),
-				...elementIds,
-				...filteredRootIds.slice(topmostIndex)
-			];
-
-			// Update page's canvasElements array
-			newPages = {
-				...state.pages,
-				[pageId]: {
-					...page,
-					canvasElements: newRootIds
-				}
-			};
+			rootGroupIds.add(currentGroupId);
+		} else {
+			ungroupedElementIds.push(id);
 		}
 	}
 
-	// Update elements to reference the group (no z-index needed)
-	elementsToGroup.forEach((element) => {
-		newElements[element.id] = {
-			...element,
-			groupId
+	// Determine if we're creating a nested group (grouping existing groups)
+	const isNestingGroups = rootGroupIds.size > 0;
+
+	if (isNestingGroups) {
+		// NESTED GROUP: Set parentGroupId on root groups, don't modify element groupIds
+		for (const rootGroupId of rootGroupIds) {
+			if (newGroups[rootGroupId]) {
+				newGroups[rootGroupId] = {
+					...newGroups[rootGroupId],
+					parentGroupId: groupId
+				};
+			}
+		}
+
+		// Only assign new groupId to ungrouped elements (if any)
+		for (const id of ungroupedElementIds) {
+			const el = newElements[id];
+			if (el) {
+				newElements[id] = { ...el, groupId };
+			}
+		}
+
+		// For nested groups, only store ungrouped element IDs
+		// Child groups track their own elements via their groupId
+		newGroups[groupId] = {
+			id: groupId,
+			elementIds: ungroupedElementIds, // Only direct members, not elements from child groups
+			parentGroupId: parentGroupId // Preserve parent group ID if provided (for paste/duplicate)
 		};
-	});
-
-	// Check if all elements share a group wrapper as parent
-	// If so, set wrapperId on the group
-	let wrapperId: string | undefined = undefined;
-	if (allSameParent && parentId) {
-		const parent = newElements[parentId];
-		if (parent?.isGroupWrapper) {
-			wrapperId = parentId;
+	} else {
+		// SIMPLE GROUP: All elements are ungrouped, assign groupId to all
+		for (const id of elementIds) {
+			const el = newElements[id];
+			if (el) {
+				newElements[id] = { ...el, groupId };
+			}
 		}
+
+		newGroups[groupId] = {
+			id: groupId,
+			elementIds: elementIds,
+			parentGroupId: parentGroupId // Preserve parent group ID if provided (for paste/duplicate)
+		};
 	}
 
-	// Update or create the group with wrapperId if applicable
-	const finalGroup: Group = wrapperId
-		? { ...group, wrapperId }
-		: group;
-
-	return {
-		...state,
-		groups: {
-			...state.groups,
-			[groupId]: finalGroup
-		},
-		elements: newElements,
-		pages: newPages
-	};
+	return { ...state, elements: newElements, groups: newGroups };
 }
 
 function handleUngroupElements(state: DesignState, event: UngroupElementsEvent): DesignState {
 	const { groupId } = event.payload;
-	const group = state.groups[groupId];
-
-	if (!group) return state;
-
 	const newElements = { ...state.elements };
-	let newPages = state.pages;
+	const newGroups = { ...state.groups };
 
-	// Check if this is a new-style group with wrapper
-	if (group.wrapperId) {
-		const wrapper = newElements[group.wrapperId];
+	const groupToUngroup = newGroups[groupId];
 
-		if (wrapper) {
-			// Move children out of wrapper to wrapper's parent
-			for (const memberId of group.elementIds) {
-				const member = newElements[memberId];
-				if (member) {
-					// Calculate absolute position (member position + wrapper position)
-					const absolutePos = {
-						x: member.position.x + wrapper.position.x,
-						y: member.position.y + wrapper.position.y
-					};
-
-					newElements[memberId] = {
-						...member,
-						groupId: null,
-						parentId: wrapper.parentId,
-						position: absolutePos
-					};
-				}
-			}
-
-			// Remove wrapper from parent's children array or page's canvasElements
-			if (wrapper.parentId && newElements[wrapper.parentId]) {
-				const parent = newElements[wrapper.parentId];
-				newElements[wrapper.parentId] = {
-					...parent,
-					children: parent.children
-						.filter(id => id !== group.wrapperId)
-						.concat(group.elementIds)
-				};
-			} else {
-				// Root level - update page's canvasElements
-				const page = state.pages[wrapper.pageId];
-				if (page) {
-					newPages = {
-						...state.pages,
-						[wrapper.pageId]: {
-							...page,
-							canvasElements: page.canvasElements
-								.filter(id => id !== group.wrapperId)
-								.concat(group.elementIds)
-						}
-					};
-				}
-			}
-
-			// Delete the wrapper element
-			delete newElements[group.wrapperId];
-		}
-	} else {
-		// Old-style group (no wrapper) - just remove groupId from elements
-		for (const elementId of group.elementIds) {
-			const element = newElements[elementId];
-			if (element) {
-				newElements[elementId] = {
-					...element,
-					groupId: null
-				};
-			}
+	// Remove groupId from all elements with matching groupId
+	for (const el of Object.values(newElements)) {
+		if (el.groupId === groupId) {
+			// If the group being ungrouped has a parent, move elements to the parent group
+			const newGroupId = groupToUngroup?.parentGroupId || null;
+			newElements[el.id] = { ...el, groupId: newGroupId };
 		}
 	}
 
-	// Delete the group
-	const newGroups = { ...state.groups };
+	// Clear parentGroupId from any nested child groups
+	for (const childGroup of Object.values(newGroups)) {
+		if (childGroup.parentGroupId === groupId) {
+			newGroups[childGroup.id] = {
+				...childGroup,
+				parentGroupId: groupToUngroup?.parentGroupId || undefined
+			};
+		}
+	}
+
+	// Remove the group record from state.groups
 	delete newGroups[groupId];
+
+	return { ...state, elements: newElements, groups: newGroups };
+}
+
+function handleReorderGroup(state: DesignState, event: ReorderGroupEvent): DesignState {
+	const { groupId, newParentId, newIndex } = event.payload;
+
+	// Get all elements in the group
+	const groupElements = Object.values(state.elements)
+		.filter(el => el.groupId === groupId);
+
+	if (groupElements.length === 0) {
+		return state;
+	}
+
+	// Get the current parent of the group elements (they should all have the same parent)
+	const firstElement = groupElements[0];
+	const oldParentId = firstElement.parentId ?? null;
+	const pageId = firstElement.pageId;
+	const page = state.pages[pageId];
+	if (!page) return state;
+
+	const groupElementIds = groupElements.map(el => el.id);
+
+	// Determine source and destination arrays
+	let sourceArray: string[];
+	let destArray: string[];
+
+	// Get source array (where group currently is)
+	if (oldParentId) {
+		const oldParent = state.elements[oldParentId];
+		if (!oldParent) return state;
+		sourceArray = [...(oldParent.children || [])];
+	} else {
+		sourceArray = [...page.canvasElements];
+	}
+
+	// Get destination array (where group is moving to)
+	if (newParentId) {
+		const newParent = state.elements[newParentId];
+		if (!newParent) return state;
+		destArray = oldParentId === newParentId ? sourceArray : [...(newParent.children || [])];
+	} else {
+		destArray = oldParentId === null ? sourceArray : [...page.canvasElements];
+	}
+
+	// Sort group elements by their current DOM order in source array
+	const sortedGroupElementIds = groupElementIds.sort((a, b) => {
+		const aIndex = sourceArray.indexOf(a);
+		const bIndex = sourceArray.indexOf(b);
+		return aIndex - bIndex;
+	});
+
+	// Remove group elements from source array
+	const filteredSource = sourceArray.filter(id => !groupElementIds.includes(id));
+
+	// If moving to a different parent, update destArray to be separate
+	let finalDestArray: string[];
+	if (oldParentId === newParentId) {
+		// Same parent - use filtered source
+		finalDestArray = filteredSource;
+	} else {
+		// Different parent - destArray already initialized
+		finalDestArray = destArray;
+	}
+
+	// Calculate adjusted insertion index
+	let adjustedIndex = newIndex;
+
+	// If moving within same parent, we need to check if any group elements were before newIndex
+	if (oldParentId === newParentId) {
+		// Count how many group elements were before the newIndex position
+		const elementsBeforeIndex = sortedGroupElementIds.filter(id => {
+			const currentIndex = sourceArray.indexOf(id);
+			return currentIndex < newIndex;
+		}).length;
+
+		// Adjust the index if elements were removed from before the insertion point
+		adjustedIndex = newIndex - elementsBeforeIndex;
+	}
+
+	// Insert group elements at the new position
+	finalDestArray.splice(adjustedIndex, 0, ...sortedGroupElementIds);
+
+	// Update state
+	const newElements = { ...state.elements };
+	const newPages = { ...state.pages };
+
+	// Update parent references for all group elements
+	for (const elementId of groupElementIds) {
+		newElements[elementId] = {
+			...state.elements[elementId],
+			parentId: newParentId
+		};
+	}
+
+	// Update source parent if it exists and changed
+	if (oldParentId && oldParentId !== newParentId) {
+		newElements[oldParentId] = {
+			...state.elements[oldParentId],
+			children: filteredSource
+		};
+	}
+
+	// Update destination parent or page
+	if (newParentId) {
+		newElements[newParentId] = {
+			...state.elements[newParentId],
+			children: finalDestArray
+		};
+	} else {
+		// Update page's canvasElements
+		newPages[pageId] = {
+			...page,
+			canvasElements: finalDestArray
+		};
+	}
+
+	// If source was page and different from dest, update source page too
+	if (!oldParentId && oldParentId !== newParentId) {
+		newPages[pageId] = {
+			...page,
+			canvasElements: filteredSource
+		};
+	}
 
 	return {
 		...state,
-		groups: newGroups,
 		elements: newElements,
 		pages: newPages
 	};
 }
-
-function handleCreateGroupWrapper(state: DesignState, event: CreateGroupWrapperEvent): DesignState {
-	const { groupId, wrapperId, elementIds, wrapperPosition, wrapperSize, memberOffsets, parentId, pageId } = event.payload;
-
-	const newElements = { ...state.elements };
-	let newPages = state.pages;
-
-	// Check if wrapper already exists (e.g., during paste operation)
-	const existingWrapper = state.elements[wrapperId];
-	if (!existingWrapper) {
-		// Create the wrapper element
-		const wrapper: Element = {
-			id: wrapperId,
-			type: 'div',
-			name: 'Group',
-			isGroupWrapper: true,
-			parentId,
-			pageId,
-			groupId: null,
-			position: wrapperPosition,
-			size: wrapperSize,
-			rotation: 0,
-			visible: true,
-			locked: false,
-			styles: { display: 'block' },
-			typography: {},
-			spacing: {},
-			children: elementIds
-		};
-
-		newElements[wrapperId] = wrapper;
-	} else {
-		// Wrapper already exists (e.g., during paste) - update it to ensure correct properties
-		// Preserve existing styles but ensure display: block and isGroupWrapper: true
-		const existingStyles = existingWrapper.styles || {};
-		newElements[wrapperId] = {
-			...existingWrapper,
-			isGroupWrapper: true,
-			children: elementIds,
-			// Preserve wrapper's dimensions and position (they were already set during paste)
-			position: wrapperPosition,
-			size: wrapperSize,
-			// Ensure display: block is set (preserve other styles)
-			styles: {
-				...existingStyles,
-				display: 'block'
-			}
-		};
-	}
-
-	// Update each member element
-	// Only update if wrapper doesn't already exist (during paste, children are already correctly set up)
-	if (!existingWrapper) {
-		for (const elementId of elementIds) {
-			const element = newElements[elementId];
-			if (element) {
-				const offset = memberOffsets[elementId] || { x: 0, y: 0 };
-				newElements[elementId] = {
-					...element,
-					parentId: wrapperId,
-					groupId,
-					position: offset
-				};
-			}
-		}
-	} else {
-		// Wrapper already exists - just update groupId on members (they already have correct parentId and position)
-		for (const elementId of elementIds) {
-			const element = newElements[elementId];
-			if (element) {
-				newElements[elementId] = {
-					...element,
-					groupId
-				};
-			}
-		}
-	}
-
-	// Add wrapper to parent's children array or page's canvasElements
-	// Only do this if wrapper doesn't already exist (to avoid duplicate operations during paste)
-	// When wrapper exists (during paste), it's already in the parent's children array, so we just need to ensure
-	// member elements are removed from parent (they should already be children of wrapper)
-	if (!existingWrapper) {
-		if (parentId && newElements[parentId]) {
-			const parent = newElements[parentId];
-
-			// Remove member elements from parent's children
-			const filteredChildren = parent.children.filter(id => !elementIds.includes(id));
-
-			// Add wrapper at the position of the topmost member
-			const memberIndices = elementIds.map(id => parent.children.indexOf(id)).filter(i => i !== -1);
-			const topmostIndex = memberIndices.length > 0 ? Math.max(...memberIndices) : filteredChildren.length;
-
-			const newChildren = [
-				...filteredChildren.slice(0, topmostIndex),
-				wrapperId,
-				...filteredChildren.slice(topmostIndex)
-			];
-
-			newElements[parentId] = {
-				...parent,
-				children: newChildren
-			};
-		} else {
-			// Root level - update page's canvasElements
-			const page = state.pages[pageId];
-			if (page) {
-				// Remove member elements from page's canvasElements
-				const filteredElements = page.canvasElements.filter(id => !elementIds.includes(id));
-
-				// Add wrapper at the position of the topmost member
-				const memberIndices = elementIds.map(id => page.canvasElements.indexOf(id)).filter(i => i !== -1);
-				const topmostIndex = memberIndices.length > 0 ? Math.max(...memberIndices) : filteredElements.length;
-
-				const newCanvasElements = [
-					...filteredElements.slice(0, topmostIndex),
-					wrapperId,
-					...filteredElements.slice(topmostIndex)
-				];
-
-				newPages = {
-					...state.pages,
-					[pageId]: {
-						...page,
-						canvasElements: newCanvasElements
-					}
-				};
-			}
-		}
-	} else {
-		// Wrapper already exists (during paste) - ensure structure is correct
-		// The wrapper was already pasted into the parent, and the children were already pasted as children of the wrapper
-		// But we need to ensure:
-		// 1. Member elements are NOT in parent's children array (they should be children of wrapper)
-		// 2. Wrapper IS in parent's children array
-		if (parentId && newElements[parentId]) {
-			const parent = newElements[parentId];
-			// Remove member elements from parent's children (they should be children of wrapper, not parent)
-			const filteredChildren = parent.children.filter(id => !elementIds.includes(id));
-			// Ensure wrapper is in parent's children (it should already be there from paste, but verify)
-			if (!filteredChildren.includes(wrapperId)) {
-				// Wrapper not in parent's children - add it
-				filteredChildren.push(wrapperId);
-			}
-			newElements[parentId] = {
-				...parent,
-				children: filteredChildren
-			};
-		} else if (!parentId) {
-			// Root level - ensure wrapper is in page's canvasElements and members are removed
-			const page = state.pages[pageId];
-			if (page) {
-				const filteredElements = page.canvasElements.filter(id => !elementIds.includes(id));
-				if (!filteredElements.includes(wrapperId)) {
-					filteredElements.push(wrapperId);
-				}
-				newPages = {
-					...state.pages,
-					[pageId]: {
-						...page,
-						canvasElements: filteredElements
-					}
-				};
-			}
-		}
-	}
-
-	// Create the group record
-	const group: Group = {
-		id: groupId,
-		elementIds,
-		wrapperId
-	};
-
-	return {
-		...state,
-		elements: newElements,
-		pages: newPages,
-		groups: {
-			...state.groups,
-			[groupId]: group
-		}
-	};
-}
-*/
 
 // ============================================================================
 // Style Handlers

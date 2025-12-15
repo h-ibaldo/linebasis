@@ -12,13 +12,15 @@
 	 * - Drag to reorder (array position changes, not z-index)
 	 */
 
-	import { designState, selectElement, selectElements, toggleVisibility, toggleLock, renameElement, shiftElementLayer, reorderElement, toggleView } from '$lib/stores/design-store';
+	import { designState, selectElement, selectElements, toggleVisibility, toggleLock, renameElement, shiftElementLayer, reorderElement, toggleView, dispatch, reorderGroup, storeState } from '$lib/stores/design-store';
 	import { isolateElementFromGroup } from '$lib/stores/interaction-store';
 	import FloatingWindow from '$lib/components/ui/FloatingWindow.svelte';
 	import LayerTreeItem from './LayerTreeItem.svelte';
+	import GroupItem from './GroupItem.svelte';
 	import ContextMenu from '$lib/components/ui/ContextMenu.svelte';
 	import type { Element, Group } from '$lib/types/events';
 	import { onMount, tick } from 'svelte';
+	import { v4 as uuidv4 } from 'uuid';
 
 	interface MenuItem {
 		id: string;
@@ -67,6 +69,7 @@
 
 	// Drag and drop state
 	let draggedElementId: string | null = null;
+	let draggedGroupId: string | null = null; // Track when dragging a group
 	let draggedParentId: string | null = null;
 	let dropTargetIndex: number | null = null;
 	let dropTarget: { elementId: string; position: 'before' | 'after' | 'inside' } | null = null;
@@ -118,66 +121,84 @@
 		element?: Element;
 		group?: Group;
 		groupElements?: Element[];
+		nestedGroups?: LayerItem[]; // For nested groups - child groups of this group
 	}
 
-	function buildLayerItems(elements: Element[], groups: Record<string, Group>): LayerItem[] {
+	// Helper to check if a group has any elements (recursively checking child groups)
+	function groupHasElements(groupId: string, groups: Record<string, Group>, elements: Element[]): boolean {
+		// Check if any element belongs to this group
+		const hasDirectElements = elements.some(el => el.groupId === groupId);
+		if (hasDirectElements) return true;
+
+		// Check if any child groups have elements
+		const childGroups = Object.values(groups).filter(g => g.parentGroupId === groupId);
+		for (const childGroup of childGroups) {
+			if (groupHasElements(childGroup.id, groups, elements)) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	function buildLayerItems(elements: Element[], groups: Record<string, Group>, parentGroupId?: string): LayerItem[] {
 		const items: LayerItem[] = [];
 		const processedElementIds = new Set<string>();
+		const processedGroupIds = new Set<string>();
 
+		// First, handle child groups (groups with this parent)
+		for (const group of Object.values(groups)) {
+			if (group.parentGroupId === parentGroupId) {
+				// Get elements belonging to this group
+				const groupElements = elements.filter(el => el.groupId === group.id);
+
+				// Skip orphaned groups - groups with no elements in the entire hierarchy
+				if (!groupHasElements(group.id, groups, elements)) continue;
+
+				processedGroupIds.add(group.id);
+				groupElements.forEach(el => processedElementIds.add(el.id));
+
+				items.push({
+					type: 'group',
+					id: group.id,
+					groupElements,
+					nestedGroups: buildLayerItems(elements, groups, group.id) // Recursively get nested groups
+				});
+			}
+		}
+
+		// Then, handle elements at this level
 		for (const element of elements) {
 			// Skip if already processed as part of a group
 			if (processedElementIds.has(element.id)) continue;
 
-			// Skip group wrappers (they're displayed as group folders via the group record)
-			if (element.isGroupWrapper) {
-				const group = Object.values(groups).find(g => g.wrapperId === element.id);
-				if (group) {
-					// Skip if we already added this group
-					if (processedElementIds.has(group.id)) continue;
-
-					const groupElements = group.elementIds
-						.map(id => $designState.elements[id])
-						.filter(Boolean);
-
-					// Mark all group elements as processed
-					group.elementIds.forEach(id => processedElementIds.add(id));
-					processedElementIds.add(group.id);
-					processedElementIds.add(element.id); // Mark wrapper as processed too
-
-					items.push({
-						type: 'group',
-						id: group.id,
-						group,
-						groupElements
-					});
-				}
-				continue;
-			}
-
 			// Check if element belongs to a group
-			if (element.groupId && groups[element.groupId]) {
-				// Skip if we already added this group
-				if (processedElementIds.has(element.groupId)) continue;
+			if (element.groupId) {
+				// Skip if this is a nested group (already processed above)
+				if (processedGroupIds.has(element.groupId)) continue;
 
+				// Skip if this group has a different parent than we're looking for
 				const group = groups[element.groupId];
-				const groupElements = group.elementIds
-					.map(id => $designState.elements[id])
-					.filter(Boolean);
-				// Note: groupElements order comes from group.elementIds array order
-				// No z-index sorting needed - array order IS the DOM order
+				if (group?.parentGroupId !== parentGroupId) continue;
 
-				// Mark all group elements as processed
-				group.elementIds.forEach(id => processedElementIds.add(id));
-				processedElementIds.add(element.groupId);
+				// Find all elements with the same groupId
+				const groupElements = elements.filter(el => el.groupId === element.groupId);
+
+				// Skip empty groups (should not happen here, but safety check)
+				if (groupElements.length === 0) continue;
+
+				// Mark all group elements and the groupId as processed
+				groupElements.forEach(el => processedElementIds.add(el.id));
+				processedGroupIds.add(element.groupId);
 
 				items.push({
 					type: 'group',
 					id: element.groupId,
-					group,
-					groupElements
+					groupElements,
+					nestedGroups: buildLayerItems(elements, groups, element.groupId) // Recursively get nested groups
 				});
-			} else {
-				// Regular element (not in a group)
+			} else if (!parentGroupId) {
+				// Regular element (not in a group) - only show at root level
 				processedElementIds.add(element.id);
 				items.push({
 					type: 'element',
@@ -193,10 +214,57 @@
 
 
 	function handleSelectGroup(groupId: string) {
-		const group = $designState.groups[groupId];
-		if (group) {
-			selectElements(group.elementIds);
+		// Find the root parent group (traverse up the hierarchy)
+		let currentGroupId = groupId;
+		let group = $designState.groups[currentGroupId];
+
+		while (group?.parentGroupId) {
+			currentGroupId = group.parentGroupId;
+			group = $designState.groups[currentGroupId];
 		}
+
+		// Now currentGroupId is the top-most parent group
+		// Select all elements in this group and all nested child groups recursively
+		const elementIds = getAllElementsInGroupHierarchy(currentGroupId, $designState.groups, $designState.elements);
+
+		if (elementIds.length > 0) {
+			storeState.update((state) => ({
+				...state,
+				designState: {
+					...state.designState,
+					selectedElementIds: elementIds
+				}
+			}));
+		}
+	}
+
+	// Helper function to get all elements in a group and its nested children
+	function getAllElementsInGroupHierarchy(groupId: string, groups: Record<string, Group>, elements: Record<string, Element>): string[] {
+		const result: string[] = [];
+		const seen = new Set<string>();
+
+		// Get direct members of this group
+		for (const el of Object.values(elements)) {
+			if (el.groupId === groupId && !seen.has(el.id)) {
+				result.push(el.id);
+				seen.add(el.id);
+			}
+		}
+
+		// Get elements from all child groups recursively
+		for (const childGroup of Object.values(groups)) {
+			if (childGroup.parentGroupId === groupId) {
+				const childElements = getAllElementsInGroupHierarchy(childGroup.id, groups, elements);
+				for (const id of childElements) {
+					if (!seen.has(id)) {
+						result.push(id);
+						seen.add(id);
+					}
+				}
+			}
+		}
+
+		return result;
 	}
 
 	function handleSelectElement(elementId: string) {
@@ -230,6 +298,7 @@
 
 	function handleDragEnd() {
 		draggedElementId = null;
+		draggedGroupId = null;
 		draggedParentId = null;
 		dropTarget = null;
 		dropTargetIndex = null;
@@ -239,6 +308,77 @@
 		dropTarget = { elementId: targetElementId, position };
 	}
 
+	// Group drag handlers
+	function handleGroupDragStart(groupId: string) {
+		console.log('🟢 Group drag started:', groupId);
+		draggedGroupId = groupId;
+	}
+
+	async function handleGroupDrop(targetElementId: string, position: 'before' | 'after' | 'inside') {
+		console.log('🟢 Group drop:', { draggedGroupId, targetElementId, position });
+		if (!draggedGroupId) return;
+
+		const targetElement = $designState.elements[targetElementId];
+		if (!targetElement) return;
+
+		let newParentId: string | null;
+		let newIndex: number;
+
+		if (position === 'inside') {
+			// Drop inside the target element (make group children of target)
+			newParentId = targetElementId;
+			// Add as first child (top layer)
+			newIndex = 0;
+		} else {
+			// Drop before or after the target (same parent as target)
+			newParentId = targetElement.parentId ?? null;
+
+			// Find target's position in its parent's children array
+			let siblings: string[];
+			if (newParentId) {
+				// Has a parent - get parent's children
+				const parent = $designState.elements[newParentId];
+				if (!parent) return;
+				siblings = parent.children || [];
+			} else {
+				// Root level - MUST have a page for DOM-based layer ordering
+				if (!currentPage) {
+					console.error('❌ CRITICAL: No page found for root elements. Cannot reorder layers without a page.');
+					console.error('   LAYERS ARE DOM POSITION. Root elements MUST belong to a page\'s canvas to have a DOM order.');
+					handleDragEnd();
+					return;
+				}
+
+				// Use page's canvasElements array (DOM order)
+				siblings = currentPage.canvasElements;
+			}
+
+			const targetIndex = siblings.indexOf(targetElementId);
+			if (targetIndex === -1) return;
+
+			// Calculate new index
+			// Array: [A(0), B(1), C(2)] where 0=bottom layer, 2=top layer
+			// Visual display (reversed): C, B, A (top layer C shows first)
+			//
+			// When hovering over B in the UI:
+			//   - Mouse in TOP half: position='before', wants ABOVE B visually
+			//     → Between C and B in UI → Array: [A, B, ★, C] → Index = targetIndex + 1
+			//   - Mouse in BOTTOM half: position='after', wants BELOW B visually
+			//     → Between B and A in UI → Array: [A, ★, B, C] → Index = targetIndex
+			if (position === 'before') {
+				newIndex = targetIndex + 1;
+			} else {
+				newIndex = targetIndex;
+			}
+
+			// Note: No adjustment needed for groups moving within same parent
+			// because handleReorderGroup handles this internally
+		}
+
+		await reorderGroup(draggedGroupId, newParentId, newIndex);
+		handleDragEnd();
+	}
+
 	async function handleDrop(targetElementId: string, position: 'before' | 'after' | 'inside') {
 		if (!draggedElementId) return;
 
@@ -246,6 +386,36 @@
 		const targetElement = $designState.elements[targetElementId];
 
 		if (!draggedElement || !targetElement) return;
+
+		// Handle group membership when dropping before/after
+		if (position === 'before' || position === 'after') {
+			// If target is in a group, add dragged element to the same group
+			if (targetElement.groupId) {
+				if (draggedElement.groupId !== targetElement.groupId) {
+					await dispatch({
+						id: uuidv4(),
+						type: 'UPDATE_ELEMENT',
+						timestamp: Date.now(),
+						payload: {
+							elementId: draggedElementId,
+							changes: { groupId: targetElement.groupId }
+						}
+					});
+				}
+			}
+			// If target is NOT in a group but dragged element IS in a group, remove from group
+			else if (draggedElement.groupId) {
+				await dispatch({
+					id: uuidv4(),
+					type: 'UPDATE_ELEMENT',
+					timestamp: Date.now(),
+					payload: {
+						elementId: draggedElementId,
+						changes: { groupId: null }
+					}
+				});
+			}
+		}
 
 		let newParentId: string | null;
 		let newIndex: number;
@@ -481,50 +651,68 @@
 			</div>
 		{:else}
 			<div class="layers-tree">
+				<!-- Drop zone above first item (for groups at top) -->
+				{#if (draggedElementId || draggedGroupId) && layerItems.length > 0}
+					<div
+						class="top-drop-zone"
+						class:drop-target={dropTarget?.elementId === 'TOP' && dropTarget?.position === 'before'}
+						on:dragover={(e) => {
+							e.preventDefault();
+							dropTarget = { elementId: 'TOP', position: 'before' };
+						}}
+						on:drop={async (e) => {
+							e.preventDefault();
+
+							// Get the first item (will be the target)
+							const firstItem = layerItems[0];
+							const firstElementId = firstItem.type === 'group'
+								? firstItem.groupElements?.[0]?.id
+								: firstItem.element?.id;
+
+							if (firstElementId) {
+								// Drop before the first element
+								if (draggedGroupId) {
+									await handleGroupDrop(firstElementId, 'before');
+								} else if (draggedElementId) {
+									await handleDrop(firstElementId, 'before');
+								}
+							}
+						}}
+					>
+						{#if dropTarget?.elementId === 'TOP'}
+							<div class="drop-indicator"></div>
+						{/if}
+					</div>
+				{/if}
+
 				{#each layerItems as item (item.id)}
-					{#if item.type === 'group' && item.groupElements}
-						<!-- Group item -->
-						<div class="group-item">
-							<div
-								class="group-header"
-								class:selected={item.groupElements.some(el => selectedIds.includes(el.id))}
-								on:click={() => handleSelectGroup(item.id)}
-							>
-								<button 
-									class="expand-btn" 
-									on:click={(e) => toggleGroupExpanded(item.id, e)}
-									aria-label={!collapsedGroups[item.id] ? 'Collapse' : 'Expand'}
-								>
-									<span class="arrow" class:expanded={!collapsedGroups[item.id]}>▸</span>
-								</button>
-								<span class="group-icon">⊞</span>
-								<span class="group-name">Group</span>
-							</div>
-							<!-- Group members (collapsible) -->
-							{#if !collapsedGroups[item.id]}
-							<div class="group-children">
-								{#each item.groupElements as element (element.id)}
-									<LayerTreeItem
-										{element}
-										elements={$designState.elements}
-										{selectedIds}
-										onSelect={handleSelectElement}
-										onToggleVisibility={handleToggleVisibility}
-										onToggleLock={handleToggleLock}
-										onRename={handleRename}
-										onDragStart={handleDragStart}
-										onDragEnd={handleDragEnd}
-										onDragOver={handleDragOver}
-										onDrop={handleDrop}
-										{draggedElementId}
-										{dropTarget}
-										depth={1}
-										on:contextmenu={handleContextMenuOpen}
-									/>
-								{/each}
-							</div>
-							{/if}
-						</div>
+					{#if item.type === 'group'}
+						<!-- Group item - recursive component -->
+						<GroupItem
+							groupId={item.id}
+							groupElements={item.groupElements || []}
+							nestedGroups={item.nestedGroups || []}
+							{selectedIds}
+							{collapsedGroups}
+							{draggedGroupId}
+							{draggedElementId}
+							{dropTarget}
+							elements={$designState.elements}
+							depth={1}
+							onSelectGroup={handleSelectGroup}
+							onSelectElement={handleSelectElement}
+							onToggleVisibility={handleToggleVisibility}
+							onToggleLock={handleToggleLock}
+							onRename={handleRename}
+							onDragStart={handleDragStart}
+							onDragEnd={handleDragEnd}
+							onDragOver={handleDragOver}
+							onDrop={handleDrop}
+							onGroupDrop={handleGroupDrop}
+							{toggleGroupExpanded}
+							{handleGroupDragStart}
+							on:contextmenu={handleContextMenuOpen}
+						/>
 					{:else if item.element}
 						<!-- Regular element -->
 						<LayerTreeItem
@@ -540,7 +728,9 @@
 							onDragEnd={handleDragEnd}
 							onDragOver={handleDragOver}
 							onDrop={handleDrop}
+							onGroupDrop={handleGroupDrop}
 							{draggedElementId}
+							{draggedGroupId}
 							{dropTarget}
 							on:contextmenu={handleContextMenuOpen}
 						/>
@@ -593,6 +783,26 @@
 		padding: 8px 0;
 	}
 
+	.top-drop-zone {
+		height: 8px;
+		width: 100%;
+		position: relative;
+	}
+
+	.top-drop-zone .drop-indicator {
+		position: absolute;
+		top: 0;
+		left: 8px;
+		right: 8px;
+		height: 2px;
+		background-color: #007aff;
+		border-radius: 1px;
+	}
+
+	.top-drop-zone.drop-target {
+		background-color: rgba(0, 122, 255, 0.1);
+	}
+
 	.group-item {
 		width: 100%;
 	}
@@ -601,10 +811,18 @@
 		display: flex;
 		align-items: center;
 		padding: 4px 8px;
-		cursor: pointer;
+		cursor: grab;
 		user-select: none;
 		border-radius: 4px;
 		transition: background-color 0.1s;
+	}
+
+	.group-header:active {
+		cursor: grabbing;
+	}
+
+	.group-header.dragging {
+		opacity: 0.5;
 	}
 
 	.group-header:hover {

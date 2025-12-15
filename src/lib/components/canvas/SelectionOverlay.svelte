@@ -24,6 +24,33 @@
 	export let selectedElements: Element[];
 	export let isPanning: boolean = false;
 
+	// Feature flags
+	const SHOW_HOVER_BORDER = false; // Set to true to enable hover borders
+
+	/**
+	 * Check if any ancestor of the element (parent, grandparent, etc.) is an auto-layout child
+	 * This is needed for deep nesting scenarios (great-grandchildren, etc.)
+	 */
+	function hasAutoLayoutAncestor(element: Element, state: DesignState): boolean {
+		let current = element;
+		while (current.parentId) {
+			const parent = state.elements[current.parentId];
+			if (!parent) break;
+
+			// Check if current element is an auto-layout child
+			const parentHasAutoLayout = parent.autoLayout?.enabled || false;
+			const currentIgnoresAutoLayout = current.autoLayout?.ignoreAutoLayout || false;
+			const isAutoLayoutChild = parentHasAutoLayout && !currentIgnoresAutoLayout;
+
+			if (isAutoLayoutChild) {
+				return true;
+			}
+
+			current = parent;
+		}
+		return false;
+	}
+
 	// Event listener cleanup registry to prevent memory leaks
 	// Stores cleanup functions for all active event listeners
 	const cleanupFunctions: Array<() => void> = [];
@@ -88,6 +115,14 @@
 	let reorderElementSize: { width: number; height: number } = { width: 0, height: 0 }; // Size of element being reordered
 	let currentMouseScreen: { x: number; y: number } = { x: 0, y: 0 }; // Current mouse position for debug
 	let hasMovedBeyondThreshold: boolean = false; // Track if we've moved past the drag threshold
+
+	// Sync auto-layout reordering state to interaction store
+	$: {
+		updateInteractionStateThrottled({
+			reorderParentId,
+			reorderTargetIndex
+		});
+	}
 
 	// Screen-space debug helpers for rotation visualization (account for canvas DOM offset)
 	let debugCenterScreen: { x: number; y: number } | null = null;
@@ -1238,6 +1273,57 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 		e.stopPropagation();
 		e.preventDefault();
 
+		// NESTED GROUPS: If element is in a group, ensure root group hierarchy is selected
+		// (Will use the 'state' variable declared below)
+		let expandedElements: Element[] | null = null;
+		if (element.groupId) {
+			const currentState = get(designState);
+			let currentGroupId = element.groupId;
+			let group = currentState.groups[currentGroupId];
+
+			// Traverse up to find root parent group
+			while (group?.parentGroupId) {
+				currentGroupId = group.parentGroupId;
+				group = currentState.groups[currentGroupId];
+			}
+
+			// Check if we need to expand selection to include entire root group hierarchy
+			// We need to collect ALL element IDs in the entire hierarchy (including nested groups)
+			const getAllElementsInHierarchy = (groupId: string): string[] => {
+				const group = currentState.groups[groupId];
+				if (!group) return [];
+
+				let allElementIds = [...group.elementIds];
+
+				// Find all child groups and recursively get their elements
+				const childGroups = Object.values(currentState.groups).filter(g => g.parentGroupId === groupId);
+				for (const childGroup of childGroups) {
+					allElementIds.push(...getAllElementsInHierarchy(childGroup.id));
+				}
+
+				return allElementIds;
+			};
+
+			const hierarchyElementIds = getAllElementsInHierarchy(currentGroupId);
+
+			const currentSelectionIds = new Set((passedSelectedElements || selectedElements).map(el => el.id));
+
+			// Need expansion if any element in the hierarchy is not selected
+			const needsExpansion = hierarchyElementIds.some(id => !currentSelectionIds.has(id));
+
+			if (needsExpansion) {
+				// Trigger selection expansion which will include entire hierarchy
+				selectElement(element.id);
+				// Wait for selection to update
+				await tick();
+
+				// Read the expanded selection directly from the state
+				const updatedState = get(designState);
+				const expandedIds = updatedState.selectedElementIds;
+				expandedElements = expandedIds.map(id => updatedState.elements[id]).filter(Boolean);
+			}
+		}
+
 		// If clicking on a different element while another has pending transforms,
 		// clear the pending state to prevent layout issues
 		if (activeElementId && activeElementId !== element.id) {
@@ -1253,7 +1339,8 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 		activeElementId = element.id;
 
 		// Use passed selection if provided (to avoid timing issues), otherwise use store
-		const elementsToUse = passedSelectedElements || selectedElements;
+		// IMPORTANT: If we just expanded the selection for nested groups, use the expanded elements we read from state
+		const elementsToUse = expandedElements || passedSelectedElements || selectedElements;
 
 		// Check if we're working with a multi-selection
 		// EXCEPTION: If this is a single isolated element (not part of multi-isolated-element selection)
@@ -1710,15 +1797,11 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 					// For grandchildren, we need to use element.size (not getActualSize) to match CanvasElement calculation
 					const elementRect = elementDom.getBoundingClientRect();
 					const state = get(designState);
-					const parent = element.parentId ? state.elements[element.parentId] : null;
-					const grandparent = parent?.parentId ? state.elements[parent.parentId] : null;
-					const grandparentHasAutoLayout = grandparent?.autoLayout?.enabled || false;
-					const parentIgnoresAutoLayout = parent?.autoLayout?.ignoreAutoLayout || false;
-					const parentIsInAutoLayout = grandparentHasAutoLayout && !parentIgnoresAutoLayout;
-					
-					// For grandchildren, use element.size to match CanvasElement calculation
-					// For other elements, use getActualSize
-					const elementSize = parentIsInAutoLayout ? element.size : getActualSize(element);
+
+					// CRITICAL: Always use element.size to match CanvasElement rendering
+					// CanvasElement always uses element.size (never getActualSize), so we must do the same
+					// for coordinate calculations to be consistent
+					const elementSize = element.size;
 					const totalRotation = getCumulativeRotation(element) + (element.rotation || 0);
 					
 					// Calculate actual top-left position accounting for rotation
@@ -1779,62 +1862,115 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 					reorderParentId = parent.id;
 					reorderOriginalIndex = parent.children?.indexOf(element.id) ?? null;
 
-					// Store the offset from cursor to element's top-left in SCREEN space
-					// We'll use screen coordinates for ghost positioning to avoid coordinate conversion issues
-					const domElement = document.querySelector(`[data-element-id="${element.id}"]`);
-					if (domElement) {
+					// Set reorderTargetIndex immediately to the element's current position
+					// This makes the blue placeholder appear on mousedown instead of waiting for drag
+					reorderTargetIndex = reorderOriginalIndex;
+
+					// Get element's current visual position from DOM
+					const domElement = document.querySelector(`[data-element-id="${element.id}"]`) as HTMLElement;
+					const parentDomElement = document.querySelector(`[data-element-id="${parent.id}"]`) as HTMLElement;
+					if (domElement && parentDomElement) {
 						const rect = domElement.getBoundingClientRect();
+						const parentRect = parentDomElement.getBoundingClientRect();
+						const canvasElement = document.querySelector('.canvas');
+						const canvasRect = canvasElement?.getBoundingClientRect();
 
-						// Store element rotation and size for recalculation during drag
-						// Use getActualSize directly to ensure we use the CURRENT element being dragged
-						// (displaySizeForSelection might be stale if selection just changed)
-						reorderElementRotation = element.rotation || 0;
-						const elementDisplaySize = getActualSize(element);
-						reorderElementSize = { ...elementDisplaySize };
+						if (canvasRect) {
+							// Calculate actual centers for both element and parent accounting for rotation
+							const totalRotation = getCumulativeRotation(element) + (element.rotation || 0);
+							const parentTotalRotation = getCumulativeRotation(parent) + (parent.rotation || 0);
 
-						// Calculate actual top-left position accounting for rotation
-						const actualPos = calculateActualTopLeftForRotated(
-							rect,
-							elementDisplaySize,
-							// Use total cumulative rotation here, just like the ghost element renderer
-							getCumulativeRotation(element) + (element.rotation || 0),
-							viewport.scale
-						);
+							const elementSize = element.size;
+							const parentSize = parent.size;
 
-						// Offset from mouse to element's actual top-left (rotation origin) in screen pixels
-						reorderGhostOffset = {
-							x: actualPos.left - e.clientX,
-							y: actualPos.top - e.clientY
-						};
+							// Get actual top-left positions accounting for rotation
+							const actualTopLeft = calculateActualTopLeftForRotated(
+								rect,
+								elementSize,
+								totalRotation,
+								viewport.scale
+							);
 
-						// Get all children positions at start
-						const allChildren = parent?.children?.map(childId => {
-							const child = state.elements[childId];
-							const domEl = document.querySelector(`[data-element-id="${childId}"]`);
-							if (!domEl || !child) return null;
-							const childRect = domEl.getBoundingClientRect();
-							return {
-								id: childId,
-								isBeingDragged: childId === element.id,
-								screenPos: { left: childRect.left, top: childRect.top },
-								size: { width: childRect.width, height: childRect.height }
+							const parentActualTopLeft = calculateActualTopLeftForRotated(
+								parentRect,
+								parentSize,
+								parentTotalRotation,
+								viewport.scale
+							);
+
+							// Calculate centers in screen space
+							const elementCenterScreen = {
+								x: actualTopLeft.left + (elementSize.width * viewport.scale) / 2,
+								y: actualTopLeft.top + (elementSize.height * viewport.scale) / 2
 							};
-						}).filter(Boolean) || [];
 
+							const parentCenterScreen = {
+								x: parentActualTopLeft.left + (parentSize.width * viewport.scale) / 2,
+								y: parentActualTopLeft.top + (parentSize.height * viewport.scale) / 2
+							};
 
-						// Calculate initial ghost position at drag start
-						const initialGhostScreenX = e.clientX + reorderGhostOffset.x;
-						const initialGhostScreenY = e.clientY + reorderGhostOffset.y;
-						const initialGhostCanvasX = (initialGhostScreenX - viewport.x) / viewport.scale;
-						const initialGhostCanvasY = (initialGhostScreenY - viewport.y) / viewport.scale;
+							// Vector from parent center to element center in screen space
+							const screenDx = elementCenterScreen.x - parentCenterScreen.x;
+							const screenDy = elementCenterScreen.y - parentCenterScreen.y;
 
+							// Convert to canvas space (account for scale)
+							const canvasDx = screenDx / viewport.scale;
+							const canvasDy = screenDy / viewport.scale;
 
-						// Initialize pendingPosition to the actual DOM position in canvas coordinates
-						// This ensures the ghost starts at the element's visual position
-						pendingPosition = {
-							x: initialGhostCanvasX,
-							y: initialGhostCanvasY
-						};
+							// Un-rotate this vector to get it in parent's local space
+							const angleRad = (-parentTotalRotation * Math.PI) / 180;
+							const cos = Math.cos(angleRad);
+							const sin = Math.sin(angleRad);
+							const localDx = canvasDx * cos - canvasDy * sin;
+							const localDy = canvasDx * sin + canvasDy * cos;
+
+							// Convert from center-relative to top-left-relative
+							let parentRelativeX = localDx + parentSize.width / 2 - elementSize.width / 2;
+							let parentRelativeY = localDy + parentSize.height / 2 - elementSize.height / 2;
+
+							// CRITICAL FIX: Account for margin on rotated auto-layout children
+							// Before drag: element has position:relative with margin for bounding box
+							// After drag: element has position:absolute with NO margin
+							// The margin pushes the element inward, so when we remove it with absolute positioning,
+							// we need to subtract the margin to keep the element in the same visual position
+							if (element.rotation && element.rotation !== 0) {
+								const angleRad = element.rotation * (Math.PI / 180);
+								const cos = Math.abs(Math.cos(angleRad));
+								const sin = Math.abs(Math.sin(angleRad));
+								const boundingWidth = elementSize.width * cos + elementSize.height * sin;
+								const boundingHeight = elementSize.width * sin + elementSize.height * cos;
+								const marginX = (boundingWidth - elementSize.width) / 2;
+								const marginY = (boundingHeight - elementSize.height) / 2;
+
+								parentRelativeX -= marginX;
+								parentRelativeY -= marginY;
+							}
+
+							// Convert screen position to canvas coordinates (for cursor offset calculation)
+							const elementCanvasX = (actualTopLeft.left - canvasRect.left - viewport.x) / viewport.scale;
+							const elementCanvasY = (actualTopLeft.top - canvasRect.top - viewport.y) / viewport.scale;
+
+							// Store offset from cursor to element's top-left IN CANVAS SPACE
+							const cursorCanvasX = (e.clientX - canvasRect.left - viewport.x) / viewport.scale;
+							const cursorCanvasY = (e.clientY - canvasRect.top - viewport.y) / viewport.scale;
+
+							reorderGhostOffset = {
+								x: elementCanvasX - cursorCanvasX,
+								y: elementCanvasY - cursorCanvasY
+							};
+
+							// Store element size for placeholder
+							reorderElementSize = {
+								width: elementSize.width,
+								height: elementSize.height
+							};
+
+							// Initialize pendingPosition to element's position in parent's local space
+							pendingPosition = {
+								x: parentRelativeX,
+								y: parentRelativeY
+							};
+						}
 					}
 				} else {
 					reorderParentId = null;
@@ -2061,31 +2197,24 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 		return null;
 	}
 
-	// Live reordering: reorder elements as user drags
-	// Use potentialDropParentId if available (dragging to different parent), otherwise use reorderParentId
-	// Only apply if we've moved beyond the threshold to avoid reordering on clicks
-	$: if (interactionMode === 'dragging' && reorderTargetIndex !== null &&
-		reorderTargetIndex !== lastAppliedIndex && activeElementId && hasMovedBeyondThreshold) {
-		const targetParent = potentialDropParentId || reorderParentId;
-		if (targetParent) {
-			// Check if changing parents (dragging from one auto-layout to another)
-			const effectiveFromParent = reorderParentId; // Where element started
-			const effectiveToParent = potentialDropParentId || reorderParentId; // Where it's going
-			const isChangingParents = effectiveFromParent !== effectiveToParent;
-
-			// Check if the target index is different from where we started
-			// This prevents reordering when just clicking (which might calculate same index)
-			const isActuallyReordering = reorderTargetIndex !== reorderOriginalIndex;
-
-			// Apply live reordering if:
-			// 1. Changing parents (always show feedback), OR
-			// 2. Same parent but actually moving to a different index
-			if (isChangingParents || isActuallyReordering) {
-				lastAppliedIndex = reorderTargetIndex;
-				applyReorder(activeElementId, targetParent, reorderTargetIndex);
-			}
-		}
-	}
+	// DISABLED: Live reordering during drag
+	// New UX: Element stays in place, blue placeholder shows drop position
+	// Reordering only happens on mouseup
+	// $: if (interactionMode === 'dragging' && reorderTargetIndex !== null &&
+	// 	reorderTargetIndex !== lastAppliedIndex && activeElementId && hasMovedBeyondThreshold) {
+	// 	const targetParent = potentialDropParentId || reorderParentId;
+	// 	if (targetParent) {
+	// 		// Check if changing parents (dragging from one auto-layout to another)
+	// 		const effectiveFromParent = reorderParentId; // Where element started
+	// 		const effectiveToParent = potentialDropParentId || reorderParentId; // Where it's going
+	// 		const isChangingParents = effectiveFromParent !== effectiveToParent;
+	//
+	// 		// Always allow reordering to any index (including back to original)
+	// 		// The applyReorder function will handle skipping no-op reorders (current === target)
+	// 		lastAppliedIndex = reorderTargetIndex;
+	// 		applyReorder(activeElementId, targetParent, reorderTargetIndex);
+	// 	}
+	// }
 
 	/**
 	 * Handle Alt key press/release during drag to enable/disable duplication mode
@@ -2171,19 +2300,103 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 			if (reorderParentId && activeElementId) {
 				currentMouseScreen = { x: e.clientX, y: e.clientY }; // Store for debug
 
-				const mouseCanvasX = (e.clientX - viewport.x) / viewport.scale;
-				const mouseCanvasY = (e.clientY - viewport.y) / viewport.scale;
+				// Get cursor position in canvas space
+				const canvasElement = document.querySelector('.canvas') as HTMLElement | null;
+				const canvasRect = canvasElement?.getBoundingClientRect();
+				if (!canvasRect) return;
 
-				// For auto layout reordering, calculate ghost position using the stored offset
-				// The offset accounts for rotation and was calculated at drag start
-				const ghostScreenX = e.clientX + reorderGhostOffset.x;
-				const ghostScreenY = e.clientY + reorderGhostOffset.y;
+				const cursorCanvasX = (e.clientX - canvasRect.left - viewport.x) / viewport.scale;
+				const cursorCanvasY = (e.clientY - canvasRect.top - viewport.y) / viewport.scale;
 
-				// Convert to canvas coordinates
-				pendingPosition = {
-					x: (ghostScreenX - viewport.x) / viewport.scale,
-					y: (ghostScreenY - viewport.y) / viewport.scale
-				};
+				// Calculate element position in canvas space first
+				const elementCanvasX = cursorCanvasX + reorderGhostOffset.x;
+				const elementCanvasY = cursorCanvasY + reorderGhostOffset.y;
+
+				// Convert to parent-relative coordinates for rotated auto-layout parents
+				const state = get(designState);
+				const draggedElement = state.elements[activeElementId];
+				const parent = draggedElement?.parentId ? state.elements[draggedElement.parentId] : null;
+
+				if (parent) {
+					// Get parent's DOM element to calculate actual position accounting for rotation
+					const parentDomElement = document.querySelector(`[data-element-id="${parent.id}"]`);
+					if (parentDomElement) {
+						const parentRect = parentDomElement.getBoundingClientRect();
+						const parentTotalRotation = getCumulativeRotation(parent) + (parent.rotation || 0);
+
+						// Get parent's actual top-left accounting for rotation
+						const parentActualTopLeft = calculateActualTopLeftForRotated(
+							parentRect,
+							parent.size,
+							parentTotalRotation,
+							viewport.scale
+						);
+
+						// Convert parent position to canvas space
+						const parentCanvasX = (parentActualTopLeft.left - canvasRect.left - viewport.x) / viewport.scale;
+						const parentCanvasY = (parentActualTopLeft.top - canvasRect.top - viewport.y) / viewport.scale;
+
+						// Calculate parent center in canvas space
+						const parentCenterX = parentCanvasX + parent.size.width / 2;
+						const parentCenterY = parentCanvasY + parent.size.height / 2;
+
+						// Calculate element center in canvas space
+						const elementCenterX = elementCanvasX + draggedElement.size.width / 2;
+						const elementCenterY = elementCanvasY + draggedElement.size.height / 2;
+
+						// Vector from parent center to element center
+						const canvasDx = elementCenterX - parentCenterX;
+						const canvasDy = elementCenterY - parentCenterY;
+
+						// Un-rotate to get position in parent's local space
+						const angleRad = (-parentTotalRotation * Math.PI) / 180;
+						const cos = Math.cos(angleRad);
+						const sin = Math.sin(angleRad);
+						const localDx = canvasDx * cos - canvasDy * sin;
+						const localDy = canvasDx * sin + canvasDy * cos;
+
+						// Convert from center-relative to top-left-relative
+						let parentRelativeX = localDx + parent.size.width / 2 - draggedElement.size.width / 2;
+						let parentRelativeY = localDy + parent.size.height / 2 - draggedElement.size.height / 2;
+
+						// CRITICAL FIX: Account for margin on rotated auto-layout children
+						// Same fix as mousedown handler - subtract margin to compensate for position change
+						if (draggedElement.rotation && draggedElement.rotation !== 0) {
+							const angleRad = draggedElement.rotation * (Math.PI / 180);
+							const cos = Math.abs(Math.cos(angleRad));
+							const sin = Math.abs(Math.sin(angleRad));
+							const boundingWidth = draggedElement.size.width * cos + draggedElement.size.height * sin;
+							const boundingHeight = draggedElement.size.width * sin + draggedElement.size.height * cos;
+							const marginX = (boundingWidth - draggedElement.size.width) / 2;
+							const marginY = (boundingHeight - draggedElement.size.height) / 2;
+
+							parentRelativeX -= marginX;
+							parentRelativeY -= marginY;
+						}
+
+						// Set pending position to parent-relative coordinates
+						pendingPosition = {
+							x: parentRelativeX,
+							y: parentRelativeY
+						};
+					} else {
+						// Fallback: use canvas-absolute
+						pendingPosition = {
+							x: elementCanvasX,
+							y: elementCanvasY
+						};
+					}
+				} else {
+					// No parent: use canvas-absolute
+					pendingPosition = {
+						x: elementCanvasX,
+						y: elementCanvasY
+					};
+				}
+
+				// Also calculate mouse position for reorder index calculation
+				const mouseCanvasX = cursorCanvasX;
+				const mouseCanvasY = cursorCanvasY;
 
 				// Only check for parent changes and calculate reorder index if we've moved beyond threshold
 				// This prevents unwanted reordering on small mouse movements (clicks)
@@ -3225,7 +3438,9 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 						// IMPORTANT: Only process parent changes if we actually moved beyond threshold
 						// and detected a parent (hasMovedBeyondThreshold ensures potentialDropParentId was calculated)
 						// IMPORTANT: Prevent parent changes during Alt+drag duplication - both original and duplicate must stay in same parent
-						if (hasMovedBeyondThreshold && potentialDropParentId !== originalParentId && !isDuplicateDrag) {
+						// CRITICAL FIX: If reorderParentId is set, we're doing auto-layout reordering within the same parent
+						// Don't process this as a "parent change" even if potentialDropParentId differs (can happen due to cursor being outside parent bounds)
+						if (hasMovedBeyondThreshold && potentialDropParentId !== originalParentId && !isDuplicateDrag && !reorderParentId) {
 							// Parent changed - need to update parent and position
 							const state_for_drop = get(designState);
 							const newParent = potentialDropParentId ? state_for_drop.elements[potentialDropParentId] : null;
@@ -3244,7 +3459,25 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 								if (currentParent !== potentialDropParentId || !hasMovedBeyondThreshold) {
 									// Parent not yet changed OR we didn't move beyond threshold (clicked without dragging)
 									// Need to finalize the parent change
+
+									// Reorder in the DOM/state (keep pendingPosition to show element during transition)
 									await reorderElement(activeElementId, potentialDropParentId, reorderTargetIndex ?? 0);
+
+									// Wait for Svelte to update DOM with new flexbox position
+									await tick();
+
+									// Wait for browser to complete layout calculation
+									await new Promise(resolve => requestAnimationFrame(() => {
+										requestAnimationFrame(resolve);
+									}));
+
+									// Clear pending position to let element snap to flexbox position
+									pendingPosition = null;
+									updateInteractionStateImmediate({
+										pendingPosition: null
+									});
+
+									await tick();
 								}
 								// No need to call moveElement - auto layout will position it
 							} else {
@@ -3285,29 +3518,82 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 								// during the drag via the reactive statement, so we only need to call moveElement here
 								if (!reorderParentId || potentialDropParentId !== (get(designState).elements[activeElementId]?.parentId)) {
 									// Parent not yet changed, or changed to different parent than current
+
+									// Reorder (keep pendingPosition to show element during transition)
 									await reorderElement(activeElementId, potentialDropParentId, reorderTargetIndex ?? 0);
+
+									// Wait for Svelte to update DOM with new flexbox position
+									await tick();
+
+									// Wait for browser to complete layout calculation
+									await new Promise(resolve => requestAnimationFrame(() => {
+										requestAnimationFrame(resolve);
+									}));
+
+									// Clear pending position
+									pendingPosition = null;
+									updateInteractionStateImmediate({
+										pendingPosition: null
+									});
+
+									await tick();
 								}
 								await moveElement(activeElementId, relativePos);
 							}
 						} else {
 							// Parent didn't change - just move within same parent
 							if (reorderParentId) {
-								// In auto layout - apply final reorder index
-								// We skipped live reordering to avoid unwanted reordering from clicks
-								// Now apply the final index on mouseup
-								if (reorderTargetIndex !== null && reorderTargetIndex !== reorderOriginalIndex) {
+								// In auto layout - apply final reorder index on mouseup
+								// Note: We disabled live reordering - reordering only happens here
+								if (reorderTargetIndex !== null) {
+									const reorderedElementId = activeElementId;
+
+									// Store the current pending position to keep element visible during transition
+									const currentPendingPosition = pendingPosition;
+
+									// Reorder in the DOM/state
 									await reorderElement(activeElementId, reorderParentId, reorderTargetIndex);
+
+									// Wait for Svelte to update DOM with new flexbox position
+									await tick();
+
+									// Wait for browser to complete layout calculation
+									// Keep element at dragged position using pendingPosition during this time
+									await new Promise(resolve => requestAnimationFrame(() => {
+										requestAnimationFrame(resolve);
+									}));
+
+									// NOW clear pending position to let element snap to flexbox position
+									pendingPosition = null;
+									updateInteractionStateImmediate({
+										pendingPosition: null,
+										reorderParentId: null,
+										reorderTargetIndex: null
+									});
+
+									// Wait for final render
+									await tick();
 								}
 							} else {
 								// Not in auto layout - move the element
-								// FIX: Use center-based transformation to prevent jump on drop for rotated nested elements
-								const currentSize = activeElement.size;
-								const centerWorld = {
-									x: pendingPosition.x + currentSize.width / 2,
-									y: pendingPosition.y + currentSize.height / 2
-								};
+								// Check if this element's parent has auto-layout
 								const state = get(designState);
 								const parent = activeElement.parentId ? state.elements[activeElement.parentId] : null;
+								const parentHasAutoLayout = parent?.autoLayout?.enabled || false;
+								const childIgnoresAutoLayout = activeElement.autoLayout?.ignoreAutoLayout || false;
+								const isAutoLayoutChild = parentHasAutoLayout && !childIgnoresAutoLayout;
+
+								if (isAutoLayoutChild) {
+									// This is an auto-layout child but reorderParentId wasn't set
+									// This shouldn't happen, but if it does, don't move - position should be (0,0)
+									console.warn('Auto-layout child without reorderParentId - skipping move');
+								} else {
+									// FIX: Use center-based transformation to prevent jump on drop for rotated nested elements
+									const currentSize = activeElement.size;
+									const centerWorld = {
+										x: pendingPosition.x + currentSize.width / 2,
+										y: pendingPosition.y + currentSize.height / 2
+									};
 								
 								// FIX: For nested elements with auto-layout parents, use DOM position
 								let centerLocal: { x: number; y: number };
@@ -3315,25 +3601,28 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 									const grandparent = parent.parentId ? state.elements[parent.parentId] : null;
 									const grandparentHasAutoLayout = grandparent?.autoLayout?.enabled || false;
 									const parentIgnoresAutoLayout = parent.autoLayout?.ignoreAutoLayout || false;
-									const parentIsInAutoLayout = grandparentHasAutoLayout && !parentIgnoresAutoLayout;
+									const parentIsInAutoLayout = hasAutoLayoutAncestor(parent, state);
 									
 									if (parentIsInAutoLayout) {
 										// Parent is in auto-layout: get its actual DOM position at drop time
 										const parentDom = document.querySelector(`[data-element-id="${parent.id}"]`) as HTMLElement | null;
 										const canvasElement = document.querySelector('.canvas') as HTMLElement | null;
-										
+
 										if (parentDom && canvasElement) {
 											const parentRect = parentDom.getBoundingClientRect();
 											const canvasRect = canvasElement.getBoundingClientRect();
-											
-											// Get parent's actual absolute position from DOM
-											const parentAbsX = (parentRect.left - canvasRect.left - viewport.x) / viewport.scale;
-											const parentAbsY = (parentRect.top - canvasRect.top - viewport.y) / viewport.scale;
-											
-											// Get parent's center in absolute space
+
+											// CRITICAL FIX: For rotated elements, getBoundingClientRect gives bounding box
+											// The center of the bounding box IS the element's center (CSS rotates around center)
+											// We cannot calculate center as boundingBox.left + element.size.width/2 - that's incorrect!
+											// Instead, use the bounding box center directly
+											const parentCenterScreenX = parentRect.left + parentRect.width / 2;
+											const parentCenterScreenY = parentRect.top + parentRect.height / 2;
+
+											// Get parent's center in absolute canvas space
 											const parentCenterAbs = {
-												x: parentAbsX + parent.size.width / 2,
-												y: parentAbsY + parent.size.height / 2
+												x: (parentCenterScreenX - canvasRect.left - viewport.x) / viewport.scale,
+												y: (parentCenterScreenY - canvasRect.top - viewport.y) / viewport.scale
 											};
 											
 											// Calculate vector from parent center to element center
@@ -3391,12 +3680,13 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 									centerLocal = centerWorld;
 								}
 								
-								const relativePos = {
-									x: centerLocal.x - currentSize.width / 2,
-									y: centerLocal.y - currentSize.height / 2
-								};
+									const relativePos = {
+										x: centerLocal.x - currentSize.width / 2,
+										y: centerLocal.y - currentSize.height / 2
+									};
 
-								await moveElement(activeElementId, relativePos);
+									await moveElement(activeElementId, relativePos);
+								}
 							}
 						}
 					}
@@ -3424,7 +3714,75 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 							// 2. Transform center to local space (parent-relative)
 							const state = get(designState);
 							const parent = activeElement.parentId ? state.elements[activeElement.parentId] : null;
-							const centerLocal = absoluteToRelative(centerWorld, parent, state);
+
+							// CRITICAL FIX: Check if parent has auto-layout ancestor (same as CanvasElement fix)
+							let centerLocal: { x: number; y: number };
+
+							if (parent && hasAutoLayoutAncestor(parent, state)) {
+								// Parent is in auto-layout: get its actual DOM position
+								const parentDom = document.querySelector(`[data-element-id="${parent.id}"]`) as HTMLElement | null;
+								const canvasElement = document.querySelector('.canvas') as HTMLElement | null;
+
+								if (parentDom && canvasElement) {
+									const parentRect = parentDom.getBoundingClientRect();
+									const canvasRect = canvasElement.getBoundingClientRect();
+
+									// Get parent's actual center from DOM
+									const parentCenterX = parentRect.left + parentRect.width / 2;
+									const parentCenterY = parentRect.top + parentRect.height / 2;
+									const parentCenterAbs = {
+										x: (parentCenterX - canvasRect.left - viewport.x) / viewport.scale,
+										y: (parentCenterY - canvasRect.top - viewport.y) / viewport.scale
+									};
+
+									// Calculate vector from parent center to element center
+									const dx = centerWorld.x - parentCenterAbs.x;
+									const dy = centerWorld.y - parentCenterAbs.y;
+
+									// Get parent's cumulative rotation
+									const parentRot = (() => {
+										let total = 0;
+										let current = parent;
+										while (current) {
+											total += current.rotation || 0;
+											if (!current.parentId) break;
+											current = state.elements[current.parentId];
+											if (!current) break;
+										}
+										return total;
+									})();
+
+									// Rotate vector by -parentRotation to get local coordinates
+									if (parentRot && Math.abs(parentRot % 360) > 0.1) {
+										const angleRad = (-parentRot * Math.PI) / 180;
+										const cos = Math.cos(angleRad);
+										const sin = Math.sin(angleRad);
+										const localDx = dx * cos - dy * sin;
+										const localDy = dx * sin + dy * cos;
+
+										const parentHalfW = parent.size.width / 2;
+										const parentHalfH = parent.size.height / 2;
+										centerLocal = {
+											x: parentHalfW + localDx,
+											y: parentHalfH + localDy
+										};
+									} else {
+										// No rotation: simple translation
+										const parentHalfW = parent.size.width / 2;
+										const parentHalfH = parent.size.height / 2;
+										centerLocal = {
+											x: parentHalfW + dx,
+											y: parentHalfH + dy
+										};
+									}
+								} else {
+									// Fallback: use coordinate utility
+									centerLocal = absoluteToRelative(centerWorld, parent, state);
+								}
+							} else {
+								// No auto-layout ancestor: use standard coordinate conversion
+								centerLocal = absoluteToRelative(centerWorld, parent, state);
+							}
 
 							// 3. Convert back to top-left in local space
 							relativePos = {
@@ -3604,7 +3962,7 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 			const grandparent = parent.parentId ? state.elements[parent.parentId] : null;
 			const grandparentHasAutoLayout = grandparent?.autoLayout?.enabled || false;
 			const parentIgnoresAutoLayout = parent.autoLayout?.ignoreAutoLayout || false;
-			const parentIsInAutoLayout = grandparentHasAutoLayout && !parentIgnoresAutoLayout;
+			const parentIsInAutoLayout = hasAutoLayoutAncestor(parent, state);
 
 			// For auto-layout parents (grandchildren scenario), get center from DOM
 			// Otherwise use recursive calculation from stored coordinates
@@ -3620,14 +3978,16 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 					if (parentDom && canvasElement) {
 						const parentRect = parentDom.getBoundingClientRect();
 						const canvasRect = canvasElement.getBoundingClientRect();
-						
-						// Get parent's actual absolute position from DOM
-						const parentAbsX = (parentRect.left - canvasRect.left - viewport.x) / viewport.scale;
-						const parentAbsY = (parentRect.top - canvasRect.top - viewport.y) / viewport.scale;
-						
+
+						// CRITICAL FIX: For rotated elements, getBoundingClientRect gives bounding box
+						// The center of the bounding box IS the element's center (CSS rotates around center)
+						// Calculate center directly from bounding box
+						const parentCenterScreenX = parentRect.left + parentRect.width / 2;
+						const parentCenterScreenY = parentRect.top + parentRect.height / 2;
+
 						return {
-							x: parentAbsX + parent.size.width / 2,
-							y: parentAbsY + parent.size.height / 2
+							x: (parentCenterScreenX - canvasRect.left - viewport.x) / viewport.scale,
+							y: (parentCenterScreenY - canvasRect.top - viewport.y) / viewport.scale
 						};
 					}
 					
@@ -3679,7 +4039,7 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 					const grandparent = parent.parentId ? state.elements[parent.parentId] : null;
 					const grandparentHasAutoLayout = grandparent?.autoLayout?.enabled || false;
 					const parentIgnoresAutoLayout = parent.autoLayout?.ignoreAutoLayout || false;
-					const parentIsInAutoLayout = grandparentHasAutoLayout && !parentIgnoresAutoLayout;
+					const parentIsInAutoLayout = hasAutoLayoutAncestor(parent, state);
 					
 					let centerLocal;
 					
@@ -3767,7 +4127,7 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 				const grandparent = parent.parentId ? state.elements[parent.parentId] : null;
 				const grandparentHasAutoLayout = grandparent?.autoLayout?.enabled || false;
 				const parentIgnoresAutoLayout = parent.autoLayout?.ignoreAutoLayout || false;
-				const parentIsInAutoLayout = grandparentHasAutoLayout && !parentIgnoresAutoLayout;
+				const parentIsInAutoLayout = hasAutoLayoutAncestor(parent, state);
 				
 				// If element is in auto-layout OR parent is in auto-layout, read from DOM
 				if (isInAutoLayout || parentIsInAutoLayout) {
@@ -3850,7 +4210,7 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 				const grandparent = parent.parentId ? state.elements[parent.parentId] : null;
 				const grandparentHasAutoLayout = grandparent?.autoLayout?.enabled || false;
 				const parentIgnoresAutoLayout = parent.autoLayout?.ignoreAutoLayout || false;
-				const parentIsInAutoLayout = grandparentHasAutoLayout && !parentIgnoresAutoLayout;
+				const parentIsInAutoLayout = hasAutoLayoutAncestor(parent, state);
 				
 				// For grandchildren, read from DOM to match CanvasElement
 				if (parentIsInAutoLayout) {
@@ -4073,7 +4433,7 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 <!-- Hover border - show border on hover (like Figma/Framer) -->
 <!-- Hide during dragging to avoid showing wrapper borders -->
 <!-- For grouped elements, show group border instead of individual element border -->
-{#if hoveredElementId && interactionMode === 'idle' && !$interactionState.hiddenDuringTransition}
+{#if SHOW_HOVER_BORDER && hoveredElementId && interactionMode === 'idle' && !$interactionState.hiddenDuringTransition}
 	{@const hoveredElement = $designState.elements[hoveredElementId]}
 	{@const isHoveredSelected = selectedElements.some(el => el.id === hoveredElementId)}
 	{#if hoveredElement && !isHoveredSelected && $interactionState.mode !== 'editing-text'}
@@ -4338,7 +4698,7 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 				const grandparent = parent.parentId ? state.elements[parent.parentId] : null;
 				const grandparentHasAutoLayout = grandparent?.autoLayout?.enabled || false;
 				const parentIgnoresAutoLayout = parent.autoLayout?.ignoreAutoLayout || false;
-				const parentIsInAutoLayout = grandparentHasAutoLayout && !parentIgnoresAutoLayout;
+				const parentIsInAutoLayout = hasAutoLayoutAncestor(parent, state);
 
 				// For auto-layout parents (grandchildren scenario), get center from DOM
 				// Otherwise use recursive calculation from stored coordinates
@@ -4354,14 +4714,16 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 						if (parentDom && canvasElement) {
 							const parentRect = parentDom.getBoundingClientRect();
 							const canvasRect = canvasElement.getBoundingClientRect();
-							
-							// Get parent's actual absolute position from DOM
-							const parentAbsX = (parentRect.left - canvasRect.left - viewport.x) / viewport.scale;
-							const parentAbsY = (parentRect.top - canvasRect.top - viewport.y) / viewport.scale;
-							
+
+							// CRITICAL FIX: For rotated elements, getBoundingClientRect gives bounding box
+							// The center of the bounding box IS the element's center (CSS rotates around center)
+							// Calculate center directly from bounding box
+							const parentCenterScreenX = parentRect.left + parentRect.width / 2;
+							const parentCenterScreenY = parentRect.top + parentRect.height / 2;
+
 							return {
-								x: parentAbsX + parent.size.width / 2,
-								y: parentAbsY + parent.size.height / 2
+								x: (parentCenterScreenX - canvasRect.left - viewport.x) / viewport.scale,
+								y: (parentCenterScreenY - canvasRect.top - viewport.y) / viewport.scale
 							};
 						}
 						
@@ -4399,7 +4761,7 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 					const grandparent = parent.parentId ? state.elements[parent.parentId] : null;
 					const grandparentHasAutoLayout = grandparent?.autoLayout?.enabled || false;
 					const parentIgnoresAutoLayout = parent.autoLayout?.ignoreAutoLayout || false;
-					const parentIsInAutoLayout = grandparentHasAutoLayout && !parentIgnoresAutoLayout;
+					const parentIsInAutoLayout = hasAutoLayoutAncestor(parent, state);
 					
 					// For grandchildren: element is NOT in auto-layout, but parent IS
 					// Also handle element itself being in auto-layout
@@ -4618,50 +4980,7 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 	</div>
 {/if}
 
-<!-- Auto layout reordering: Ghost element following cursor -->
-{#if interactionMode === 'dragging' && reorderParentId && activeElementId}
-	{@const draggedElement = selectedElements.find(el => el.id === activeElementId)}
-	{#if draggedElement && pendingPosition}
-		{@const ghostSize = displaySizeForSelection || draggedElement.size}
-		<!-- Use pendingPosition which is already being updated to follow cursor during reordering -->
-		{@const ghostPos = pendingPosition}
-
-		<!-- Ghost element with visual preview -->
-		{@const totalRotation = getCumulativeRotation(draggedElement) + (draggedElement.rotation || 0)}
-
-		{@const ghostScreenLeft = viewport.x + ghostPos.x * viewport.scale}
-		{@const ghostScreenTop = viewport.y + ghostPos.y * viewport.scale}
-		{@const ghostWidth = ghostSize.width * viewport.scale}
-		{@const ghostHeight = ghostSize.height * viewport.scale}
-
-		<div
-			style="
-				position: fixed;
-				left: {ghostScreenLeft}px;
-				top: {ghostScreenTop}px;
-				width: {ghostWidth}px;
-				height: {ghostHeight}px;
-				background-color: {draggedElement.styles?.backgroundColor || '#f5f5f5'};
-				border: {draggedElement.styles?.borderWidth || '0px'} {draggedElement.styles?.borderStyle || 'solid'} {draggedElement.styles?.borderColor || 'transparent'};
-				border-radius: {draggedElement.styles?.borderRadius || '0px'};
-				opacity: 0.9;
-				pointer-events: none;
-				z-index: 10000;
-				box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-				transform: rotate({totalRotation}deg);
-				transform-origin: center center;
-			"
-		>
-			{#if draggedElement.type === 'img'}
-				<img
-					src={draggedElement.src || ''}
-					alt={draggedElement.alt || ''}
-					style="width: 100%; height: 100%; object-fit: {draggedElement.styles?.objectFit || 'cover'};"
-				/>
-			{/if}
-		</div>
-	{/if}
-{/if}
+<!-- Auto layout reordering placeholder is now rendered inline in CanvasElement.svelte -->
 
 <!-- DEBUG: Rotation visualization -->
 {#if interactionMode === 'rotating' && debugCenterScreen && debugCornerScreen && debugCursorScreen}

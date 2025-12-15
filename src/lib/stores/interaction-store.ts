@@ -23,6 +23,9 @@ export interface InteractionState {
 	hiddenDuringTransition: string | null; // Element ID to hide
 	// Group isolation: when an element from a group is isolated (double-clicked)
 	isolatedElementId: string | null; // Element ID that has been isolated from its group
+	// Auto-layout reordering state
+	reorderParentId: string | null;
+	reorderTargetIndex: number | null;
 }
 
 const initialState: InteractionState = {
@@ -36,7 +39,9 @@ const initialState: InteractionState = {
 	groupTransforms: new Map(),
 	editingElementId: null,
 	hiddenDuringTransition: null,
-	isolatedElementId: null
+	isolatedElementId: null,
+	reorderParentId: null,
+	reorderTargetIndex: null
 };
 
 export const interactionState = writable<InteractionState>(initialState);

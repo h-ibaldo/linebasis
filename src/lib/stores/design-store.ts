@@ -8,7 +8,7 @@
 import { writable, derived, get } from 'svelte/store';
 import type { Writable, Readable } from 'svelte/store';
 import { v4 as uuidv4 } from 'uuid';
-import type { DesignEvent, DesignState, Element, Page, Component, AutoLayoutStyle } from '$lib/types/events';
+import type { DesignEvent, DesignState, Element, Page, Component, AutoLayoutStyle, Group } from '$lib/types/events';
 import {
 	initDB,
 	appendEvent,
@@ -56,7 +56,7 @@ const initialStoreState: StoreState = {
 // Core Store
 // ============================================================================
 
-const storeState: Writable<StoreState> = writable(initialStoreState);
+export const storeState: Writable<StoreState> = writable(initialStoreState);
 
 // Derived stores for convenience
 export const designState: Readable<DesignState> = derived(
@@ -598,6 +598,39 @@ export async function deleteElements(elementIds: string[]): Promise<void> {
 	});
 }
 
+/**
+ * Clear all elements from the current page's canvas
+ * Useful for resetting a corrupted canvas
+ */
+export async function clearCurrentPageCanvas(): Promise<void> {
+	const state = get(storeState);
+	const pageId = state.designState.currentPageId;
+	
+	if (!pageId) {
+		console.warn('No current page to clear');
+		return;
+	}
+
+	const page = state.designState.pages[pageId];
+	if (!page) {
+		console.warn(`Page ${pageId} not found`);
+		return;
+	}
+
+	// Get all root element IDs from the canvas
+	const rootElementIds = page.canvasElements;
+	
+	if (rootElementIds.length === 0) {
+		console.log('Canvas is already empty');
+		return;
+	}
+
+	// Delete all root elements (this will recursively delete all children)
+	await deleteElements(rootElementIds);
+	
+	console.log(`Cleared ${rootElementIds.length} root element(s) from canvas`);
+}
+
 export async function moveElement(
 	elementId: string,
 	position: { x: number; y: number },
@@ -925,6 +958,29 @@ function expandSelectionWithGroups(elementIds: string[], state: DesignState): st
 		return el?.groupId === isolatedGroupId;
 	});
 
+	// Helper function to recursively expand a group and all its nested child groups
+	const expandGroup = (groupId: string, shouldSkip: boolean) => {
+		const group = state.groups[groupId];
+		if (!group) return;
+
+		// Add all direct members of this group
+		for (const memberId of group.elementIds) {
+			if (!seen.has(memberId) && state.elements[memberId]) {
+				seen.add(memberId);
+				expanded.push(memberId);
+			}
+		}
+
+		// Recursively expand any nested child groups (groups with this group as parent)
+		if (!shouldSkip) {
+			for (const childGroup of Object.values(state.groups)) {
+				if (childGroup.parentGroupId === groupId) {
+					expandGroup(childGroup.id, false);
+				}
+			}
+		}
+	};
+
 	for (const id of elementIds) {
 		const element = state.elements[id];
 
@@ -936,16 +992,18 @@ function expandSelectionWithGroups(elementIds: string[], state: DesignState): st
 			(element?.groupId && isAddingFromIsolatedGroup && element.groupId === isolatedGroupId);
 
 		if (element?.groupId && !shouldSkipGroupExpansion) {
-			const group = state.groups[element.groupId];
-			if (group) {
-				for (const memberId of group.elementIds) {
-					if (!seen.has(memberId) && state.elements[memberId]) {
-						seen.add(memberId);
-						expanded.push(memberId);
-					}
-				}
-				continue;
+			// Find the root parent group (traverse up the hierarchy)
+			let currentGroupId = element.groupId;
+			let group = state.groups[currentGroupId];
+
+			while (group?.parentGroupId) {
+				currentGroupId = group.parentGroupId;
+				group = state.groups[currentGroupId];
 			}
+
+			// Expand from the root parent group down (includes all nested groups)
+			expandGroup(currentGroupId, false);
+			continue;
 		}
 
 		if (!seen.has(id) && state.elements[id]) {
@@ -1171,10 +1229,10 @@ export function manualSave(): void {
 
 // Clipboard for storing copied elements (in-memory, not system clipboard)
 let clipboard: Element[] = [];
+// Clipboard for group records (needed for nested groups)
+let clipboardGroups: Record<string, Group> = {};
 // Track if clipboard contains cut elements (vs copied elements)
 let isClipboardFromCut = false;
-// DEPRECATED: Groups are now just div elements, no separate group records needed
-// let clipboardGroups: Record<string, Group> = {};
 
 /**
  * Helper: Get the four corners of a rotated rectangle in world space
@@ -1532,98 +1590,25 @@ export async function unwrapSelectedDiv(): Promise<void> {
 
 /**
  * Group selected elements
- * Grouped elements behave as if they are selected together - property changes affect all group members
+ * Simply assigns the same groupId to all selected elements
+ * Allows single-element groups so users can add more elements via drag-and-drop
  */
-// DEPRECATED: Groups are now regular divs - use CREATE_ELEMENT instead
 export async function groupElements(): Promise<void> {
 	const selected = get(selectedElements);
-	if (selected.length < 2) return; // Need at least 2 elements to group
+	if (selected.length < 1) return; // Need at least 1 element to group
 
-	const state = get(designState);
-	const pageId = state.currentPageId;
-	if (!pageId) return;
-
-	// Check if any selected element is a group wrapper (not allowed)
-	const hasGroupWrapper = selected.some(el => el.isGroupWrapper);
-	if (hasGroupWrapper) {
-		console.error('Cannot group a group wrapper. Ungroup first.');
-		return;
-	}
-
-	// Find the common parent of all selected elements
-	const firstParentId = selected[0].parentId;
-	const commonParent = selected.every(el => el.parentId === firstParentId)
-		? firstParentId
-		: null;
-
-	// Calculate bounding box of all selected elements (accounting for rotation)
-	let minX = Infinity;
-	let minY = Infinity;
-	let maxX = -Infinity;
-	let maxY = -Infinity;
-
-	for (const el of selected) {
-		const rotation = el.rotation || 0;
-
-		if (rotation !== 0) {
-			// For rotated elements, get all four corners and find their bounds
-			const corners = getRotatedCorners({
-				x: el.position.x,
-				y: el.position.y,
-				width: el.size.width || 0,
-				height: el.size.height || 0,
-				rotation
-			});
-
-			// Find min/max across all corners
-			for (const corner of corners) {
-				minX = Math.min(minX, corner.x);
-				minY = Math.min(minY, corner.y);
-				maxX = Math.max(maxX, corner.x);
-				maxY = Math.max(maxY, corner.y);
-			}
-		} else {
-			// For non-rotated elements, use simple bounds
-			minX = Math.min(minX, el.position.x);
-			minY = Math.min(minY, el.position.y);
-			maxX = Math.max(maxX, el.position.x + (el.size.width || 0));
-			maxY = Math.max(maxY, el.position.y + (el.size.height || 0));
-		}
-	}
-
-	const wrapperWidth = maxX - minX;
-	const wrapperHeight = maxY - minY;
-
-	// Calculate member offsets (position relative to wrapper)
-	const memberOffsets: Record<string, { x: number; y: number }> = {};
-	for (const el of selected) {
-		memberOffsets[el.id] = {
-			x: el.position.x - minX,
-			y: el.position.y - minY
-		};
-	}
-
-	// Generate IDs
-	const groupId = uuidv4();
-	const wrapperId = uuidv4();
 	const elementIds = selected.map(el => el.id);
+	const groupId = uuidv4();
 
-	// Dispatch CREATE_GROUP_WRAPPER event
 	await dispatch({
 		id: uuidv4(),
-		type: 'CREATE_GROUP_WRAPPER',
+		type: 'CREATE_GROUP',
 		timestamp: Date.now(),
-		payload: {
-			groupId,
-			wrapperId,
-			elementIds,
-			wrapperPosition: { x: minX, y: minY },
-			wrapperSize: { width: wrapperWidth, height: wrapperHeight },
-			memberOffsets,
-			parentId: commonParent,
-			pageId
-		}
+		payload: { groupId, elementIds }
 	});
+
+	// Keep selection on the grouped elements
+	selectElements(elementIds);
 }
 
 /**
@@ -1653,6 +1638,28 @@ export async function ungroupElements(): Promise<void> {
 			}
 		});
 	}
+}
+
+/**
+ * Reorder an entire group to a new position in the DOM
+ */
+export async function reorderGroup(
+	groupId: string,
+	newParentId: string | null,
+	newIndex: number
+): Promise<void> {
+	console.log('🔵 reorderGroup called:', { groupId, newParentId, newIndex });
+	await dispatch({
+		id: uuidv4(),
+		type: 'REORDER_GROUP',
+		timestamp: Date.now(),
+		payload: {
+			groupId,
+			newParentId,
+			newIndex
+		}
+	});
+	console.log('🔵 reorderGroup dispatched');
 }
 
 /**
@@ -1887,14 +1894,32 @@ export function copyElements(): void {
 	clipboard = Array.from(elementsToCopy).map((el) => ({ ...el }));
 	isClipboardFromCut = false;
 
-	// DEPRECATED: No need to copy group records - groups are just divs now
-	// clipboardGroups = {};
-	// const elementIds = new Set(clipboard.map(el => el.id));
-	// for (const [groupId, group] of Object.entries(state.groups)) {
-	// 	if (group.wrapperId && elementIds.has(group.wrapperId)) {
-	// 		clipboardGroups[groupId] = { ...group };
-	// 	}
-	// }
+	// Copy group records for all groups that the copied elements belong to
+	// This is CRITICAL for nested groups to preserve the hierarchy
+	const copiedGroupIds = new Set<string>();
+	for (const el of clipboard) {
+		if (el.groupId) {
+			copiedGroupIds.add(el.groupId);
+		}
+	}
+
+	// Also include parent groups in the hierarchy
+	const groupIdsToInclude = new Set(copiedGroupIds);
+	for (const groupId of copiedGroupIds) {
+		let currentGroup = state.groups[groupId];
+		while (currentGroup?.parentGroupId) {
+			groupIdsToInclude.add(currentGroup.parentGroupId);
+			currentGroup = state.groups[currentGroup.parentGroupId];
+		}
+	}
+
+	// Copy all relevant group records
+	clipboardGroups = {};
+	for (const groupId of groupIdsToInclude) {
+		if (state.groups[groupId]) {
+			clipboardGroups[groupId] = { ...state.groups[groupId] };
+		}
+	}
 }
 
 /**
@@ -1918,14 +1943,32 @@ export async function cutElements(): Promise<void> {
 	clipboard = Array.from(elementsToCopy).map((el) => ({ ...el }));
 	isClipboardFromCut = true;
 
-	// DEPRECATED: No need to copy group records - groups are just divs now
-	// clipboardGroups = {};
-	// const elementIds = new Set(clipboard.map(el => el.id));
-	// for (const [groupId, group] of Object.entries(state.groups)) {
-	// 	if (group.wrapperId && elementIds.has(group.wrapperId)) {
-	// 		clipboardGroups[groupId] = { ...group };
-	// 	}
-	// }
+	// Copy group records for all groups that the copied elements belong to
+	// This is CRITICAL for nested groups to preserve the hierarchy
+	const copiedGroupIds = new Set<string>();
+	for (const el of clipboard) {
+		if (el.groupId) {
+			copiedGroupIds.add(el.groupId);
+		}
+	}
+
+	// Also include parent groups in the hierarchy
+	const groupIdsToInclude = new Set(copiedGroupIds);
+	for (const groupId of copiedGroupIds) {
+		let currentGroup = state.groups[groupId];
+		while (currentGroup?.parentGroupId) {
+			groupIdsToInclude.add(currentGroup.parentGroupId);
+			currentGroup = state.groups[currentGroup.parentGroupId];
+		}
+	}
+
+	// Copy all relevant group records
+	clipboardGroups = {};
+	for (const groupId of groupIdsToInclude) {
+		if (state.groups[groupId]) {
+			clipboardGroups[groupId] = { ...state.groups[groupId] };
+		}
+	}
 
 	// Wrap deletion in a transaction for single undo/redo
 	beginTransaction();
@@ -2001,11 +2044,10 @@ export async function pasteElements(
 
 		// Generate new group IDs for all groups in clipboard
 		// This prevents pasted elements from being linked to original groups
-		const clipboardGroupIds = new Set<string>();
-		for (const element of clipboard) {
-			if (element.groupId && !clipboardGroupIds.has(element.groupId)) {
-				clipboardGroupIds.add(element.groupId);
-				oldToNewGroupIdMap.set(element.groupId, uuidv4());
+		// IMPORTANT: Use clipboardGroups (not just element.groupId) to include parent groups
+		for (const oldGroupId of Object.keys(clipboardGroups)) {
+			if (!oldToNewGroupIdMap.has(oldGroupId)) {
+				oldToNewGroupIdMap.set(oldGroupId, uuidv4());
 			}
 		}
 
@@ -2300,10 +2342,8 @@ export async function pasteElements(
 				}
 			});
 		}
-		// Preserve groupId if element belongs to a group (use new group ID)
-		// BUT: Skip this if the element's parent is a group wrapper (new-style groups)
-		// DEPRECATED: No need to handle groupId - groups are just parent-child relationships now
-		// The parent-child structure was already preserved when creating the element
+		// Note: groupId will be applied after all elements are pasted
+		// (see group recreation logic after the pasteElementTree loop)
 
 		// Recursively paste children (synchronous)
 		const children = clipboard.filter(el => el.parentId === element.id);
@@ -2322,9 +2362,67 @@ export async function pasteElements(
 			newRootElementIds.push(newId);
 		}
 
-		// DEPRECATED: No need to recreate group records - groups are just divs now
-		// The tree structure (parent-child relationships) was already preserved during paste
-		// No special group logic needed
+		// Recreate groups: For each old groupId, dispatch a CREATE_GROUP event with all new element IDs
+		// that belong to that group, preserving the parent-child hierarchy
+		for (const [oldGroupId, newGroupId] of oldToNewGroupIdMap.entries()) {
+			// Find all pasted elements that had this groupId in the clipboard
+			const elementsInGroup: string[] = [];
+			for (const clipboardElement of clipboard) {
+				if (clipboardElement.groupId === oldGroupId) {
+					const newElementId = oldToNewIdMap.get(clipboardElement.id);
+					if (newElementId) {
+						elementsInGroup.push(newElementId);
+					}
+				}
+			}
+
+			// Get the original group from clipboard
+			const originalGroup = clipboardGroups[oldGroupId];
+
+			// Check if this group has child groups (via parentGroupId references)
+			const hasChildGroups = Object.values(clipboardGroups).some(g => g.parentGroupId === oldGroupId);
+
+			// If this is a parent group (has child groups but no direct elements),
+			// populate elementIds with all elements from child groups
+			if (hasChildGroups && elementsInGroup.length === 0) {
+				// Get all child group IDs
+				const childGroupIds = Object.keys(clipboardGroups).filter(id =>
+					clipboardGroups[id].parentGroupId === oldGroupId
+				);
+
+				// Collect all elements from child groups
+				for (const childGroupId of childGroupIds) {
+					for (const clipboardElement of clipboard) {
+						if (clipboardElement.groupId === childGroupId) {
+							const newElementId = oldToNewIdMap.get(clipboardElement.id);
+							if (newElementId && !elementsInGroup.includes(newElementId)) {
+								elementsInGroup.push(newElementId);
+							}
+						}
+					}
+				}
+			}
+
+			// Create the group if it has elements OR if it has child groups (parent groups)
+			if (elementsInGroup.length > 0 || hasChildGroups) {
+				// If the original group had a parent group, map it to the new parent group ID
+				let newParentGroupId: string | undefined;
+				if (originalGroup?.parentGroupId) {
+					newParentGroupId = oldToNewGroupIdMap.get(originalGroup.parentGroupId);
+				}
+
+				dispatch({
+					id: uuidv4(),
+					type: 'CREATE_GROUP',
+					timestamp: Date.now(),
+					payload: {
+						groupId: newGroupId,
+						elementIds: elementsInGroup,
+						parentGroupId: newParentGroupId
+					}
+				});
+			}
+		}
 
 		// Commit the transaction (batches all events into single undo/redo step + single IndexedDB write)
 		await commitTransaction();
@@ -2351,7 +2449,9 @@ export async function pasteElements(
  */
 export async function duplicateElements(customOffset?: { x: number; y: number } | null): Promise<void> {
 	copyElements();
-	await pasteElements(customOffset);
+	// If no custom offset provided, use default offset of 10px to make duplicates visible
+	const offset = customOffset !== undefined ? customOffset : { x: 10, y: 10 };
+	await pasteElements(offset);
 }
 
 /**
@@ -2821,6 +2921,13 @@ export function setupKeyboardShortcuts(): (() => void) | undefined {
 				moveLayerForward(selected);
 			}
 		}
+		// Cmd+G - Group selected elements
+		if ((e.metaKey || e.ctrlKey) && e.key === 'g' && !isTyping) {
+			e.preventDefault();
+			groupElements();
+			return;
+		}
+
 		// Cmd+Backspace (Mac) or Ctrl+Backspace (Windows) - Unwrap selected div
 		if (
 			(e.metaKey || e.ctrlKey) &&
@@ -2855,6 +2962,39 @@ export function setupKeyboardShortcuts(): (() => void) | undefined {
 }
 
 
+/**
+ * Clean up orphaned groups (groups with no elements)
+ * This should be called periodically or after major operations
+ */
+export function cleanupOrphanedGroups(): void {
+	storeState.update((state) => {
+		const newGroups = { ...state.designState.groups };
+		let hasChanges = false;
+
+		// Find all groups that have no elements with matching groupId
+		for (const [groupId, group] of Object.entries(newGroups)) {
+			const hasElements = Object.values(state.designState.elements).some(
+				(el) => el.groupId === groupId
+			);
+
+			if (!hasElements) {
+				delete newGroups[groupId];
+				hasChanges = true;
+			}
+		}
+
+		if (!hasChanges) return state;
+
+		return {
+			...state,
+			designState: {
+				...state.designState,
+				groups: newGroups
+			}
+		};
+	});
+}
+
 // Expose for E2E testing
 if (typeof window !== 'undefined') {
 	(window as any).__designStore = {
@@ -2865,6 +3005,7 @@ if (typeof window !== 'undefined') {
 		rotateElement,
 		selectElement,
 		selectElements,
-		clearSelection
+		clearSelection,
+		cleanupOrphanedGroups
 	};
 }

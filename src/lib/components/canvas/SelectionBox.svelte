@@ -106,15 +106,42 @@
 		};
 	}
 
+	/**
+	 * Calculate absolute position of an element in canvas space
+	 * For nested elements, walk up the parent chain and accumulate positions
+	 */
+	function getAbsolutePosition(element: typeof $designState.elements[string]): { x: number; y: number } {
+		let absoluteX = element.position.x;
+		let absoluteY = element.position.y;
+
+		// Walk up parent chain to accumulate absolute position
+		let currentElement = element;
+		while (currentElement.parentId) {
+			const parent = $designState.elements[currentElement.parentId];
+			if (!parent) break;
+
+			// Add parent's position to get absolute coordinates
+			absoluteX += parent.position.x;
+			absoluteY += parent.position.y;
+
+			currentElement = parent;
+		}
+
+		return { x: absoluteX, y: absoluteY };
+	}
+
 	function handleMouseUp() {
 		if (isSelecting) {
 			// Find elements within selection box
 			const newlySelectedIds: string[] = [];
 
 			Object.values($designState.elements).forEach((element) => {
+				// Calculate absolute position in canvas space
+				const absolutePos = getAbsolutePosition(element);
+
 				const elementRect = {
-					x: element.position.x,
-					y: element.position.y,
+					x: absolutePos.x,
+					y: absolutePos.y,
 					width: element.size.width,
 					height: element.size.height
 				};

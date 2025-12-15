@@ -27,7 +27,9 @@
 	export let onDragEnd: () => void;
 	export let onDragOver: (targetElementId: string, position: 'before' | 'after' | 'inside') => void;
 	export let onDrop: (targetElementId: string, position: 'before' | 'after' | 'inside') => void;
+	export let onGroupDrop: ((targetElementId: string, position: 'before' | 'after' | 'inside') => void) | undefined = undefined;
 	export let draggedElementId: string | null = null;
+	export let draggedGroupId: string | null = null;
 	export let dropTarget: { elementId: string; position: 'before' | 'after' | 'inside' } | null = null;
 	export let depth: number = 0;
 	export let onSelectGroup: ((groupId: string) => void) | undefined = undefined;
@@ -74,55 +76,27 @@
 	function buildLayerItems(elements: Element[], groups: Record<string, Group>): LayerItem[] {
 		const items: LayerItem[] = [];
 		const processedElementIds = new Set<string>();
+		const processedGroupIds = new Set<string>();
 
 		for (const element of elements) {
 			// Skip if already processed as part of a group
 			if (processedElementIds.has(element.id)) continue;
 
-			// Skip group wrappers (they're displayed as group folders via the group record)
-			if (element.isGroupWrapper) {
-				const group = Object.values(groups).find(g => g.wrapperId === element.id);
-				if (group) {
-					// Skip if we already added this group
-					if (processedElementIds.has(group.id)) continue;
-
-					const groupElements = group.elementIds
-						.map(id => $designState.elements[id])
-						.filter(Boolean);
-
-					// Mark all group elements as processed
-					group.elementIds.forEach(id => processedElementIds.add(id));
-					processedElementIds.add(group.id);
-					processedElementIds.add(element.id); // Mark wrapper as processed too
-
-					items.push({
-						type: 'group',
-						id: group.id,
-						group,
-						groupElements
-					});
-				}
-				continue;
-			}
-
-			// Check if element belongs to a group
-			if (element.groupId && groups[element.groupId]) {
+			// Check if element belongs to a group (groupId-based system)
+			if (element.groupId) {
 				// Skip if we already added this group
-				if (processedElementIds.has(element.groupId)) continue;
+				if (processedGroupIds.has(element.groupId)) continue;
 
-				const group = groups[element.groupId];
-				const groupElements = group.elementIds
-					.map(id => $designState.elements[id])
-					.filter(Boolean);
+				// Find all elements with the same groupId
+				const groupElements = elements.filter(el => el.groupId === element.groupId);
 
-				// Mark all group elements as processed
-				group.elementIds.forEach(id => processedElementIds.add(id));
-				processedElementIds.add(element.groupId);
+				// Mark all group elements and the groupId as processed
+				groupElements.forEach(el => processedElementIds.add(el.id));
+				processedGroupIds.add(element.groupId);
 
 				items.push({
 					type: 'group',
 					id: element.groupId,
-					group,
 					groupElements
 				});
 			} else {
@@ -257,13 +231,11 @@
 		e.preventDefault();
 		e.stopPropagation();
 
-		if (!draggedElementId || draggedElementId === element.id) return;
+		// Accept either element or group drags
+		if ((!draggedElementId && !draggedGroupId) || draggedElementId === element.id) return;
 
-		// Prevent dropping parent into its own child
-		if (isAncestor(draggedElementId, element.id)) return;
-
-		const draggedElement = elements[draggedElementId];
-		if (!draggedElement) return;
+		// Prevent dropping parent into its own child (only for elements, not groups)
+		if (draggedElementId && isAncestor(draggedElementId, element.id)) return;
 
 		// Determine drop position based on mouse Y position
 		const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -272,19 +244,37 @@
 
 		let position: 'before' | 'after' | 'inside';
 
-		// Check if dragged element and target element are siblings (same parent)
-		const areSiblings = draggedElement.parentId === element.parentId;
+		// Both groups and elements can be dropped inside containers
+		if (draggedGroupId) {
+			// Groups can be dropped inside elements with children
+			// Only allow "inside" drop if:
+			// 1. Element has children and is expanded
+			// 2. Mouse is in the middle zone (30-70%)
+			if (hasChildren && isExpanded && y > height * 0.3 && y < height * 0.7) {
+				position = 'inside';
+			} else {
+				position = y < height / 2 ? 'before' : 'after';
+			}
+		} else if (draggedElementId) {
+			const draggedElement = elements[draggedElementId];
+			if (!draggedElement) return;
 
-		// Only allow "inside" drop if:
-		// 1. Element has children and is expanded
-		// 2. Mouse is in the middle zone (30-70%)
-		// 3. Elements are NOT siblings (different parents or dragging root into nested)
-		if (hasChildren && isExpanded && y > height * 0.3 && y < height * 0.7 && !areSiblings) {
-			position = 'inside';
-		} else if (y < height / 2) {
-			position = 'before';
+			// Check if dragged element and target element are siblings (same parent)
+			const areSiblings = draggedElement.parentId === element.parentId;
+
+			// Only allow "inside" drop if:
+			// 1. Element has children and is expanded
+			// 2. Mouse is in the middle zone (30-70%)
+			// 3. Elements are NOT siblings (different parents or dragging root into nested)
+			if (hasChildren && isExpanded && y > height * 0.3 && y < height * 0.7 && !areSiblings) {
+				position = 'inside';
+			} else if (y < height / 2) {
+				position = 'before';
+			} else {
+				position = 'after';
+			}
 		} else {
-			position = 'after';
+			return;
 		}
 
 		onDragOver(element.id, position);
@@ -294,11 +284,18 @@
 		e.preventDefault();
 		e.stopPropagation();
 
-		if (!draggedElementId || draggedElementId === element.id) return;
-		if (isAncestor(draggedElementId, element.id)) return;
+		if ((!draggedElementId && !draggedGroupId) || draggedElementId === element.id) return;
+		if (draggedElementId && isAncestor(draggedElementId, element.id)) return;
 
 		if (dropPosition) {
-			onDrop(element.id, dropPosition);
+			// Handle group drops (now supports 'inside' as well)
+			if (draggedGroupId && onGroupDrop) {
+				onGroupDrop(element.id, dropPosition);
+			}
+			// Handle element drops
+			else if (draggedElementId) {
+				onDrop(element.id, dropPosition);
+			}
 		}
 	}
 
@@ -456,7 +453,9 @@
 								{onDragEnd}
 								{onDragOver}
 								{onDrop}
+								{onGroupDrop}
 								{draggedElementId}
+								{draggedGroupId}
 								{dropTarget}
 								depth={depth + 2}
 								{onSelectGroup}
@@ -480,7 +479,9 @@
 					{onDragEnd}
 					{onDragOver}
 					{onDrop}
+					{onGroupDrop}
 					{draggedElementId}
+					{draggedGroupId}
 					{dropTarget}
 					depth={depth + 1}
 					{onSelectGroup}

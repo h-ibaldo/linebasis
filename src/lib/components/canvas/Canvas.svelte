@@ -695,6 +695,7 @@
 					{element}
 					{isPanning}
 					{isDragging}
+					{viewport}
 					onStartDrag={selectionOverlay ? handleStartDrag : undefined}
 					on:contextmenu={handleCanvasContextMenu}
 				/>

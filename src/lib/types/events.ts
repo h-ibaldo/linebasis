@@ -27,10 +27,10 @@ export type EventType =
 	| 'GROUP_MOVE_ELEMENTS'
 	| 'GROUP_RESIZE_ELEMENTS'
 	| 'GROUP_ROTATE_ELEMENTS'
-	// Group operations (DEPRECATED - groups are now regular divs)
-	// | 'GROUP_ELEMENTS'
-	// | 'UNGROUP_ELEMENTS'
-	// | 'CREATE_GROUP_WRAPPER'
+	// Group operations
+	| 'CREATE_GROUP'
+	| 'UNGROUP_ELEMENTS'
+	| 'REORDER_GROUP'
 	// Style operations
 	| 'UPDATE_STYLES'
 	| 'GROUP_UPDATE_STYLES'
@@ -84,6 +84,8 @@ export interface UpdateElementEvent extends BaseEvent {
 			alt?: string;
 			href?: string;
 			src?: string;
+			/** @deprecated Group feature removed - this property will be deleted */
+			groupId?: string | null;
 		};
 	};
 }
@@ -221,41 +223,30 @@ export interface GroupUpdateStylesEvent extends BaseEvent {
 	};
 }
 
-// ============================================================================
-// Group Events (DEPRECATED - groups are now regular div elements)
-// ============================================================================
+export interface CreateGroupEvent extends BaseEvent {
+	type: 'CREATE_GROUP';
+	payload: {
+		groupId: string;
+		elementIds: string[];
+		parentGroupId?: string;
+	};
+}
 
-// DEPRECATED: Use CREATE_ELEMENT with type='div' and children instead
-// export interface GroupElementsEvent extends BaseEvent {
-// 	type: 'GROUP_ELEMENTS';
-// 	payload: {
-// 		groupId: string;
-// 		elementIds: string[];
-// 	};
-// }
+export interface UngroupElementsEvent extends BaseEvent {
+	type: 'UNGROUP_ELEMENTS';
+	payload: {
+		groupId: string;
+	};
+}
 
-// DEPRECATED: Use DELETE_ELEMENT on the wrapper div instead
-// export interface UngroupElementsEvent extends BaseEvent {
-// 	type: 'UNGROUP_ELEMENTS';
-// 	payload: {
-// 		groupId: string;
-// 	};
-// }
-
-// DEPRECATED: Use CREATE_ELEMENT with type='div' and children instead
-// export interface CreateGroupWrapperEvent extends BaseEvent {
-// 	type: 'CREATE_GROUP_WRAPPER';
-// 	payload: {
-// 		groupId: string;
-// 		wrapperId: string;
-// 		elementIds: string[];
-// 		wrapperPosition: Position;
-// 		wrapperSize: Size;
-// 		memberOffsets: Record<string, Position>;
-// 		parentId: string | null;
-// 		pageId: string;
-// 	};
-// }
+export interface ReorderGroupEvent extends BaseEvent {
+	type: 'REORDER_GROUP';
+	payload: {
+		groupId: string;
+		newParentId: string | null; // New parent element (null for root level)
+		newIndex: number; // Index in parent's children array or page's canvasElements
+	};
+}
 
 // ============================================================================
 // Style Events
@@ -402,10 +393,9 @@ export type DesignEvent =
 	| GroupResizeElementsEvent
 	| GroupRotateElementsEvent
 	| GroupUpdateStylesEvent
-	// DEPRECATED: Group events removed (groups are now regular divs)
-	// | GroupElementsEvent
-	// | UngroupElementsEvent
-	// | CreateGroupWrapperEvent
+	| CreateGroupEvent
+	| UngroupElementsEvent
+	| ReorderGroupEvent
 	| UpdateStylesEvent
 	| UpdateTypographyEvent
 	| UpdateSpacingEvent
@@ -587,6 +577,7 @@ export interface Group {
 	id: string;
 	elementIds: string[];
 	wrapperId?: string;
+	parentGroupId?: string; // For nested groups - the group this group belongs to
 }
 
 export interface Component {
