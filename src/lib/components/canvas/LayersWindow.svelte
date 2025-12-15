@@ -214,18 +214,9 @@
 
 
 	function handleSelectGroup(groupId: string) {
-		// Find the root parent group (traverse up the hierarchy)
-		let currentGroupId = groupId;
-		let group = $designState.groups[currentGroupId];
-
-		while (group?.parentGroupId) {
-			currentGroupId = group.parentGroupId;
-			group = $designState.groups[currentGroupId];
-		}
-
-		// Now currentGroupId is the top-most parent group
-		// Select all elements in this group and all nested child groups recursively
-		const elementIds = getAllElementsInGroupHierarchy(currentGroupId, $designState.groups, $designState.elements);
+		// Select all elements in THIS specific group and its nested child groups
+		// Do NOT traverse up to parent groups - we want to select exactly what was clicked
+		const elementIds = getAllElementsInGroupHierarchy(groupId, $designState.groups, $designState.elements);
 
 		if (elementIds.length > 0) {
 			storeState.update((state) => ({

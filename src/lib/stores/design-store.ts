@@ -1612,31 +1612,106 @@ export async function groupElements(): Promise<void> {
 }
 
 /**
+ * Helper function to recursively get all element IDs in a group
+ */
+function getAllElementsInGroup(groupId: string, state: DesignState): string[] {
+	const result: string[] = [];
+	const group = state.groups[groupId];
+	if (!group) return result;
+
+	// Add direct elements from the group's elementIds array
+	result.push(...group.elementIds);
+
+	// Add elements from child groups recursively
+	for (const childGroup of Object.values(state.groups)) {
+		if (childGroup.parentGroupId === groupId) {
+			result.push(...getAllElementsInGroup(childGroup.id, state));
+		}
+	}
+
+	return result;
+}
+
+/**
  * Ungroup selected elements
  * Removes grouping from all selected elements that are in a group
+ * Implements Figma-like behavior: only ungroups the parent-most group that contains the selection
  */
 export async function ungroupElements(): Promise<void> {
 	const selected = get(selectedElements);
 	if (selected.length === 0) return;
 
-	// Find all unique groups from selected elements
-	const groupIds = new Set<string>();
-	for (const element of selected) {
-		if (element.groupId) {
-			groupIds.add(element.groupId);
+	const state = get(designState);
+	const selectedIds = new Set(selected.map(el => el.id));
+
+	// Find all groups where ALL of the group's elements are selected
+	// We need to recursively check all descendants, not just direct elementIds
+	const fullySelectedGroups: string[] = [];
+	for (const [groupId] of Object.entries(state.groups)) {
+		// Get ALL elements that belong to this group (recursively)
+		const allGroupElements = getAllElementsInGroup(groupId, state);
+
+		// A group is fully selected if ALL its elements (including nested) are selected
+		const allElementsSelected = allGroupElements.length > 0 && allGroupElements.every((id: string) => selectedIds.has(id));
+
+		if (allElementsSelected) {
+			fullySelectedGroups.push(groupId);
 		}
 	}
 
-	// Dispatch ungroup event for each group
-	for (const groupId of groupIds) {
-		await dispatch({
-			id: uuidv4(),
-			type: 'UNGROUP_ELEMENTS',
-			timestamp: Date.now(),
-			payload: {
-				groupId
+	if (fullySelectedGroups.length === 0) return;
+
+	// Find the TOP-MOST fully selected group (the one with no parent that's also fully selected)
+	// This is the group the user actually intends to ungroup
+	let topMostGroupId: string | null = null;
+	for (const groupId of fullySelectedGroups) {
+		const group = state.groups[groupId];
+		if (!group) continue;
+
+		// Check if this group's parent is also fully selected
+		const hasFullySelectedParent = group.parentGroupId && fullySelectedGroups.includes(group.parentGroupId);
+
+		if (!hasFullySelectedParent) {
+			// This is a top-most fully selected group
+			topMostGroupId = groupId;
+			break; // Only ungroup one group at a time
+		}
+	}
+
+	if (!topMostGroupId) return;
+
+	// Before ungrouping, collect the elements and child groups that will remain after ungrouping
+	const elementsToSelect: string[] = [];
+
+	// Find all direct child groups of the group being ungrouped
+	for (const [childGroupId, childGroup] of Object.entries(state.groups)) {
+		if (childGroup.parentGroupId === topMostGroupId) {
+			// This is a child group - find its elements to select
+			const childElements = Object.values(state.elements).filter(el => el.parentId === childGroupId);
+			if (childElements.length > 0) {
+				elementsToSelect.push(...childElements.map(el => el.id));
 			}
-		});
+		}
+	}
+
+	// Also include any direct elements of the group being ungrouped
+	const directElements = Object.values(state.elements).filter(el => el.parentId === topMostGroupId);
+	elementsToSelect.push(...directElements.map(el => el.id));
+
+	// Dispatch ungroup event for the top-most group
+	await dispatch({
+		id: uuidv4(),
+		type: 'UNGROUP_ELEMENTS',
+		timestamp: Date.now(),
+		payload: {
+			groupId: topMostGroupId
+		}
+	});
+
+	// Select the child elements/groups that remain after ungrouping
+	// This matches Figma behavior where ungrouping maintains selection of the children
+	if (elementsToSelect.length > 0) {
+		selectElements(elementsToSelect);
 	}
 }
 
