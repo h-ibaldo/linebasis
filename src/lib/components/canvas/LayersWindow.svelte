@@ -16,6 +16,7 @@
 	import { isolateElementFromGroup } from '$lib/stores/interaction-store';
 	import FloatingWindow from '$lib/components/ui/FloatingWindow.svelte';
 	import LayerTreeItem from './LayerTreeItem.svelte';
+	import GroupItem from './GroupItem.svelte';
 	import ContextMenu from '$lib/components/ui/ContextMenu.svelte';
 	import type { Element, Group } from '$lib/types/events';
 	import { onMount, tick } from 'svelte';
@@ -123,6 +124,23 @@
 		nestedGroups?: LayerItem[]; // For nested groups - child groups of this group
 	}
 
+	// Helper to check if a group has any elements (recursively checking child groups)
+	function groupHasElements(groupId: string, groups: Record<string, Group>, elements: Element[]): boolean {
+		// Check if any element belongs to this group
+		const hasDirectElements = elements.some(el => el.groupId === groupId);
+		if (hasDirectElements) return true;
+
+		// Check if any child groups have elements
+		const childGroups = Object.values(groups).filter(g => g.parentGroupId === groupId);
+		for (const childGroup of childGroups) {
+			if (groupHasElements(childGroup.id, groups, elements)) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
 	function buildLayerItems(elements: Element[], groups: Record<string, Group>, parentGroupId?: string): LayerItem[] {
 		const items: LayerItem[] = [];
 		const processedElementIds = new Set<string>();
@@ -134,11 +152,8 @@
 				// Get elements belonging to this group
 				const groupElements = elements.filter(el => el.groupId === group.id);
 
-				// Check if this group has any child groups (nested groups)
-				const hasChildGroups = Object.values(groups).some(g => g.parentGroupId === group.id);
-
-				// Skip empty groups ONLY if they have no elements AND no child groups
-				if (groupElements.length === 0 && !hasChildGroups) continue;
+				// Skip orphaned groups - groups with no elements in the entire hierarchy
+				if (!groupHasElements(group.id, groups, elements)) continue;
 
 				processedGroupIds.add(group.id);
 				groupElements.forEach(el => processedElementIds.add(el.id));
@@ -671,152 +686,33 @@
 				{/if}
 
 				{#each layerItems as item (item.id)}
-					{#if item.type === 'group' && item.groupElements}
-						<!-- Group item -->
-						<div class="group-item">
-							<div
-								class="group-header"
-								class:selected={item.groupElements.some(el => selectedIds.includes(el.id))}
-								class:dragging={draggedGroupId === item.id}
-								draggable={true}
-								on:click={() => handleSelectGroup(item.id)}
-								on:dragstart={(e) => {
-									e.stopPropagation();
-									if (e.dataTransfer) {
-										e.dataTransfer.effectAllowed = 'move';
-										e.dataTransfer.setData('text/plain', item.id);
-									}
-									handleGroupDragStart(item.id);
-								}}
-								on:dragend={(e) => {
-									e.stopPropagation();
-									handleDragEnd();
-								}}
-								on:dragover={(e) => {
-									e.preventDefault();
-									e.stopPropagation();
-
-									if (!draggedGroupId || draggedGroupId === item.id) return;
-									if (!item.groupElements || item.groupElements.length === 0) return;
-
-									// Determine drop position based on mouse Y
-									const rect = e.currentTarget.getBoundingClientRect();
-									const y = e.clientY - rect.top;
-									const height = rect.height;
-									const position = y < height / 2 ? 'before' : 'after';
-
-									// Use first element of group as reference
-									dropTarget = { elementId: item.groupElements[0].id, position };
-								}}
-								on:drop={(e) => {
-									e.preventDefault();
-									e.stopPropagation();
-
-									if (!draggedGroupId || !dropTarget || !item.groupElements || item.groupElements.length === 0) return;
-
-									// dropTarget.position is always 'before' or 'after' for groups (never 'inside')
-									if (dropTarget.position === 'inside') return;
-									handleGroupDrop(item.groupElements[0].id, dropTarget.position);
-								}}
-							>
-								<button
-									class="expand-btn"
-									draggable={false}
-									on:click={(e) => toggleGroupExpanded(item.id, e)}
-									on:mousedown={(e) => e.stopPropagation()}
-									aria-label={!collapsedGroups[item.id] ? 'Collapse' : 'Expand'}
-								>
-									<span class="arrow" class:expanded={!collapsedGroups[item.id]}>▸</span>
-								</button>
-								<span class="group-icon">⊞</span>
-								<span class="group-name">Group</span>
-							</div>
-							<!-- Group members (collapsible) -->
-							{#if !collapsedGroups[item.id]}
-							<div class="group-children">
-								<!-- Nested groups first -->
-								{#if item.nestedGroups && item.nestedGroups.length > 0}
-									{#each item.nestedGroups as nestedItem (nestedItem.id)}
-										{#if nestedItem.type === 'group' && nestedItem.groupElements}
-											<div class="nested-group-wrapper" style="padding-left: 16px;">
-												<div
-													class="group-item nested-group"
-													class:selected={nestedItem.groupElements.some(el => selectedIds.includes(el.id))}
-													draggable={true}
-													on:click={() => handleSelectGroup(nestedItem.id)}
-													on:dragstart={() => {
-														draggedGroupId = nestedItem.id;
-													}}
-													on:dragend={handleDragEnd}
-												>
-													<button
-														class="expand-btn"
-														draggable={false}
-														on:click={(e) => toggleGroupExpanded(nestedItem.id, e)}
-														on:mousedown={(e) => e.stopPropagation()}
-														aria-label={!collapsedGroups[nestedItem.id] ? 'Collapse' : 'Expand'}
-													>
-														<span class="arrow" class:expanded={!collapsedGroups[nestedItem.id]}>▸</span>
-													</button>
-													<span class="group-icon">⊞</span>
-													<span class="group-name">Group (nested)</span>
-												</div>
-												<!-- Nested group members -->
-												{#if !collapsedGroups[nestedItem.id]}
-													<div class="group-children" style="padding-left: 16px;">
-														{#each nestedItem.groupElements as element (element.id)}
-															<LayerTreeItem
-																{element}
-																elements={$designState.elements}
-																{selectedIds}
-																onSelect={handleSelectElement}
-																onToggleVisibility={handleToggleVisibility}
-																onToggleLock={handleToggleLock}
-																onRename={handleRename}
-																onDragStart={handleDragStart}
-																onDragEnd={handleDragEnd}
-																onDragOver={handleDragOver}
-																onDrop={handleDrop}
-																onGroupDrop={handleGroupDrop}
-																{draggedElementId}
-																{draggedGroupId}
-																{dropTarget}
-																depth={2}
-																on:contextmenu={handleContextMenuOpen}
-															/>
-														{/each}
-													</div>
-												{/if}
-											</div>
-										{/if}
-									{/each}
-								{/if}
-
-								<!-- Regular group elements -->
-								{#each item.groupElements as element (element.id)}
-									<LayerTreeItem
-										{element}
-										elements={$designState.elements}
-										{selectedIds}
-										onSelect={handleSelectElement}
-										onToggleVisibility={handleToggleVisibility}
-										onToggleLock={handleToggleLock}
-										onRename={handleRename}
-										onDragStart={handleDragStart}
-										onDragEnd={handleDragEnd}
-										onDragOver={handleDragOver}
-										onDrop={handleDrop}
-										onGroupDrop={handleGroupDrop}
-										{draggedElementId}
-										{draggedGroupId}
-										{dropTarget}
-										depth={1}
-										on:contextmenu={handleContextMenuOpen}
-									/>
-								{/each}
-							</div>
-							{/if}
-						</div>
+					{#if item.type === 'group'}
+						<!-- Group item - recursive component -->
+						<GroupItem
+							groupId={item.id}
+							groupElements={item.groupElements || []}
+							nestedGroups={item.nestedGroups || []}
+							{selectedIds}
+							{collapsedGroups}
+							{draggedGroupId}
+							{draggedElementId}
+							{dropTarget}
+							elements={$designState.elements}
+							depth={1}
+							onSelectGroup={handleSelectGroup}
+							onSelectElement={handleSelectElement}
+							onToggleVisibility={handleToggleVisibility}
+							onToggleLock={handleToggleLock}
+							onRename={handleRename}
+							onDragStart={handleDragStart}
+							onDragEnd={handleDragEnd}
+							onDragOver={handleDragOver}
+							onDrop={handleDrop}
+							onGroupDrop={handleGroupDrop}
+							{toggleGroupExpanded}
+							{handleGroupDragStart}
+							on:contextmenu={handleContextMenuOpen}
+						/>
 					{:else if item.element}
 						<!-- Regular element -->
 						<LayerTreeItem

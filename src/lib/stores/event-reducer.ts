@@ -483,15 +483,23 @@ function handleGroupDeleteElements(state: DesignState, event: GroupDeleteElement
 		}
 	}
 
-	// For each affected group, check if all elements are being deleted
+	// For each affected group, check if all elements and child groups are being deleted
 	for (const groupId of groupsToCheck) {
 		const group = state.groups[groupId];
 		if (!group) continue;
 
-		// Check if all group elements are being deleted
+		// Check if all direct group elements are being deleted
 		const allElementsDeleted = group.elementIds.every(id => idsToDelete.has(id));
 
-		if (allElementsDeleted) {
+		// Check if all child groups are being deleted (for nested groups)
+		const childGroups = Object.values(state.groups).filter(g => g.parentGroupId === groupId);
+		const allChildGroupsDeleted = childGroups.length === 0 || childGroups.every(childGroup =>
+			// A child group is considered deleted if it's in groupsToCheck and will be deleted
+			groupsToCheck.has(childGroup.id) &&
+			childGroup.elementIds.every(id => idsToDelete.has(id))
+		);
+
+		if (allElementsDeleted && allChildGroupsDeleted) {
 			// All group elements are being deleted - also delete the wrapper if it exists
 			if (group.wrapperId && !idsToDelete.has(group.wrapperId)) {
 				// Wrapper is not in the deletion list, add it
@@ -1034,33 +1042,42 @@ function handleGroupUpdateStyles(state: DesignState, event: GroupUpdateStylesEve
 }
 
 function handleCreateGroup(state: DesignState, event: CreateGroupEvent): DesignState {
-	const { groupId, elementIds } = event.payload;
+	const { groupId, elementIds, parentGroupId } = event.payload;
 	const newElements = { ...state.elements };
 	const newGroups = { ...state.groups };
 
-	// Track which existing groups are being nested
-	const existingGroupIds = new Set<string>();
+	// Track which existing ROOT groups are being nested
+	const rootGroupIds = new Set<string>();
 	const ungroupedElementIds: string[] = [];
 
-	// Categorize elements: which are already in groups vs ungrouped
+	// Categorize elements: find root groups vs ungrouped elements
 	for (const id of elementIds) {
 		const el = newElements[id];
 		if (el?.groupId) {
-			existingGroupIds.add(el.groupId);
+			// Find the root parent group (traverse up the hierarchy)
+			let currentGroupId = el.groupId;
+			let group = newGroups[currentGroupId];
+
+			while (group?.parentGroupId) {
+				currentGroupId = group.parentGroupId;
+				group = newGroups[currentGroupId];
+			}
+
+			rootGroupIds.add(currentGroupId);
 		} else {
 			ungroupedElementIds.push(id);
 		}
 	}
 
 	// Determine if we're creating a nested group (grouping existing groups)
-	const isNestingGroups = existingGroupIds.size > 0;
+	const isNestingGroups = rootGroupIds.size > 0;
 
 	if (isNestingGroups) {
-		// NESTED GROUP: Set parentGroupId on existing groups, don't modify element groupIds
-		for (const existingGroupId of existingGroupIds) {
-			if (newGroups[existingGroupId]) {
-				newGroups[existingGroupId] = {
-					...newGroups[existingGroupId],
+		// NESTED GROUP: Set parentGroupId on root groups, don't modify element groupIds
+		for (const rootGroupId of rootGroupIds) {
+			if (newGroups[rootGroupId]) {
+				newGroups[rootGroupId] = {
+					...newGroups[rootGroupId],
 					parentGroupId: groupId
 				};
 			}
@@ -1074,11 +1091,12 @@ function handleCreateGroup(state: DesignState, event: CreateGroupEvent): DesignS
 			}
 		}
 
-		// For nested groups, elementIds should reference the child groups (via their representative elements)
-		// We'll store all selected elements but understand that some belong to child groups
+		// For nested groups, only store ungrouped element IDs
+		// Child groups track their own elements via their groupId
 		newGroups[groupId] = {
 			id: groupId,
-			elementIds: elementIds
+			elementIds: ungroupedElementIds, // Only direct members, not elements from child groups
+			parentGroupId: parentGroupId // Preserve parent group ID if provided (for paste/duplicate)
 		};
 	} else {
 		// SIMPLE GROUP: All elements are ungrouped, assign groupId to all
@@ -1091,7 +1109,8 @@ function handleCreateGroup(state: DesignState, event: CreateGroupEvent): DesignS
 
 		newGroups[groupId] = {
 			id: groupId,
-			elementIds: elementIds
+			elementIds: elementIds,
+			parentGroupId: parentGroupId // Preserve parent group ID if provided (for paste/duplicate)
 		};
 	}
 

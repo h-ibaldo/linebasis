@@ -9,7 +9,7 @@
 	 */
 
 	import { currentTool, type Tool } from '$lib/stores/tool-store';
-	import { undo, redo } from '$lib/stores/design-store';
+	import { undo, redo, clearCurrentPageCanvas } from '$lib/stores/design-store';
 
 	function selectTool(tool: Tool) {
 		currentTool.set(tool);
@@ -21,6 +21,12 @@
 
 	function handleRedo() {
 		redo();
+	}
+
+	async function handleClearCanvas() {
+		if (confirm('Are you sure you want to clear the entire canvas? This will delete all elements and cannot be undone.')) {
+			await clearCurrentPageCanvas();
+		}
 	}
 </script>
 
@@ -76,6 +82,10 @@
 			<option>150%</option>
 			<option>200%</option>
 		</select>
+		<span class="separator"></span>
+		<button class="tool-btn danger" on:click={handleClearCanvas} title="Clear Canvas">
+			Clear Canvas
+		</button>
 	</div>
 
 	<!-- Right Section: Actions -->
@@ -169,6 +179,17 @@
 
 	.tool-btn.primary:hover {
 		background: #2563eb;
+	}
+
+	.tool-btn.danger {
+		background: #ef4444;
+		color: white;
+		border-color: #ef4444;
+	}
+
+	.tool-btn.danger:hover {
+		background: #dc2626;
+		border-color: #dc2626;
 	}
 
 	/* Zoom Selector */

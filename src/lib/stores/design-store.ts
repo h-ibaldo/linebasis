@@ -8,7 +8,7 @@
 import { writable, derived, get } from 'svelte/store';
 import type { Writable, Readable } from 'svelte/store';
 import { v4 as uuidv4 } from 'uuid';
-import type { DesignEvent, DesignState, Element, Page, Component, AutoLayoutStyle } from '$lib/types/events';
+import type { DesignEvent, DesignState, Element, Page, Component, AutoLayoutStyle, Group } from '$lib/types/events';
 import {
 	initDB,
 	appendEvent,
@@ -596,6 +596,39 @@ export async function deleteElements(elementIds: string[]): Promise<void> {
 			elementIds
 		}
 	});
+}
+
+/**
+ * Clear all elements from the current page's canvas
+ * Useful for resetting a corrupted canvas
+ */
+export async function clearCurrentPageCanvas(): Promise<void> {
+	const state = get(storeState);
+	const pageId = state.designState.currentPageId;
+	
+	if (!pageId) {
+		console.warn('No current page to clear');
+		return;
+	}
+
+	const page = state.designState.pages[pageId];
+	if (!page) {
+		console.warn(`Page ${pageId} not found`);
+		return;
+	}
+
+	// Get all root element IDs from the canvas
+	const rootElementIds = page.canvasElements;
+	
+	if (rootElementIds.length === 0) {
+		console.log('Canvas is already empty');
+		return;
+	}
+
+	// Delete all root elements (this will recursively delete all children)
+	await deleteElements(rootElementIds);
+	
+	console.log(`Cleared ${rootElementIds.length} root element(s) from canvas`);
 }
 
 export async function moveElement(
@@ -1196,6 +1229,8 @@ export function manualSave(): void {
 
 // Clipboard for storing copied elements (in-memory, not system clipboard)
 let clipboard: Element[] = [];
+// Clipboard for group records (needed for nested groups)
+let clipboardGroups: Record<string, Group> = {};
 // Track if clipboard contains cut elements (vs copied elements)
 let isClipboardFromCut = false;
 
@@ -1859,12 +1894,32 @@ export function copyElements(): void {
 	clipboard = Array.from(elementsToCopy).map((el) => ({ ...el }));
 	isClipboardFromCut = false;
 
-	// DEPRECATED: No need to copy group records - groups are just divs now
-	// const elementIds = new Set(clipboard.map(el => el.id));
-	// for (const [groupId, group] of Object.entries(state.groups)) {
-	// 	if (group.wrapperId && elementIds.has(group.wrapperId)) {
-	// 	}
-	// }
+	// Copy group records for all groups that the copied elements belong to
+	// This is CRITICAL for nested groups to preserve the hierarchy
+	const copiedGroupIds = new Set<string>();
+	for (const el of clipboard) {
+		if (el.groupId) {
+			copiedGroupIds.add(el.groupId);
+		}
+	}
+
+	// Also include parent groups in the hierarchy
+	const groupIdsToInclude = new Set(copiedGroupIds);
+	for (const groupId of copiedGroupIds) {
+		let currentGroup = state.groups[groupId];
+		while (currentGroup?.parentGroupId) {
+			groupIdsToInclude.add(currentGroup.parentGroupId);
+			currentGroup = state.groups[currentGroup.parentGroupId];
+		}
+	}
+
+	// Copy all relevant group records
+	clipboardGroups = {};
+	for (const groupId of groupIdsToInclude) {
+		if (state.groups[groupId]) {
+			clipboardGroups[groupId] = { ...state.groups[groupId] };
+		}
+	}
 }
 
 /**
@@ -1888,12 +1943,32 @@ export async function cutElements(): Promise<void> {
 	clipboard = Array.from(elementsToCopy).map((el) => ({ ...el }));
 	isClipboardFromCut = true;
 
-	// DEPRECATED: No need to copy group records - groups are just divs now
-	// const elementIds = new Set(clipboard.map(el => el.id));
-	// for (const [groupId, group] of Object.entries(state.groups)) {
-	// 	if (group.wrapperId && elementIds.has(group.wrapperId)) {
-	// 	}
-	// }
+	// Copy group records for all groups that the copied elements belong to
+	// This is CRITICAL for nested groups to preserve the hierarchy
+	const copiedGroupIds = new Set<string>();
+	for (const el of clipboard) {
+		if (el.groupId) {
+			copiedGroupIds.add(el.groupId);
+		}
+	}
+
+	// Also include parent groups in the hierarchy
+	const groupIdsToInclude = new Set(copiedGroupIds);
+	for (const groupId of copiedGroupIds) {
+		let currentGroup = state.groups[groupId];
+		while (currentGroup?.parentGroupId) {
+			groupIdsToInclude.add(currentGroup.parentGroupId);
+			currentGroup = state.groups[currentGroup.parentGroupId];
+		}
+	}
+
+	// Copy all relevant group records
+	clipboardGroups = {};
+	for (const groupId of groupIdsToInclude) {
+		if (state.groups[groupId]) {
+			clipboardGroups[groupId] = { ...state.groups[groupId] };
+		}
+	}
 
 	// Wrap deletion in a transaction for single undo/redo
 	beginTransaction();
@@ -1969,11 +2044,10 @@ export async function pasteElements(
 
 		// Generate new group IDs for all groups in clipboard
 		// This prevents pasted elements from being linked to original groups
-		const clipboardGroupIds = new Set<string>();
-		for (const element of clipboard) {
-			if (element.groupId && !clipboardGroupIds.has(element.groupId)) {
-				clipboardGroupIds.add(element.groupId);
-				oldToNewGroupIdMap.set(element.groupId, uuidv4());
+		// IMPORTANT: Use clipboardGroups (not just element.groupId) to include parent groups
+		for (const oldGroupId of Object.keys(clipboardGroups)) {
+			if (!oldToNewGroupIdMap.has(oldGroupId)) {
+				oldToNewGroupIdMap.set(oldGroupId, uuidv4());
 			}
 		}
 
@@ -2289,7 +2363,7 @@ export async function pasteElements(
 		}
 
 		// Recreate groups: For each old groupId, dispatch a CREATE_GROUP event with all new element IDs
-		// that belong to that group
+		// that belong to that group, preserving the parent-child hierarchy
 		for (const [oldGroupId, newGroupId] of oldToNewGroupIdMap.entries()) {
 			// Find all pasted elements that had this groupId in the clipboard
 			const elementsInGroup: string[] = [];
@@ -2302,15 +2376,49 @@ export async function pasteElements(
 				}
 			}
 
-			// Only create the group if there are elements in it
-			if (elementsInGroup.length > 0) {
+			// Get the original group from clipboard
+			const originalGroup = clipboardGroups[oldGroupId];
+
+			// Check if this group has child groups (via parentGroupId references)
+			const hasChildGroups = Object.values(clipboardGroups).some(g => g.parentGroupId === oldGroupId);
+
+			// If this is a parent group (has child groups but no direct elements),
+			// populate elementIds with all elements from child groups
+			if (hasChildGroups && elementsInGroup.length === 0) {
+				// Get all child group IDs
+				const childGroupIds = Object.keys(clipboardGroups).filter(id =>
+					clipboardGroups[id].parentGroupId === oldGroupId
+				);
+
+				// Collect all elements from child groups
+				for (const childGroupId of childGroupIds) {
+					for (const clipboardElement of clipboard) {
+						if (clipboardElement.groupId === childGroupId) {
+							const newElementId = oldToNewIdMap.get(clipboardElement.id);
+							if (newElementId && !elementsInGroup.includes(newElementId)) {
+								elementsInGroup.push(newElementId);
+							}
+						}
+					}
+				}
+			}
+
+			// Create the group if it has elements OR if it has child groups (parent groups)
+			if (elementsInGroup.length > 0 || hasChildGroups) {
+				// If the original group had a parent group, map it to the new parent group ID
+				let newParentGroupId: string | undefined;
+				if (originalGroup?.parentGroupId) {
+					newParentGroupId = oldToNewGroupIdMap.get(originalGroup.parentGroupId);
+				}
+
 				dispatch({
 					id: uuidv4(),
 					type: 'CREATE_GROUP',
 					timestamp: Date.now(),
 					payload: {
 						groupId: newGroupId,
-						elementIds: elementsInGroup
+						elementIds: elementsInGroup,
+						parentGroupId: newParentGroupId
 					}
 				});
 			}

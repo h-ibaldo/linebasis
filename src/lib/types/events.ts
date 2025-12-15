@@ -228,6 +228,7 @@ export interface CreateGroupEvent extends BaseEvent {
 	payload: {
 		groupId: string;
 		elementIds: string[];
+		parentGroupId?: string;
 	};
 }
 

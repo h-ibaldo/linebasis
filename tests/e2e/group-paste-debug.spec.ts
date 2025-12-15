@@ -93,14 +93,14 @@ test.describe('Group Paste Debug', () => {
 			const wrapper = state.elements[wrapperId];
 			const div1 = state.elements[div1Id];
 			const div2 = state.elements[div2Id];
-			const group = Object.values(state.groups).find((g: any) => g.wrapperId === wrapperId);
+			const group = Object.values(state.groups).find((g: any) => g.wrapperId === wrapperId) as any;
 
 			return {
 				wrapperParentId: wrapper?.parentId,
 				wrapperChildren: wrapper?.children || [],
 				div1ParentId: div1?.parentId,
 				div2ParentId: div2?.parentId,
-				groupElementIds: group ? group.elementIds : []
+				groupElementIds: group ? (group.elementIds || []) : []
 			};
 		}, { wrapperId, div1Id, div2Id });
 

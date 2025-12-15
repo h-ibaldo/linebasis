@@ -1277,20 +1277,15 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 		// (Will use the 'state' variable declared below)
 		let expandedElements: Element[] | null = null;
 		if (element.groupId) {
-			console.log('[startDrag] Element has groupId:', element.groupId, 'elementId:', element.id);
 			const currentState = get(designState);
 			let currentGroupId = element.groupId;
 			let group = currentState.groups[currentGroupId];
-			console.log('[startDrag] Initial group:', group);
 
 			// Traverse up to find root parent group
 			while (group?.parentGroupId) {
-				console.log('[startDrag] Traversing to parent:', group.parentGroupId);
 				currentGroupId = group.parentGroupId;
 				group = currentState.groups[currentGroupId];
 			}
-
-			console.log('[startDrag] Root group ID:', currentGroupId);
 
 			// Check if we need to expand selection to include entire root group hierarchy
 			// We need to collect ALL element IDs in the entire hierarchy (including nested groups)
@@ -1310,19 +1305,14 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 			};
 
 			const hierarchyElementIds = getAllElementsInHierarchy(currentGroupId);
-			console.log('[startDrag] Hierarchy element IDs:', hierarchyElementIds);
 
 			const currentSelectionIds = new Set((passedSelectedElements || selectedElements).map(el => el.id));
-			console.log('[startDrag] Current selection IDs:', Array.from(currentSelectionIds));
 
 			// Need expansion if any element in the hierarchy is not selected
 			const needsExpansion = hierarchyElementIds.some(id => !currentSelectionIds.has(id));
 
-			console.log('[startDrag] Needs expansion:', needsExpansion);
-
 			if (needsExpansion) {
 				// Trigger selection expansion which will include entire hierarchy
-				console.log('[startDrag] Expanding selection for element:', element.id);
 				selectElement(element.id);
 				// Wait for selection to update
 				await tick();
@@ -1330,15 +1320,9 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 				// Read the expanded selection directly from the state
 				const updatedState = get(designState);
 				const expandedIds = updatedState.selectedElementIds;
-				console.log('[startDrag] After expansion, selectedElementIds:', expandedIds);
 				expandedElements = expandedIds.map(id => updatedState.elements[id]).filter(Boolean);
-				console.log('[startDrag] expandedElements count:', expandedElements.length);
 			}
 		}
-
-		console.log('[startDrag] expandedElements:', expandedElements?.map(el => el.id) || 'null');
-		console.log('[startDrag] passedSelectedElements:', passedSelectedElements?.map(el => el.id) || 'null');
-		console.log('[startDrag] selectedElements:', selectedElements.map(el => el.id));
 
 		// If clicking on a different element while another has pending transforms,
 		// clear the pending state to prevent layout issues
