@@ -243,6 +243,12 @@ type DocumentWithCaret = Document & {
 				// If this creates a multi-selection, drag all selected elements
 				elementsToDrag = [element];
 			}
+			// PRIORITY 3: Element is part of multi-selection = drag all selected
+			// This must come BEFORE the grouped element logic to allow groups to be dragged
+			// together with other elements in a multi-selection
+			else if (isPartOfMultiSelection) {
+				elementsToDrag = get(selectedElements);
+			}
 			// PRIORITY 4: First click on grouped element = select entire group
 			else {
 				// Find all elements with the same groupId
@@ -256,7 +262,7 @@ type DocumentWithCaret = Document & {
 					.filter(Boolean);
 			}
 		}
-		// PRIORITY 3: Element is part of multi-selection = drag all selected
+		// PRIORITY 3b: Non-grouped element is part of multi-selection = drag all selected
 		else if (isPartOfMultiSelection) {
 			elementsToDrag = get(selectedElements);
 		}
