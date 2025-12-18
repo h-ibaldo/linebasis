@@ -193,3 +193,4 @@ test.describe('Auto-layout fast drop - Selection UI alignment', () => {
 		await page.screenshot({ path: 'tests/screenshots/debug-positions.png' });
 	});
 });
+

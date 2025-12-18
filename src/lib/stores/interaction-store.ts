@@ -21,8 +21,13 @@ export interface InteractionState {
 	editingElementId: string | null;
 	// Hide element during parent change transition to prevent flash
 	hiddenDuringTransition: string | null; // Element ID to hide
-	// Group isolation: when an element from a group is isolated (double-clicked)
-	isolatedElementId: string | null; // Element ID that has been isolated from its group
+	// Hierarchical group isolation stack for drill-down navigation (Figma-style)
+	// Each entry represents a level of isolation, from root to deepest
+	// Empty array = no isolation (root level)
+	// [ga] = ga's children (gb, gc) are isolated
+	// [ga, gb] = gb's children (gba, gbb) are isolated (within ga's isolation)
+	// The LAST item in the stack is the current isolation level
+	isolationStack: string[];
 	// Auto-layout reordering state
 	reorderParentId: string | null;
 	reorderTargetIndex: number | null;
@@ -39,7 +44,7 @@ const initialState: InteractionState = {
 	groupTransforms: new Map(),
 	editingElementId: null,
 	hiddenDuringTransition: null,
-	isolatedElementId: null,
+	isolationStack: [],
 	reorderParentId: null,
 	reorderTargetIndex: null
 };
@@ -112,22 +117,61 @@ export function stopEditingText(): void {
 }
 
 /**
- * Mark an element as isolated from its group
- * This tells SelectionOverlay to treat it as a single element
+ * Push a new isolation level onto the stack
+ * Drills down one level deeper into the specified group
  */
-export function isolateElementFromGroup(elementId: string): void {
+export function pushIsolation(groupId: string): void {
 	interactionState.update((state) => ({
 		...state,
-		isolatedElementId: elementId
+		isolationStack: [...state.isolationStack, groupId]
 	}));
 }
 
 /**
- * Clear element isolation (when clicking outside or selecting something else)
+ * Pop the last isolation level from the stack
+ * Goes up one level (dismantles deepest isolation)
  */
-export function clearElementIsolation(): void {
+export function popIsolation(): void {
 	interactionState.update((state) => ({
 		...state,
-		isolatedElementId: null
+		isolationStack: state.isolationStack.slice(0, -1)
 	}));
 }
+
+/**
+ * Set the entire isolation stack
+ * Used when jumping to a specific isolation level
+ */
+export function setIsolationStack(stack: string[]): void {
+	interactionState.update((state) => ({
+		...state,
+		isolationStack: [...stack]
+	}));
+}
+
+/**
+ * Clear all isolation levels (return to root level)
+ */
+export function clearIsolation(): void {
+	interactionState.update((state) => ({
+		...state,
+		isolationStack: []
+	}));
+}
+
+/**
+ * Get the current isolation level (last item in stack)
+ * Returns null if no isolation (at root level)
+ */
+export function getCurrentIsolationLevel(state: InteractionState): string | null {
+	return state.isolationStack.length > 0
+		? state.isolationStack[state.isolationStack.length - 1]
+		: null;
+}
+
+// Backward compatibility aliases (deprecated - will be removed)
+export const isolateElementFromGroup = (elementId: string) => {
+	console.warn('isolateElementFromGroup is deprecated, use pushIsolation');
+	pushIsolation(elementId);
+};
+export const clearElementIsolation = clearIsolation;

@@ -1016,8 +1016,10 @@ function expandSelectionWithGroups(elementIds: string[], state: DesignState): st
 }
 
 export function selectElement(elementId: string): void {
+	console.trace('selectElement called with:', elementId);
 	storeState.update((state) => {
 		const expanded = expandSelectionWithGroups([elementId], state.designState);
+		console.log('selectElement expanded to:', expanded.length, 'elements');
 		return {
 			...state,
 			designState: {
@@ -1029,8 +1031,10 @@ export function selectElement(elementId: string): void {
 }
 
 export function selectElements(elementIds: string[]): void {
+	console.trace('selectElements called with:', elementIds.length, 'elements');
 	storeState.update((state) => {
 		const expanded = expandSelectionWithGroups(elementIds, state.designState);
+		console.log('selectElements expanded to:', expanded.length, 'elements');
 		return {
 			...state,
 			designState: {

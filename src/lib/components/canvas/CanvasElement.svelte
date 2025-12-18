@@ -18,11 +18,13 @@
 		addToSelection,
 		removeFromSelection,
 		updateElement,
-		updateElementTypography
+		updateElementTypography,
+		storeState
 	} from '$lib/stores/design-store';
-import { interactionState, startEditingText, stopEditingText, isolateElementFromGroup, clearElementIsolation } from '$lib/stores/interaction-store';
+import { interactionState, startEditingText, stopEditingText, setIsolationStack, clearIsolation, getCurrentIsolationLevel } from '$lib/stores/interaction-store';
 import { sanitizeTextContent } from '$lib/utils/sanitize';
 import { absoluteToRelative } from '$lib/utils/coordinates';
+import { handleDoubleClick as handleDoubleClickIsolation, handleSingleClick as handleSingleClickIsolation } from '$lib/utils/drill-down-figma-logic';
 
 	const dispatch = createEventDispatcher<{ contextmenu: { elementId: string; x: number; y: number } }>();
 
@@ -87,14 +89,14 @@ type DocumentWithCaret = Document & {
 	// Sync local isolation flag with global isolation state
 	$: {
 		const selectedIds = Array.from($selectedIdsStore);
-		const globalIsolatedId = $interactionState.isolatedElementId;
+		const globalIsolatedId = getCurrentIsolationLevel($interactionState);
 
 		if (!selectedIds.includes(element.id)) {
 			// This element is not selected at all - reset isolation
 			isIsolatedFromGroup = false;
 			// Clear global isolation state if this was the isolated element
 			if (globalIsolatedId === element.id) {
-				clearElementIsolation();
+				clearIsolation();
 			}
 		} else if (globalIsolatedId === element.id) {
 			// This element is isolated (either via double-click or layers panel)
@@ -151,7 +153,7 @@ type DocumentWithCaret = Document & {
 			const state = get(designState);
 			const clickedElement = state.elements[element.id];
 			const groupId = clickedElement?.groupId;
-			const currentlyIsolatedId = $interactionState.isolatedElementId;
+			const currentlyIsolatedId = getCurrentIsolationLevel($interactionState);
 			const currentlyIsolatedElement = currentlyIsolatedId ? state.elements[currentlyIsolatedId] : null;
 
 			// If clicking a group element while another element from the same group is isolated,
@@ -176,100 +178,91 @@ type DocumentWithCaret = Document & {
 			return;
 		}
 
-		// Check if this element belongs to a group
+		// Get current state
 		const state = get(designState);
 		const clickedElement = state.elements[element.id];
 		const groupId = clickedElement?.groupId;
-
-		// Group wrappers are not clickable (pointer-events: none)
-		// Clicks pass through to children, which handle group selection
-		// No need to handle wrapper clicks here
 
 		// Check if this element is part of a multi-selection
 		const currentSelection = get(selectedElements).map(el => el.id);
 		const isPartOfMultiSelection = currentSelection.length > 1 && currentSelection.includes(element.id);
 
-		// Use the browser's native click count (e.detail) to detect double-clicks
-		// e.detail = 1 for first click, 2 for second click (double), 3 for triple, etc.
+		// Use the browser's native click count to detect double-clicks
 		const mightBeDoubleClick = e.detail >= 2;
 
-		// If clicking on an element that's part of a multi-selection, keep the selection
-		// and start dragging all selected elements. Otherwise, select element(s).
+		// Get current isolation stack
+		const currentStack = $interactionState.isolationStack;
+
+		// Elements to drag (will be set based on click type)
 		let elementsToDrag: Element[] = [];
 
-		// PRIORITY 1: Double-click on grouped element = ALWAYS isolate it
-		if (mightBeDoubleClick && groupId) {
-			// Set isolation BEFORE selection to ensure SelectionOverlay sees it immediately
-			isIsolatedFromGroup = true;
-			isolateElementFromGroup(element.id);
-			selectElement(element.id);
-			elementsToDrag = [element];
-		}
-		// PRIORITY 2: Element is already isolated from group
-		// Check if this is part of a multi-selection of isolated elements from the same group
-		else if (isIsolatedFromGroup && currentSelection.includes(element.id)) {
-			// If multiple elements are selected and they're all from the same group,
-			// drag all of them together (sticky isolation mode)
-			if (isPartOfMultiSelection && groupId) {
-				const allFromSameGroup = currentSelection.every(id => {
-					const el = state.elements[id];
-					return el?.groupId === groupId;
-				});
-				if (allFromSameGroup) {
-					elementsToDrag = get(selectedElements);
-				} else {
-					elementsToDrag = [element];
-				}
-			} else {
-				elementsToDrag = [element];
-			}
-		}
-		// PRIORITY 2.5: Sticky isolation mode - clicking another element from the same group
-		// while an element is already isolated should isolate the clicked element
-		// This MUST come before multi-selection check to prevent group UI flash
-		else if (groupId) {
-			const currentlyIsolatedId = $interactionState.isolatedElementId;
-			const currentlyIsolatedElement = currentlyIsolatedId ? state.elements[currentlyIsolatedId] : null;
+		if (mightBeDoubleClick) {
+			// Handle double-click: drill down one isolation level (Figma-style)
+			const result = handleDoubleClickIsolation(
+				groupId || null,
+				element.id,
+				currentStack,
+				state.groups
+			);
 
-			// Check if we're clicking a different element in the same group as the isolated one
-			if (currentlyIsolatedElement &&
-			    currentlyIsolatedElement.groupId === groupId &&
-			    currentlyIsolatedId !== element.id) {
-				// Sticky isolation: isolate the clicked element instead of selecting whole group
-				// CRITICAL: Set isolation BEFORE selection to ensure SelectionOverlay sees it immediately
-				isIsolatedFromGroup = true;
-				isolateElementFromGroup(element.id);
-				selectElement(element.id);
-				// If this creates a multi-selection, drag all selected elements
-				elementsToDrag = [element];
-			}
-			// PRIORITY 3: Element is part of multi-selection = drag all selected
-			// This must come BEFORE the grouped element logic to allow groups to be dragged
-			// together with other elements in a multi-selection
-			else if (isPartOfMultiSelection) {
-				elementsToDrag = get(selectedElements);
-			}
-			// PRIORITY 4: First click on grouped element = select entire group
-			else {
-				// Find all elements with the same groupId
-				const groupElementIds = Object.values(state.elements)
-					.filter(el => el.groupId === groupId)
-					.map(el => el.id);
-				selectElements(groupElementIds);
-				isIsolatedFromGroup = false;
-				elementsToDrag = groupElementIds
-					.map(id => state.elements[id])
-					.filter(Boolean);
-			}
+			// Update isolation stack
+			setIsolationStack(result.newIsolationStack);
+
+			// Select the elements
+			storeState.update((s) => ({
+				...s,
+				designState: {
+					...s.designState,
+					selectedElementIds: result.elementsToSelect
+				}
+			}));
+
+			// Set elements to drag
+			elementsToDrag = result.elementsToSelect.map(id => state.elements[id]).filter(Boolean);
+			isIsolatedFromGroup = result.newIsolationStack.length > 0;
+
+			console.log('Double-click:', {
+				newStack: result.newIsolationStack,
+				selectedCount: result.elementsToSelect.length
+			});
 		}
-		// PRIORITY 3b: Non-grouped element is part of multi-selection = drag all selected
+		// Single click: Handle selection with Figma-style isolation dismantling
 		else if (isPartOfMultiSelection) {
+			// Element is part of multi-selection - drag all selected elements
 			elementsToDrag = get(selectedElements);
 		}
-		// PRIORITY 5: Non-grouped element or any other case = select this element only
 		else {
-			selectElement(element.id);
-			elementsToDrag = [element];
+			// Handle single-click: select element/group with automatic isolation dismantling
+			const result = handleSingleClickIsolation(
+				groupId || null,
+				element.id,
+				currentStack,
+				state.groups
+			);
+
+			// Update isolation stack if it changed (dismantling occurred)
+			if (result.shouldDismantle) {
+				setIsolationStack(result.newIsolationStack);
+			}
+
+			// Select the elements
+			storeState.update((s) => ({
+				...s,
+				designState: {
+					...s.designState,
+					selectedElementIds: result.elementsToSelect
+				}
+			}));
+
+			// Set elements to drag
+			elementsToDrag = result.elementsToSelect.map(id => state.elements[id]).filter(Boolean);
+			isIsolatedFromGroup = result.newIsolationStack.length > 0;
+
+			console.log('Single-click:', {
+				dismantled: result.shouldDismantle,
+				newStack: result.newIsolationStack,
+				selectedCount: result.elementsToSelect.length
+			});
 		}
 
 		// If scale tool, start scaling from any click (not just handles)

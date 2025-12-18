@@ -12,8 +12,8 @@
 	import { onMount, onDestroy, tick } from 'svelte';
 	import { get } from 'svelte/store';
 	import type { Element, DesignState } from '$lib/types/events';
-	import { designState, moveElement, resizeElement, rotateElement, moveElementsGroup, resizeElementsGroup, rotateElementsGroup, selectElement, selectElements, clearSelection, addToSelection, removeFromSelection, updateElementStyles, reorderElement, duplicateElements, deleteElements } from '$lib/stores/design-store';
-	import { interactionState, updateInteractionStateThrottled, updateInteractionStateImmediate } from '$lib/stores/interaction-store';
+	import { designState, storeState, moveElement, resizeElement, rotateElement, moveElementsGroup, resizeElementsGroup, rotateElementsGroup, selectElement, selectElements, clearSelection, addToSelection, removeFromSelection, updateElementStyles, reorderElement, duplicateElements, deleteElements } from '$lib/stores/design-store';
+	import { interactionState, updateInteractionStateThrottled, updateInteractionStateImmediate, getCurrentIsolationLevel } from '$lib/stores/interaction-store';
 	import { currentTool } from '$lib/stores/tool-store';
 	import { CANVAS_INTERACTION } from '$lib/constants/canvas';
 	import { getAbsolutePosition, getAbsoluteTransform, absoluteToRelative, invalidateTransformCache, getElementCenterAbsoluteRecursive } from '$lib/utils/coordinates';
@@ -1309,7 +1309,10 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 			const currentSelectionIds = new Set((passedSelectedElements || selectedElements).map(el => el.id));
 
 			// Need expansion if any element in the hierarchy is not selected
-			const needsExpansion = hierarchyElementIds.some(id => !currentSelectionIds.has(id));
+			// BUT: Skip expansion if we're in isolation mode (drill-down behavior)
+			const isolatedId = getCurrentIsolationLevel(get(interactionState));
+			const isInIsolationMode = isolatedId !== null;
+			const needsExpansion = !isInIsolationMode && hierarchyElementIds.some(id => !currentSelectionIds.has(id));
 
 			if (needsExpansion) {
 				// Trigger selection expansion which will include entire hierarchy
@@ -1347,7 +1350,7 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 		// In "sticky isolation mode", multiple elements from the same group can be isolated together
 		const state = get(designState);
 		const clickedElement = state.elements[element.id];
-		const isolatedId = $interactionState.isolatedElementId;
+		const isolatedId = getCurrentIsolationLevel($interactionState);
 		const isolatedElement = isolatedId ? state.elements[isolatedId] : null;
 
 		// Check if we're in sticky isolation mode (multiple elements from same group are isolated)
@@ -1362,6 +1365,14 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 		// 2. Either we're NOT in isolation mode OR we're in sticky isolation mode
 		const isSingleIsolated = isolatedId === element.id && elementsToUse.length === 1;
 		isGroupInteraction = !isSingleIsolated && elementsToUse.length > 1;
+
+		console.log('startDrag:', {
+			elementId: element.id,
+			isolatedId,
+			elementsToUseCount: elementsToUse.length,
+			isSingleIsolated,
+			isGroupInteraction
+		});
 
 		dragStartScreen = { x: e.clientX, y: e.clientY };
 		hasMovedBeyondThreshold = false; // Reset movement threshold flag
@@ -3425,7 +3436,20 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 			}
 
 			// Keep group selected after interaction
-			selectElements(groupStartElements.map(el => el.id));
+			// If in isolation mode, bypass selectElements to prevent expansion
+			const isolatedId = getCurrentIsolationLevel(get(interactionState));
+			if (isolatedId !== null) {
+				const elementIds = groupStartElements.map(el => el.id);
+				storeState.update((s) => ({
+					...s,
+					designState: {
+						...s.designState,
+						selectedElementIds: elementIds
+					}
+				}));
+			} else {
+				selectElements(groupStartElements.map(el => el.id));
+			}
 		} else if (activeElementId) {
 			// Handle single element interaction
 			const activeElement = selectedElements.find(el => el.id === activeElementId);

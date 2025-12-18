@@ -26,7 +26,7 @@
 		selectedElementIds as selectedIdsStore
 	} from '$lib/stores/design-store';
 	import { currentTool } from '$lib/stores/tool-store';
-	import { interactionState, startEditingText, stopEditingText } from '$lib/stores/interaction-store';
+	import { interactionState, startEditingText, stopEditingText, clearIsolation } from '$lib/stores/interaction-store';
 	import { viewport as viewportStore } from '$lib/stores/viewport-store';
 	import { CANVAS_INTERACTION } from '$lib/constants/canvas';
 	import CanvasElement from './CanvasElement.svelte';
@@ -44,6 +44,10 @@
 
 	// Sync local viewport state with the store
 	$: viewportStore.set(viewport);
+
+	// DEBUG: Log selected elements
+	$: console.log('Canvas: selectedElements count =', $selectedElements.length, 'first 3:', $selectedElements.map(e => e.id).slice(0, 3));
+
 	let isDragging = false;
 	let dragStart = { x: 0, y: 0 };
 	let isPanning = false;
@@ -270,11 +274,22 @@
 	}
 
 	function handleKeyDown(e: KeyboardEvent) {
-		// ESC key: switch to move tool when text tool is active
-		if (e.key === 'Escape' && $currentTool === 'text') {
-			e.preventDefault();
-			currentTool.set('move');
-			return;
+		// ESC key: Clear isolation if active, otherwise switch to move tool from text tool
+		if (e.key === 'Escape') {
+			// Priority 1: Exit isolation if active (Figma behavior)
+			if ($interactionState.isolationStack.length > 0) {
+				e.preventDefault();
+				clearIsolation();
+				console.log('ESC pressed: cleared all isolation');
+				return;
+			}
+
+			// Priority 2: Switch to move tool when text tool is active
+			if ($currentTool === 'text') {
+				e.preventDefault();
+				currentTool.set('move');
+				return;
+			}
 		}
 
 		// Space key for panning
@@ -365,6 +380,12 @@
 
 		// Only handle clicks on the canvas background for other tools
 		if (e.target !== e.currentTarget) return;
+
+		// Clear any isolation when clicking on canvas background (Figma behavior)
+		if ($interactionState.isolationStack.length > 0) {
+			clearIsolation();
+			console.log('Canvas background clicked: cleared all isolation');
+		}
 
 		// If we're in text editing mode, blur the active element first to save content
 		// Then clear selection on the next event loop to allow blur to complete
