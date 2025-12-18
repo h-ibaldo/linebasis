@@ -184,4 +184,22 @@ describe('handleSingleClick - Figma behavior', () => {
 		expect(result.elementsToSelect).toEqual(['ungrouped']);
 		expect(result.shouldDismantle).toBe(true);
 	});
+
+	it('While gcb isolated (element level): click between elem.e and elem.f switches selection', () => {
+		// gcb is isolated (stack: [ga, gc, gcb]), click elem.f after elem.e was selected
+		const result = handleSingleClick('gca', 'f', ['ga', 'gc', 'gca'], testGroups);
+
+		expect(result.newIsolationStack).toEqual(['ga', 'gc', 'gca']); // Isolation maintained
+		expect(result.elementsToSelect).toEqual(['f']); // Just elem.f, not both e and f
+		expect(result.shouldDismantle).toBe(false);
+	});
+
+	it('While gcb isolated (element level): click elem.g switches to elem.g', () => {
+		// gca is isolated (stack: [ga, gc, gca]), click elem.e
+		const result = handleSingleClick('gca', 'e', ['ga', 'gc', 'gca'], testGroups);
+
+		expect(result.newIsolationStack).toEqual(['ga', 'gc', 'gca']); // Isolation maintained
+		expect(result.elementsToSelect).toEqual(['e']); // Just elem.e
+		expect(result.shouldDismantle).toBe(false);
+	});
 });

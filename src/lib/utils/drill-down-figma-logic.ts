@@ -232,6 +232,16 @@ export function handleSingleClick(
 		};
 	}
 
+	// If the current isolation is the element's immediate parent, we're at the element level
+	// Just select the clicked element (like Figma does)
+	if (currentIsolation === elementGroupId) {
+		return {
+			newIsolationStack: isolationStack,
+			elementsToSelect: [elementId],
+			shouldDismantle: false
+		};
+	}
+
 	// Fallback: select immediate group
 	return {
 		newIsolationStack: isolationStack,
