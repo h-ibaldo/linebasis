@@ -202,4 +202,24 @@ describe('handleSingleClick - Figma behavior', () => {
 		expect(result.elementsToSelect).toEqual(['e']); // Just elem.e
 		expect(result.shouldDismantle).toBe(false);
 	});
+
+	it('While gba isolated (element level): click elem.c in gbb → dismantles to gb level', () => {
+		// gba is isolated (stack: [ga, gb, gba]), showing elem.a and elem.b
+		// Click elem.c which is in gbb
+		const result = handleSingleClick('gbb', 'c', ['ga', 'gb', 'gba'], testGroups);
+
+		expect(result.newIsolationStack).toEqual(['ga', 'gb']); // Dismantle to gb level
+		expect(result.elementsToSelect).toEqual(['c', 'd']); // Select gbb's elements
+		expect(result.shouldDismantle).toBe(true);
+	});
+
+	it('While gba isolated (element level): click between elem.a and elem.b stays in gba', () => {
+		// gba is isolated (stack: [ga, gb, gba]), showing elem.a and elem.b
+		// Click elem.b after elem.a was selected
+		const result = handleSingleClick('gba', 'b', ['ga', 'gb', 'gba'], testGroups);
+
+		expect(result.newIsolationStack).toEqual(['ga', 'gb', 'gba']); // Stay isolated in gba
+		expect(result.elementsToSelect).toEqual(['b']); // Just elem.b
+		expect(result.shouldDismantle).toBe(false);
+	});
 });

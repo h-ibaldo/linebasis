@@ -3877,7 +3877,27 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 			}
 
 			// Keep element selected after interaction
-			selectElement(activeElementId);
+			// In isolation mode, bypass selectElement to prevent expansion
+			const isolatedId = getCurrentIsolationLevel(get(interactionState));
+			if (isolatedId !== null) {
+				// In isolation mode, preserve the selection set by the click handler
+				// Don't override it - the click handler already set the correct selection
+				// based on drill-down logic (e.g., might have selected a group, not just one element)
+				// Only update if the active element is NOT in the current selection
+				const currentSelection = get(storeState).designState.selectedElementIds;
+				if (!currentSelection.includes(activeElementId)) {
+					storeState.update((s) => ({
+						...s,
+						designState: {
+							...s.designState,
+							selectedElementIds: [activeElementId]
+						}
+					}));
+				}
+			} else {
+				// Normal mode - use selectElement which expands to include parent groups
+				selectElement(activeElementId);
+			}
 		}
 
 		// Reset state

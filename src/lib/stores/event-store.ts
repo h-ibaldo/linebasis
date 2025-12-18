@@ -22,8 +22,17 @@ let dbInstance: IDBDatabase | null = null;
  * Initialize IndexedDB database
  */
 export async function initDB(): Promise<IDBDatabase> {
+	// Check if we have a valid open connection
+	// IDBDatabase doesn't have a reliable 'isClosed' property, so we test with a transaction
 	if (dbInstance) {
-		return dbInstance;
+		try {
+			// Try to create a transaction to verify the connection is still open
+			dbInstance.transaction([EVENTS_STORE], 'readonly');
+			return dbInstance;
+		} catch (error) {
+			// Connection is closed or invalid, clear it and reopen
+			dbInstance = null;
+		}
 	}
 
 	return new Promise((resolve, reject) => {
@@ -35,6 +44,19 @@ export async function initDB(): Promise<IDBDatabase> {
 
 		request.onsuccess = () => {
 			dbInstance = request.result;
+
+			// Listen for unexpected closes
+			dbInstance.onclose = () => {
+				console.warn('IndexedDB connection closed unexpectedly');
+				dbInstance = null;
+			};
+
+			// Listen for version changes from other tabs
+			dbInstance.onversionchange = () => {
+				dbInstance?.close();
+				dbInstance = null;
+			};
+
 			resolve(dbInstance);
 		};
 
