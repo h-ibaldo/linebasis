@@ -92,12 +92,12 @@ type DocumentWithCaret = Document & {
 		const globalIsolatedId = getCurrentIsolationLevel($interactionState);
 
 		if (!selectedIds.includes(element.id)) {
-			// This element is not selected at all - reset isolation
+			// This element is not selected at all - reset local isolation flag
 			isIsolatedFromGroup = false;
-			// Clear global isolation state if this was the isolated element
-			if (globalIsolatedId === element.id) {
-				clearIsolation();
-			}
+			// NOTE: We do NOT clear global isolation here - this was causing a bug
+			// where isolating a child element would immediately clear the parent's isolation.
+			// Global isolation should only be cleared through explicit user actions
+			// (clicking outside, pressing Escape, etc.), handled by drill-down-figma-logic.ts
 		} else if (globalIsolatedId === element.id) {
 			// This element is isolated (either via double-click or layers panel)
 			isIsolatedFromGroup = true;
