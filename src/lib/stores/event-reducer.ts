@@ -557,16 +557,18 @@ function handleMoveElement(state: DesignState, event: MoveElementEvent): DesignS
 	// Invalidate transform cache for element and all descendants
 	invalidateTransformCache(elementId, state);
 
-	return {
-		...state,
-		elements: {
-			...state.elements,
-			[elementId]: {
-				...element,
-				position: roundPosition(position)
-			}
+	const newElements = {
+		...state.elements,
+		[elementId]: {
+			...element,
+			position: roundPosition(position)
 		}
 	};
+
+	// If this element lives inside an auto-layout wrapper div, resize the wrapper
+	syncAutoLayoutWrapperToChildren(newElements, [elementId]);
+
+	return { ...state, elements: newElements };
 }
 
 function handleResizeElement(state: DesignState, event: ResizeElementEvent): DesignState {
@@ -579,18 +581,20 @@ function handleResizeElement(state: DesignState, event: ResizeElementEvent): Des
 	// (resize changes bounding box which affects child transforms in rotated parents)
 	invalidateTransformCache(elementId, state);
 
-	return {
-		...state,
-		elements: {
-			...state.elements,
-			[elementId]: {
-				...element,
-				size: roundSize(size),
-				// Update position if provided (for N/W handles)
-				...(position && { position: roundPosition(position) })
-			}
+	const newElements = {
+		...state.elements,
+		[elementId]: {
+			...element,
+			size: roundSize(size),
+			// Update position if provided (for N/W handles)
+			...(position && { position: roundPosition(position) })
 		}
 	};
+
+	// If this element lives inside an auto-layout wrapper div, resize the wrapper
+	syncAutoLayoutWrapperToChildren(newElements, [elementId]);
+
+	return { ...state, elements: newElements };
 }
 
 function handleRotateElement(state: DesignState, event: RotateElementEvent): DesignState {
@@ -603,16 +607,18 @@ function handleRotateElement(state: DesignState, event: RotateElementEvent): Des
 	// (rotation affects all child transforms)
 	invalidateTransformCache(elementId, state);
 
-	return {
-		...state,
-		elements: {
-			...state.elements,
-			[elementId]: {
-				...element,
-				rotation: roundRotation(rotation)
-			}
+	const newElements = {
+		...state.elements,
+		[elementId]: {
+			...element,
+			rotation: roundRotation(rotation)
 		}
 	};
+
+	// If this element lives inside an auto-layout wrapper div, resize the wrapper
+	syncAutoLayoutWrapperToChildren(newElements, [elementId]);
+
+	return { ...state, elements: newElements };
 }
 
 function handleReorderElement(state: DesignState, event: ReorderElementEvent): DesignState {
@@ -837,6 +843,80 @@ function calculateGroupBounds(groupElements: Element[]): { x: number; y: number;
 	};
 }
 
+/**
+ * When elements inside a plain-div wrapper (that is itself a flex item in an
+ * auto-layout container) are moved, resized, or rotated, the wrapper div must
+ * be resized to tightly wrap all its children.  Children's positions are also
+ * re-anchored so the wrapper's top-left is always (0, 0).
+ *
+ * Detects the condition automatically: parentId must be a non-auto-layout div
+ * whose own parent has auto-layout enabled.
+ */
+function syncAutoLayoutWrapperToChildren(
+	newElements: Record<string, Element>,
+	elementIds: string[]
+): void {
+	// Collect the unique parent IDs of the transformed elements
+	const parentIds = new Set<string>();
+	for (const id of elementIds) {
+		const el = newElements[id];
+		if (el?.parentId) parentIds.add(el.parentId);
+	}
+
+	for (const parentId of parentIds) {
+		const wrapper = newElements[parentId];
+		if (!wrapper) continue;
+
+		// Wrapper must be a plain div (not an auto-layout container itself, not a view)
+		if (wrapper.type !== 'div') continue;
+		if (wrapper.autoLayout?.enabled) continue;
+		if (wrapper.isView) continue;
+
+		// Wrapper's parent must have auto-layout enabled
+		if (!wrapper.parentId) continue;
+		const grandparent = newElements[wrapper.parentId];
+		if (!grandparent?.autoLayout?.enabled) continue;
+
+		// Collect all current children of the wrapper
+		const children = (wrapper.children || [])
+			.map(id => newElements[id])
+			.filter((el): el is Element => el !== undefined);
+
+		if (children.length === 0) continue;
+
+		const bounds = calculateGroupBounds(children);
+
+		// If the bounding box doesn't start at (0, 0), re-anchor:
+		// shift the wrapper position by (deltaX, deltaY) and shift all children
+		// back by the same amount so the visual result is unchanged.
+		const deltaX = bounds.x;
+		const deltaY = bounds.y;
+
+		// Update wrapper size (position is flex-managed, but keep stored position in sync)
+		newElements[parentId] = {
+			...wrapper,
+			size: { width: bounds.width, height: bounds.height },
+			position: {
+				x: wrapper.position.x + deltaX,
+				y: wrapper.position.y + deltaY
+			}
+		};
+
+		// Re-anchor children so wrapper top-left stays at 0,0
+		if (deltaX !== 0 || deltaY !== 0) {
+			for (const child of children) {
+				newElements[child.id] = {
+					...newElements[child.id],
+					position: {
+						x: child.position.x - deltaX,
+						y: child.position.y - deltaY
+					}
+				};
+			}
+		}
+	}
+}
+
 // Helper function to update wrapper bounds for a group
 function updateWrapperBounds(
 	newElements: Record<string, Element>,
@@ -924,6 +1004,9 @@ function handleGroupMoveElements(state: DesignState, event: GroupMoveElementsEve
 		}
 	}
 
+	// Sync auto-layout wrapper divs for all moved elements
+	syncAutoLayoutWrapperToChildren(newElements, event.payload.elements.map(e => e.elementId));
+
 	return {
 		...state,
 		elements: newElements,
@@ -967,6 +1050,9 @@ function handleGroupResizeElements(state: DesignState, event: GroupResizeElement
 		}
 	}
 
+	// Sync auto-layout wrapper divs for all resized elements
+	syncAutoLayoutWrapperToChildren(newElements, event.payload.elements.map(e => e.elementId));
+
 	return {
 		...state,
 		elements: newElements,
@@ -1009,6 +1095,9 @@ function handleGroupRotateElements(state: DesignState, event: GroupRotateElement
 			updateWrapperBounds(newElements, newGroups, group);
 		}
 	}
+
+	// Sync auto-layout wrapper divs for all rotated elements
+	syncAutoLayoutWrapperToChildren(newElements, event.payload.elements.map(e => e.elementId));
 
 	return {
 		...state,
