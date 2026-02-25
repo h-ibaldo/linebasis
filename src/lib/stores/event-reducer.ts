@@ -577,6 +577,9 @@ function handleResizeElement(state: DesignState, event: ResizeElementEvent): Des
 
 	if (!element) return state;
 
+	// Capture old size before updating (needed for proportional child resize)
+	const oldSize = element.size;
+
 	// Invalidate transform cache for element and all descendants
 	// (resize changes bounding box which affects child transforms in rotated parents)
 	invalidateTransformCache(elementId, state);
@@ -590,6 +593,9 @@ function handleResizeElement(state: DesignState, event: ResizeElementEvent): Des
 			...(position && { position: roundPosition(position) })
 		}
 	};
+
+	// If this element is a plain wrapper div inside auto-layout, resize its children proportionally
+	syncChildrenToAutoLayoutWrapper(newElements, elementId, oldSize);
 
 	// If this element lives inside an auto-layout wrapper div, resize the wrapper
 	syncAutoLayoutWrapperToChildren(newElements, [elementId]);
@@ -914,6 +920,55 @@ function syncAutoLayoutWrapperToChildren(
 				};
 			}
 		}
+	}
+}
+
+/**
+ * When a plain-div wrapper (flex item inside an auto-layout container) is
+ * directly resized, proportionally resize and reposition all of its children
+ * to fill the new wrapper dimensions.
+ *
+ * scaleX = newWidth / oldWidth, scaleY = newHeight / oldHeight
+ * Each child: new size = old size * scale, new position = old position * scale
+ */
+function syncChildrenToAutoLayoutWrapper(
+	newElements: Record<string, Element>,
+	wrapperId: string,
+	oldSize: { width: number; height: number }
+): void {
+	const wrapper = newElements[wrapperId];
+	if (!wrapper) return;
+
+	// Only applies to plain wrapper divs inside auto-layout
+	if (wrapper.type !== 'div') return;
+	if (wrapper.autoLayout?.enabled) return;
+	if (wrapper.isView) return;
+	if (!wrapper.parentId) return;
+	const grandparent = newElements[wrapper.parentId];
+	if (!grandparent?.autoLayout?.enabled) return;
+
+	const newSize = wrapper.size;
+	const scaleX = oldSize.width > 0 ? newSize.width / oldSize.width : 1;
+	const scaleY = oldSize.height > 0 ? newSize.height / oldSize.height : 1;
+
+	if (scaleX === 1 && scaleY === 1) return;
+
+	const children = (wrapper.children || [])
+		.map(id => newElements[id])
+		.filter((el): el is Element => el !== undefined);
+
+	for (const child of children) {
+		newElements[child.id] = {
+			...newElements[child.id],
+			size: {
+				width: Math.round(child.size.width * scaleX),
+				height: Math.round(child.size.height * scaleY)
+			},
+			position: {
+				x: Math.round(child.position.x * scaleX),
+				y: Math.round(child.position.y * scaleY)
+			}
+		};
 	}
 }
 
