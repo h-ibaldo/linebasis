@@ -273,7 +273,28 @@ type DocumentWithCaret = Document & {
 		if (onStartDrag && !(isTextElement && tool === 'move' && isEditingThisElement)) {
 			// For scale tool, pass 'se' handle to trigger resize mode with aspect ratio lock
 			const handle = tool === 'scale' ? 'se' : undefined;
-			onStartDrag(e, element, handle, elementsToDrag);
+
+			// If this element is inside a plain wrapper div that's inside auto-layout,
+			// treat the wrapper as the drag target so AL reordering works correctly.
+			const parent = state.elements[element.parentId ?? ''];
+			const grandparent = parent?.parentId ? state.elements[parent.parentId] : null;
+			const isInAutoLayoutWrapper =
+				parent &&
+				!parent.autoLayout?.enabled &&
+				!parent.isView &&
+				parent.parentId &&
+				grandparent?.autoLayout?.enabled;
+
+			if (isInAutoLayoutWrapper && !mightBeDoubleClick) {
+				// Select the wrapper instead and drag it as a single element
+				storeState.update((s) => ({
+					...s,
+					designState: { ...s.designState, selectedElementIds: [parent.id] }
+				}));
+				onStartDrag(e, parent, handle, [parent]);
+			} else {
+				onStartDrag(e, element, handle, elementsToDrag);
+			}
 		}
 	}
 
