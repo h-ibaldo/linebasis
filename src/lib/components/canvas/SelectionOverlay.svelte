@@ -2970,6 +2970,46 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 				pendingPosition = { x: newX, y: newY };
 			}
 
+			// If the single selected element is an AL group wrapper, propagate resize to its children
+			if (!isGroupInteraction && activeElement) {
+				const state = get(designState);
+				const wrapperParent = activeElement.parentId ? state.elements[activeElement.parentId] : null;
+				const firstGroupId = activeElement.children.length > 0 ? state.elements[activeElement.children[0]]?.groupId : undefined;
+				const isALWrapper =
+					!activeElement.autoLayout?.enabled &&
+					!activeElement.isView &&
+					!!wrapperParent?.autoLayout?.enabled &&
+					!!firstGroupId &&
+					activeElement.children.every(id => state.elements[id]?.groupId === firstGroupId);
+
+				if (isALWrapper) {
+					const scaleX = newWidth / elementStartCanvas.width;
+					const scaleY = newHeight / elementStartCanvas.height;
+					// Use pendingPosition if available (DOM-measured position for AL children),
+					// otherwise fall back to elementStartCanvas position
+					const wrapperAbsX = pendingPosition?.x ?? elementStartCanvas.x;
+					const wrapperAbsY = pendingPosition?.y ?? elementStartCanvas.y;
+
+					const childTransforms = new Map<string, { position: { x: number; y: number }; size: { width: number; height: number }; rotation: number }>();
+					for (const childId of activeElement.children) {
+						const child = state.elements[childId];
+						if (!child) continue;
+						childTransforms.set(childId, {
+							position: {
+								x: wrapperAbsX + child.position.x * scaleX,
+								y: wrapperAbsY + child.position.y * scaleY
+							},
+							size: {
+								width: child.size.width * scaleX,
+								height: child.size.height * scaleY
+							},
+							rotation: child.rotation || 0
+						});
+					}
+					groupPendingTransforms = childTransforms;
+				}
+			}
+
 			// Update pending transforms for all group elements during resize
 			if (isGroupInteraction) {
 				const scaleX = newWidth / elementStartCanvas.width;
@@ -4648,7 +4688,11 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 				return groupElements.every(el => el.parentId === firstParent) ? firstParent : null;
 			})()}
 			{@const commonParent = commonParentId ? $designState.elements[commonParentId] : null}
-			{@const isParentGroupWrapper = commonParent?.isGroupWrapper || false}
+			{@const isParentGroupWrapper = (() => {
+				if (!commonParent) return false;
+				const alParent = commonParent.parentId ? $designState.elements[commonParent.parentId] : null;
+				return !commonParent.autoLayout?.enabled && !commonParent.isView && !!alParent?.autoLayout?.enabled;
+			})()}
 			{@const wrapperParentId = isParentGroupWrapper && commonParent ? commonParent.parentId : null}
 			{@const wrapperParent = wrapperParentId ? $designState.elements[wrapperParentId] : null}
 			{@const groupParentTransform = (() => {
@@ -4881,7 +4925,11 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 		{:else}
 			<!-- Show individual element border for non-grouped elements or when group is already selected -->
 			{@const parent = hoveredElement.parentId ? $designState.elements[hoveredElement.parentId] : null}
-			{@const isParentGroupWrapper = parent?.isGroupWrapper || false}
+			{@const isParentGroupWrapper = (() => {
+				if (!parent) return false;
+				const alParent = parent.parentId ? $designState.elements[parent.parentId] : null;
+				return !parent.autoLayout?.enabled && !parent.isView && !!alParent?.autoLayout?.enabled;
+			})()}
 			{@const wrapperAbsolutePos = isParentGroupWrapper && parent ? getAbsolutePositionLocal(parent) : null}
 			{@const parentTransform = parent && !isParentGroupWrapper ? (() => {
 				const state = get(designState);

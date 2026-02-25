@@ -1715,6 +1715,49 @@ export async function ungroupElements(): Promise<void> {
 		});
 	}
 
+	// After ungrouping, check if any group was inside a group wrapper
+	// (a plain div inside an auto-layout container). If so, move its ex-children
+	// up into the AL container directly and delete the now-empty wrapper div.
+	const freshState = get(designState);
+	for (const groupId of topMostGroupIds) {
+		const group = state.groups[groupId]; // use pre-ungroup state for elementIds
+		if (!group || group.elementIds.length === 0) continue;
+
+		// Find the wrapper: the parent of the first group element
+		const firstEl = freshState.elements[group.elementIds[0]];
+		if (!firstEl) continue;
+
+		const wrapper = firstEl.parentId ? freshState.elements[firstEl.parentId] : null;
+		const alParent = wrapper?.parentId ? freshState.elements[wrapper.parentId] : null;
+
+		// Only proceed if wrapper is a plain div inside an AL container
+		if (
+			wrapper &&
+			!wrapper.autoLayout?.enabled &&
+			!wrapper.isView &&
+			alParent?.autoLayout?.enabled
+		) {
+			// Move each child of the wrapper to the AL parent (at wrapper's position in child list)
+			const wrapperIndex = alParent.children.indexOf(wrapper.id);
+			const childIds = [...wrapper.children]; // snapshot before mutations
+			for (let i = 0; i < childIds.length; i++) {
+				await dispatch({
+					id: uuidv4(),
+					type: 'REORDER_ELEMENT',
+					timestamp: Date.now(),
+					payload: { elementId: childIds[i], newParentId: alParent.id, newIndex: wrapperIndex + i }
+				});
+			}
+			// Delete the now-empty wrapper
+			await dispatch({
+				id: uuidv4(),
+				type: 'DELETE_ELEMENT',
+				timestamp: Date.now(),
+				payload: { elementId: wrapper.id }
+			});
+		}
+	}
+
 	// Select the child elements/groups that remain after ungrouping
 	// This matches Figma behavior where ungrouping maintains selection of the children
 	if (elementsToSelect.length > 0) {

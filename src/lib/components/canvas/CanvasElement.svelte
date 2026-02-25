@@ -59,6 +59,19 @@ type DocumentWithCaret = Document & {
 		return false;
 	}
 
+	/**
+	 * Check if an element is a group wrapper: a plain (non-AL, non-view) div inside an AL
+	 * container whose children all share the same groupId. These are invisible to the user.
+	 */
+	function isGroupWrapperElement(el: Element, state: DesignState): boolean {
+		if (el.autoLayout?.enabled || el.isView || !el.parentId || el.children.length === 0) return false;
+		const parent = state.elements[el.parentId];
+		if (!parent?.autoLayout?.enabled) return false;
+		const firstGroupId = state.elements[el.children[0]]?.groupId;
+		if (!firstGroupId) return false;
+		return el.children.every(id => state.elements[id]?.groupId === firstGroupId);
+	}
+
 	export let element: Element;
 	export let onStartDrag: ((e: MouseEvent, element: Element, handle?: string, selectedElements?: Element[]) => void) | undefined = undefined;
 	export let isPanning: boolean = false;
@@ -582,6 +595,10 @@ type DocumentWithCaret = Document & {
 							return total;
 						})();
 
+						// Use DOM-measured parent size (reflects live pendingSize during resize)
+						const parentHalfW = parentRect.width / viewport.scale / 2;
+						const parentHalfH = parentRect.height / viewport.scale / 2;
+
 						// Rotate vector by -parentRotation to get local coordinates
 						if (parentRot && Math.abs(parentRot % 360) > 0.1) {
 							const angleRad = (-parentRot * Math.PI) / 180;
@@ -590,16 +607,12 @@ type DocumentWithCaret = Document & {
 							const localDx = dx * cos - dy * sin;
 							const localDy = dx * sin + dy * cos;
 
-							const parentHalfW = parentEl.size.width / 2;
-							const parentHalfH = parentEl.size.height / 2;
 							centerLocal = {
 								x: parentHalfW + localDx,
 								y: parentHalfH + localDy
 							};
 						} else {
 							// No rotation: simple translation
-							const parentHalfW = parentEl.size.width / 2;
-							const parentHalfH = parentEl.size.height / 2;
 							centerLocal = {
 								x: parentHalfW + dx,
 								y: parentHalfH + dy

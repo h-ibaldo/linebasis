@@ -71,41 +71,78 @@
 		element?: Element;
 		group?: Group;
 		groupElements?: Element[];
+		wrapperId?: string; // Set when a group wrapper is detected (the div that wraps the group in AL)
 	}
 
-	function buildLayerItems(elements: Element[], groups: Record<string, Group>): LayerItem[] {
+	function buildLayerItems(
+		childElements: Element[],
+		groups: Record<string, Group>,
+		allElements: Record<string, Element>,
+		parentEl: Element
+	): LayerItem[] {
 		const items: LayerItem[] = [];
 		const processedElementIds = new Set<string>();
 		const processedGroupIds = new Set<string>();
 
-		for (const element of elements) {
+		for (const child of childElements) {
 			// Skip if already processed as part of a group
-			if (processedElementIds.has(element.id)) continue;
+			if (processedElementIds.has(child.id)) continue;
+
+			// Detect group wrapper: a plain (non-AL, non-view) div inside an AL container
+			// whose children all share the same groupId. These are invisible to the user —
+			// we surface the group directly at the wrapper's level in the layer tree.
+			if (
+				parentEl.autoLayout?.enabled &&
+				!child.autoLayout?.enabled &&
+				!child.isView &&
+				child.children.length > 0
+			) {
+				const firstGroupId = allElements[child.children[0]]?.groupId;
+				if (
+					firstGroupId &&
+					child.children.every(id => allElements[id]?.groupId === firstGroupId)
+				) {
+					if (!processedGroupIds.has(firstGroupId)) {
+						const groupElements = child.children
+							.map(id => allElements[id])
+							.filter(Boolean) as Element[];
+						processedGroupIds.add(firstGroupId);
+						processedElementIds.add(child.id);
+						items.push({
+							type: 'group',
+							id: firstGroupId,
+							groupElements,
+							wrapperId: child.id
+						});
+					}
+					continue;
+				}
+			}
 
 			// Check if element belongs to a group (groupId-based system)
-			if (element.groupId) {
+			if (child.groupId) {
 				// Skip if we already added this group
-				if (processedGroupIds.has(element.groupId)) continue;
+				if (processedGroupIds.has(child.groupId)) continue;
 
 				// Find all elements with the same groupId
-				const groupElements = elements.filter(el => el.groupId === element.groupId);
+				const groupElements = childElements.filter(el => el.groupId === child.groupId);
 
 				// Mark all group elements and the groupId as processed
 				groupElements.forEach(el => processedElementIds.add(el.id));
-				processedGroupIds.add(element.groupId);
+				processedGroupIds.add(child.groupId);
 
 				items.push({
 					type: 'group',
-					id: element.groupId,
+					id: child.groupId,
 					groupElements
 				});
 			} else {
 				// Regular element (not in a group)
-				processedElementIds.add(element.id);
+				processedElementIds.add(child.id);
 				items.push({
 					type: 'element',
-					id: element.id,
-					element
+					id: child.id,
+					element: child
 				});
 			}
 		}
@@ -114,7 +151,9 @@
 	}
 
 	// Build layer items from children to handle groups
-	$: childLayerItems = hasChildren ? buildLayerItems(children, $designState.groups) : [];
+	$: childLayerItems = hasChildren
+		? buildLayerItems(children, $designState.groups, $designState.elements, element)
+		: [];
 
 	// Get element display name
 	$: displayName = element.name || getDefaultName(element);
