@@ -2975,7 +2975,7 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 				const scaleX = newWidth / elementStartCanvas.width;
 				const scaleY = newHeight / elementStartCanvas.height;
 
-				groupPendingTransforms = new Map(
+				const transforms = new Map(
 					groupStartElements.map(el => {
 						// Find the original element to get its rotation
 						const originalElement = selectedElements.find(e => e.id === el.id);
@@ -3012,55 +3012,48 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 								size: { width: newElWidth, height: newElHeight },
 								rotation
 							}
-						];
+						] as [string, { position: { x: number; y: number }; size: { width: number; height: number }; rotation: number }];
 					})
 				);
-			}
 
-			// For single-element resize of an AL group wrapper: propagate pending transforms to children
-			if (!isGroupInteraction && activeElement && pendingSize) {
-				const state = get(designState);
-				const parent = activeElement.parentId ? state.elements[activeElement.parentId] : null;
-				const grandparent = parent?.parentId ? state.elements[parent.parentId] : null;
-				const isWrapperInAL =
-					!activeElement.autoLayout?.enabled &&
-					!activeElement.isView &&
-					grandparent?.autoLayout?.enabled;
+				// If a single selected element is a plain wrapper div inside auto-layout,
+				// also propagate pending transforms proportionally to its children.
+				if (groupStartElements.length === 1) {
+					const state = get(designState);
+					const wrapper = state.elements[groupStartElements[0].id];
+					const wrapperParent = wrapper?.parentId ? state.elements[wrapper.parentId] : null;
+					const wrapperGrandparent = wrapperParent?.parentId ? state.elements[wrapperParent.parentId] : null;
+					const isALWrapper =
+						wrapper &&
+						!wrapper.autoLayout?.enabled &&
+						!wrapper.isView &&
+						wrapperGrandparent?.autoLayout?.enabled;
 
-				if (isWrapperInAL && activeElement.children && activeElement.children.length > 0) {
-					const scaleX = elementStartCanvas.width > 0 ? pendingSize.width / elementStartCanvas.width : 1;
-					const scaleY = elementStartCanvas.height > 0 ? pendingSize.height / elementStartCanvas.height : 1;
+					if (isALWrapper && wrapper.children && wrapper.children.length > 0) {
+						// Wrapper's pending absolute top-left (the scaled position from transforms map)
+						const wrapperTransform = transforms.get(wrapper.id);
+						const wrapperAbsX = wrapperTransform?.position.x ?? elementStartCanvas.x;
+						const wrapperAbsY = wrapperTransform?.position.y ?? elementStartCanvas.y;
 
-					// Wrapper's absolute top-left during resize (pendingPosition is absolute for AL children)
-					const wrapperAbsX = pendingPosition?.x ?? getAbsolutePositionLocal(activeElement).x;
-					const wrapperAbsY = pendingPosition?.y ?? getAbsolutePositionLocal(activeElement).y;
-
-					const childTransforms = new Map(
-						activeElement.children
-							.map(childId => {
-								const child = state.elements[childId];
-								if (!child) return null;
-								// Child positions are wrapper-local; scale them and add wrapper's absolute position
-								// to get absolute canvas coordinates (matching format expected by groupTransforms in CanvasElement)
-								return [
-									childId,
-									{
-										position: {
-											x: wrapperAbsX + child.position.x * scaleX,
-											y: wrapperAbsY + child.position.y * scaleY
-										},
-										size: {
-											width: child.size.width * scaleX,
-											height: child.size.height * scaleY
-										},
-										rotation: child.rotation || 0
-									}
-								] as [string, { position: { x: number; y: number }; size: { width: number; height: number }; rotation: number }];
-							})
-							.filter((entry): entry is [string, { position: { x: number; y: number }; size: { width: number; height: number }; rotation: number }] => entry !== null)
-					);
-					groupPendingTransforms = childTransforms;
+						for (const childId of wrapper.children) {
+							const child = state.elements[childId];
+							if (!child) continue;
+							transforms.set(childId, {
+								position: {
+									x: wrapperAbsX + child.position.x * scaleX,
+									y: wrapperAbsY + child.position.y * scaleY
+								},
+								size: {
+									width: child.size.width * scaleX,
+									height: child.size.height * scaleY
+								},
+								rotation: child.rotation || 0
+							});
+						}
+					}
 				}
+
+				groupPendingTransforms = transforms;
 			}
 		} else if (interactionMode === 'rotating') {
 			// Track latest screen-space cursor position for debug overlay
