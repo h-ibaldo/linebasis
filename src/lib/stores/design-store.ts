@@ -1723,14 +1723,66 @@ export async function ungroupElements(): Promise<void> {
 }
 
 /**
- * Reorder an entire group to a new position in the DOM
+ * Reorder an entire group to a new position in the DOM.
+ * When moving into an auto-layout container, wraps the group elements in a div
+ * so their relative positioning is preserved (auto-layout would otherwise treat
+ * each element as an independent flex item, losing the group's internal layout).
  */
 export async function reorderGroup(
 	groupId: string,
 	newParentId: string | null,
 	newIndex: number
 ): Promise<void> {
-	console.log('🔵 reorderGroup called:', { groupId, newParentId, newIndex });
+	const state = get(designState);
+	const targetParent = newParentId ? state.elements[newParentId] : null;
+
+	if (targetParent?.autoLayout?.enabled) {
+		// Target is an auto-layout container: wrap the group elements in a div first
+		const groupElements = Object.values(state.elements)
+			.filter(el => el.groupId === groupId);
+
+		if (groupElements.length >= 2) {
+			beginTransaction();
+			try {
+				// Calculate bounding box of the group in its current coordinate space
+				let minX = Infinity, minY = Infinity;
+				let maxX = -Infinity, maxY = -Infinity;
+				for (const el of groupElements) {
+					minX = Math.min(minX, el.position.x);
+					minY = Math.min(minY, el.position.y);
+					maxX = Math.max(maxX, el.position.x + (el.size.width || 0));
+					maxY = Math.max(maxY, el.position.y + (el.size.height || 0));
+				}
+
+				// Create wrapper div as a flex item in the auto-layout container
+				const wrapperId = await createElement({
+					parentId: newParentId,
+					pageId: groupElements[0].pageId,
+					elementType: 'div',
+					position: { x: 0, y: 0 },
+					size: { width: maxX - minX, height: maxY - minY },
+					styles: { display: 'block' }
+				});
+
+				// Move each group element into the wrapper at its relative position
+				for (let i = 0; i < groupElements.length; i++) {
+					const el = groupElements[i];
+					await reorderElement(el.id, wrapperId, i);
+					await moveElement(el.id, {
+						x: el.position.x - minX,
+						y: el.position.y - minY
+					});
+				}
+
+				await commitTransaction();
+			} catch (error) {
+				await commitTransaction();
+				throw error;
+			}
+			return;
+		}
+	}
+
 	await dispatch({
 		id: uuidv4(),
 		type: 'REORDER_GROUP',
@@ -1741,7 +1793,6 @@ export async function reorderGroup(
 			newIndex
 		}
 	});
-	console.log('🔵 reorderGroup dispatched');
 }
 
 /**
@@ -2151,6 +2202,8 @@ export async function pasteElements(
 	}
 
 	// If pasting inside a container, calculate offsets to center groups
+	// Also pre-create wrapper divs for groups pasted into auto-layout containers
+	const groupWrappers = new Map<string, { wrapperId: string; minX: number; minY: number }>();
 	if (targetParentId) {
 		const currentState = get(designState);
 		const parentElement = currentState.elements[targetParentId];
@@ -2176,6 +2229,45 @@ export async function pasteElements(
 				const offsetY_group = targetY - minY;
 
 				groupOffsets.set(groupId, { x: offsetX_group, y: offsetY_group });
+			}
+		} else if (parentElement?.autoLayout?.enabled) {
+			// Pasting groups into an auto-layout container: create a wrapper div for each group
+			// so the group's internal layout (absolute-positioned children) is preserved.
+			// Without a wrapper, each group element becomes an individual flex item and
+			// loses its position relative to the other group elements.
+			for (const [groupId, rootElementsInGroup] of groupedRoots) {
+				if (rootElementsInGroup.length < 2) continue; // Single elements don't need wrapping
+
+				// Calculate bounding box of all group elements
+				let minX = Infinity, minY = Infinity;
+				let maxX = -Infinity, maxY = -Infinity;
+
+				for (const el of rootElementsInGroup) {
+					minX = Math.min(minX, el.position.x);
+					minY = Math.min(minY, el.position.y);
+					maxX = Math.max(maxX, el.position.x + (el.size.width || 0));
+					maxY = Math.max(maxY, el.position.y + (el.size.height || 0));
+				}
+
+				// Create a wrapper div that will contain the group elements
+				// It becomes a flex item in the auto-layout; position {0,0} since flex handles it
+				const wrapperId = uuidv4();
+				dispatch({
+					id: uuidv4(),
+					type: 'CREATE_ELEMENT',
+					timestamp: Date.now(),
+					payload: {
+						elementId: wrapperId,
+						parentId: targetParentId,
+						pageId,
+						elementType: 'div',
+						position: { x: 0, y: 0 },
+						size: { width: maxX - minX, height: maxY - minY },
+						styles: { display: 'block' }
+					}
+				});
+
+				groupWrappers.set(groupId, { wrapperId, minX, minY });
 			}
 		}
 	}
@@ -2241,7 +2333,13 @@ export async function pasteElements(
 		} else if (isRoot) {
 			// For root elements, use the determined target parent
 			// (based on whether selected element is in clipboard and has children)
-			newParentId = targetParentId;
+			// Exception: if this element belongs to a group that has a pre-created wrapper div
+			// (for auto-layout targets), redirect to the wrapper instead
+			if (element.groupId && groupWrappers.has(element.groupId)) {
+				newParentId = groupWrappers.get(element.groupId)!.wrapperId;
+			} else {
+				newParentId = targetParentId;
+			}
 		} else {
 			// Non-root elements without parent in clipboard -> paste as root
 			newParentId = null;
@@ -2258,42 +2356,53 @@ export async function pasteElements(
 			};
 		} else if (isRoot && newParentId !== null) {
 			// Pasting as child of a parent element
-			const currentState = get(designState);
-			const parentElement = currentState.elements[newParentId];
 
-			if (parentElement?.autoLayout?.enabled) {
-				// Parent has auto layout -> paste as last child in queue
-				// For group wrappers, position at {0,0} preserves children's relative positions
-				// For regular elements, position doesn't matter - auto layout will handle it
-				position = { x: 0, y: 0 };
-			} else if (parentElement) {
-				// Parent doesn't have auto layout
-				// Check if pasting as sibling (element's original parent matches new parent)
-				if (element.parentId === newParentId) {
-					// Pasting as sibling in same parent -> maintain position with offset
-					position = {
-						x: element.position.x + offsetX,
-						y: element.position.y + offsetY
-					};
-				} else {
-					// Pasting into different parent -> paste at center of parent
-					if (element.groupId && groupOffsets.has(element.groupId)) {
-						// Apply group offset while maintaining relative position
-						const offset = groupOffsets.get(element.groupId)!;
+			// If this element is going into a pre-created group wrapper (auto-layout case),
+			// position it relative to the wrapper's bounding box origin
+			if (element.groupId && groupWrappers.has(element.groupId)) {
+				const wrapper = groupWrappers.get(element.groupId)!;
+				position = {
+					x: element.position.x - wrapper.minX,
+					y: element.position.y - wrapper.minY
+				};
+			} else {
+				const currentState = get(designState);
+				const parentElement = currentState.elements[newParentId];
+
+				if (parentElement?.autoLayout?.enabled) {
+					// Parent has auto layout -> paste as last child in queue
+					// For group wrappers, position at {0,0} preserves children's relative positions
+					// For regular elements, position doesn't matter - auto layout will handle it
+					position = { x: 0, y: 0 };
+				} else if (parentElement) {
+					// Parent doesn't have auto layout
+					// Check if pasting as sibling (element's original parent matches new parent)
+					if (element.parentId === newParentId) {
+						// Pasting as sibling in same parent -> maintain position with offset
 						position = {
-							x: element.position.x + offset.x,
-							y: element.position.y + offset.y
+							x: element.position.x + offsetX,
+							y: element.position.y + offsetY
 						};
 					} else {
-						// Ungrouped element -> center it
-						const centerX = parentElement.size.width / 2 - element.size.width / 2;
-						const centerY = parentElement.size.height / 2 - element.size.height / 2;
-						position = { x: centerX, y: centerY };
+						// Pasting into different parent -> paste at center of parent
+						if (element.groupId && groupOffsets.has(element.groupId)) {
+							// Apply group offset while maintaining relative position
+							const offset = groupOffsets.get(element.groupId)!;
+							position = {
+								x: element.position.x + offset.x,
+								y: element.position.y + offset.y
+							};
+						} else {
+							// Ungrouped element -> center it
+							const centerX = parentElement.size.width / 2 - element.size.width / 2;
+							const centerY = parentElement.size.height / 2 - element.size.height / 2;
+							position = { x: centerX, y: centerY };
+						}
 					}
+				} else {
+					// Fallback if parent not found
+					position = { x: element.position.x, y: element.position.y };
 				}
-			} else {
-				// Fallback if parent not found
-				position = { x: element.position.x, y: element.position.y };
 			}
 		} else {
 			// Non-root elements -> maintain their relative position
