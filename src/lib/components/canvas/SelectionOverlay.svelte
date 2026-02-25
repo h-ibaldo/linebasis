@@ -1869,6 +1869,16 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 				const state = get(designState);
 				const parent = element.parentId ? state.elements[element.parentId] : null;
 
+				// Also check if element is inside a plain wrapper div that is itself inside auto-layout
+				// (this is the case for groups placed inside auto-layout containers)
+				const grandparent = parent?.parentId ? state.elements[parent.parentId] : null;
+				const isInsideGroupWrapper =
+					parent &&
+					!parent.autoLayout?.enabled &&
+					!parent.isView &&
+					parent.parentId &&
+					grandparent?.autoLayout?.enabled;
+
 				if (parent?.autoLayout?.enabled && !element.autoLayout?.ignoreAutoLayout) {
 					reorderParentId = parent.id;
 					reorderOriginalIndex = parent.children?.indexOf(element.id) ?? null;
@@ -1977,6 +1987,105 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 							};
 
 							// Initialize pendingPosition to element's position in parent's local space
+							pendingPosition = {
+								x: parentRelativeX,
+								y: parentRelativeY
+							};
+						}
+					}
+				} else if (isInsideGroupWrapper && grandparent) {
+					// Element is inside a plain wrapper div (group container) that is a child of auto-layout.
+					// Treat the wrapper div as the element being reordered.
+					const wrapper = parent!;
+					const alParent = grandparent;
+
+					// Override activeElementId and originalParentId to act on the wrapper
+					activeElementId = wrapper.id;
+					originalParentId = wrapper.parentId;
+					// Force single-element drag path (wrapper is a single flex item from AL's perspective)
+					isGroupInteraction = false;
+
+					reorderParentId = alParent.id;
+					reorderOriginalIndex = alParent.children?.indexOf(wrapper.id) ?? null;
+					reorderTargetIndex = reorderOriginalIndex;
+
+					// Get wrapper's current visual position from DOM
+					const wrapperDomElement = document.querySelector(`[data-element-id="${wrapper.id}"]`) as HTMLElement;
+					const alParentDomElement = document.querySelector(`[data-element-id="${alParent.id}"]`) as HTMLElement;
+					if (wrapperDomElement && alParentDomElement) {
+						const rect = wrapperDomElement.getBoundingClientRect();
+						const parentRect = alParentDomElement.getBoundingClientRect();
+						const canvasElement = document.querySelector('.canvas');
+						const canvasRect = canvasElement?.getBoundingClientRect();
+
+						if (canvasRect) {
+							const wrapperTotalRotation = getCumulativeRotation(wrapper) + (wrapper.rotation || 0);
+							const alParentTotalRotation = getCumulativeRotation(alParent) + (alParent.rotation || 0);
+
+							const wrapperSize = wrapper.size;
+							const alParentSize = alParent.size;
+
+							const actualTopLeft = calculateActualTopLeftForRotated(
+								rect,
+								wrapperSize,
+								wrapperTotalRotation,
+								viewport.scale
+							);
+
+							const parentActualTopLeft = calculateActualTopLeftForRotated(
+								parentRect,
+								alParentSize,
+								alParentTotalRotation,
+								viewport.scale
+							);
+
+							// Calculate centers in screen space
+							const wrapperCenterScreen = {
+								x: actualTopLeft.left + (wrapperSize.width * viewport.scale) / 2,
+								y: actualTopLeft.top + (wrapperSize.height * viewport.scale) / 2
+							};
+
+							const alParentCenterScreen = {
+								x: parentActualTopLeft.left + (alParentSize.width * viewport.scale) / 2,
+								y: parentActualTopLeft.top + (alParentSize.height * viewport.scale) / 2
+							};
+
+							// Vector from AL parent center to wrapper center in screen space
+							const screenDx = wrapperCenterScreen.x - alParentCenterScreen.x;
+							const screenDy = wrapperCenterScreen.y - alParentCenterScreen.y;
+
+							// Convert to canvas space
+							const canvasDx = screenDx / viewport.scale;
+							const canvasDy = screenDy / viewport.scale;
+
+							// Un-rotate to AL parent's local space
+							const angleRad = (-alParentTotalRotation * Math.PI) / 180;
+							const cos = Math.cos(angleRad);
+							const sin = Math.sin(angleRad);
+							const localDx = canvasDx * cos - canvasDy * sin;
+							const localDy = canvasDx * sin + canvasDy * cos;
+
+							// Convert from center-relative to top-left-relative
+							const parentRelativeX = localDx + alParentSize.width / 2 - wrapperSize.width / 2;
+							const parentRelativeY = localDy + alParentSize.height / 2 - wrapperSize.height / 2;
+
+							// Convert screen position to canvas coordinates (for cursor offset calculation)
+							const wrapperCanvasX = (actualTopLeft.left - canvasRect.left - viewport.x) / viewport.scale;
+							const wrapperCanvasY = (actualTopLeft.top - canvasRect.top - viewport.y) / viewport.scale;
+
+							const cursorCanvasX = (e.clientX - canvasRect.left - viewport.x) / viewport.scale;
+							const cursorCanvasY = (e.clientY - canvasRect.top - viewport.y) / viewport.scale;
+
+							reorderGhostOffset = {
+								x: wrapperCanvasX - cursorCanvasX,
+								y: wrapperCanvasY - cursorCanvasY
+							};
+
+							reorderElementSize = {
+								width: wrapperSize.width,
+								height: wrapperSize.height
+							};
+
 							pendingPosition = {
 								x: parentRelativeX,
 								y: parentRelativeY
@@ -3452,7 +3561,9 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 			}
 		} else if (activeElementId) {
 			// Handle single element interaction
-			const activeElement = selectedElements.find(el => el.id === activeElementId);
+			// Fall back to state lookup to handle group wrapper reorder (wrapper not in selectedElements)
+			const activeElement = selectedElements.find(el => el.id === activeElementId) ??
+				(reorderParentId ? get(designState).elements[activeElementId] ?? null : null);
 
 			if (interactionMode === 'dragging') {
 				if (movedX > CANVAS_INTERACTION.MOVEMENT_THRESHOLD || movedY > CANVAS_INTERACTION.MOVEMENT_THRESHOLD) {
