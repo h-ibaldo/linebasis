@@ -2235,12 +2235,25 @@ export async function pasteElements(
 	const groupOffsets = new Map<string, { x: number; y: number }>();
 	const groupedRoots = new Map<string, Element[]>();
 
-	// Group root elements by groupId
+	// Walk up the parentGroupId chain in clipboardGroups to find the topmost (root) group ID.
+	// This handles nested groups: A[BA, BB] — elements of BA and BB all belong to root group A.
+	function getRootGroupId(groupId: string): string {
+		let current = groupId;
+		while (clipboardGroups[current]?.parentGroupId) {
+			current = clipboardGroups[current].parentGroupId!;
+		}
+		return current;
+	}
+
+	// Group root elements by their root group ID (topmost ancestor group).
+	// Using the root group ID ensures nested groups like A[BA, BB] are bucketed together
+	// instead of being split into separate wrappers per sub-group.
 	for (const element of rootElements) {
 		if (element.groupId) {
-			const group = groupedRoots.get(element.groupId) || [];
+			const rootGroupId = getRootGroupId(element.groupId);
+			const group = groupedRoots.get(rootGroupId) || [];
 			group.push(element);
-			groupedRoots.set(element.groupId, group);
+			groupedRoots.set(rootGroupId, group);
 		}
 	}
 
@@ -2377,9 +2390,11 @@ export async function pasteElements(
 			// For root elements, use the determined target parent
 			// (based on whether selected element is in clipboard and has children)
 			// Exception: if this element belongs to a group that has a pre-created wrapper div
-			// (for auto-layout targets), redirect to the wrapper instead
-			if (element.groupId && groupWrappers.has(element.groupId)) {
-				newParentId = groupWrappers.get(element.groupId)!.wrapperId;
+			// (for auto-layout targets), redirect to the wrapper instead.
+			// Use getRootGroupId so nested groups (A[BA,BB]) all map to the single wrapper for A.
+			const rootGid = element.groupId ? getRootGroupId(element.groupId) : null;
+			if (rootGid && groupWrappers.has(rootGid)) {
+				newParentId = groupWrappers.get(rootGid)!.wrapperId;
 			} else {
 				newParentId = targetParentId;
 			}
@@ -2401,9 +2416,11 @@ export async function pasteElements(
 			// Pasting as child of a parent element
 
 			// If this element is going into a pre-created group wrapper (auto-layout case),
-			// position it relative to the wrapper's bounding box origin
-			if (element.groupId && groupWrappers.has(element.groupId)) {
-				const wrapper = groupWrappers.get(element.groupId)!;
+			// position it relative to the wrapper's bounding box origin.
+			// Use getRootGroupId so nested group elements find the correct wrapper.
+			const rootGidForPos = element.groupId ? getRootGroupId(element.groupId) : null;
+			if (rootGidForPos && groupWrappers.has(rootGidForPos)) {
+				const wrapper = groupWrappers.get(rootGidForPos)!;
 				position = {
 					x: element.position.x - wrapper.minX,
 					y: element.position.y - wrapper.minY
@@ -2428,9 +2445,10 @@ export async function pasteElements(
 						};
 					} else {
 						// Pasting into different parent -> paste at center of parent
-						if (element.groupId && groupOffsets.has(element.groupId)) {
+						const rootGidForOffset = element.groupId ? getRootGroupId(element.groupId) : null;
+						if (rootGidForOffset && groupOffsets.has(rootGidForOffset)) {
 							// Apply group offset while maintaining relative position
-							const offset = groupOffsets.get(element.groupId)!;
+							const offset = groupOffsets.get(rootGidForOffset)!;
 							position = {
 								x: element.position.x + offset.x,
 								y: element.position.y + offset.y
