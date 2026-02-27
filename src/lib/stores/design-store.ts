@@ -1709,15 +1709,32 @@ export async function ungroupElements(): Promise<void> {
 		}
 	}
 
-	// Dispatch ungroup events for ALL top-most groups
+	// Dispatch ungroup events for ALL top-most groups.
+	// For parent groups (groups of groups, elementIds=[]), also ungroup each child group
+	// so that UNGROUP_ELEMENTS clears groupId from all descendant elements.
 	for (const groupId of topMostGroupIds) {
+		const group = state.groups[groupId];
+
+		// If this is a parent group (has child groups, no direct elements), ungroup children first
+		if (group && group.elementIds.length === 0) {
+			const childGroupIds = Object.keys(state.groups).filter(
+				id => state.groups[id].parentGroupId === groupId
+			);
+			for (const childGroupId of childGroupIds) {
+				await dispatch({
+					id: uuidv4(),
+					type: 'UNGROUP_ELEMENTS',
+					timestamp: Date.now(),
+					payload: { groupId: childGroupId }
+				});
+			}
+		}
+
 		await dispatch({
 			id: uuidv4(),
 			type: 'UNGROUP_ELEMENTS',
 			timestamp: Date.now(),
-			payload: {
-				groupId
-			}
+			payload: { groupId }
 		});
 	}
 
@@ -1726,40 +1743,100 @@ export async function ungroupElements(): Promise<void> {
 	// up into the AL container directly and delete the now-empty wrapper div.
 	const freshState = get(designState);
 	for (const groupId of topMostGroupIds) {
-		const group = state.groups[groupId]; // use pre-ungroup state for elementIds
-		if (!group || group.elementIds.length === 0) continue;
+		const group = state.groups[groupId]; // use pre-ungroup state
 
-		// Find the wrapper: the parent of the first group element
-		const firstEl = freshState.elements[group.elementIds[0]];
-		if (!firstEl) continue;
+		// Case 1: simple group — find wrapper via first element
+		if (group && group.elementIds.length > 0) {
+			const firstEl = freshState.elements[group.elementIds[0]];
+			if (!firstEl) continue;
 
-		const wrapper = firstEl.parentId ? freshState.elements[firstEl.parentId] : null;
-		const alParent = wrapper?.parentId ? freshState.elements[wrapper.parentId] : null;
+			const wrapper = firstEl.parentId ? freshState.elements[firstEl.parentId] : null;
+			const alParent = wrapper?.parentId ? freshState.elements[wrapper.parentId] : null;
 
-		// Only proceed if wrapper is a plain div inside an AL container
-		if (
-			wrapper &&
-			!wrapper.autoLayout?.enabled &&
-			!wrapper.isView &&
-			alParent?.autoLayout?.enabled
-		) {
-			// Move each child of the wrapper to the AL parent (at wrapper's position in child list)
-			const wrapperIndex = alParent.children.indexOf(wrapper.id);
-			const childIds = [...wrapper.children]; // snapshot before mutations
-			for (let i = 0; i < childIds.length; i++) {
+			if (
+				wrapper &&
+				!wrapper.autoLayout?.enabled &&
+				!wrapper.isView &&
+				alParent?.autoLayout?.enabled
+			) {
+				const wrapperIndex = alParent.children.indexOf(wrapper.id);
+				const childIds = [...wrapper.children];
+				for (let i = 0; i < childIds.length; i++) {
+					await dispatch({
+						id: uuidv4(),
+						type: 'REORDER_ELEMENT',
+						timestamp: Date.now(),
+						payload: { elementId: childIds[i], newParentId: alParent.id, newIndex: wrapperIndex + i }
+					});
+				}
 				await dispatch({
 					id: uuidv4(),
-					type: 'REORDER_ELEMENT',
+					type: 'DELETE_ELEMENT',
 					timestamp: Date.now(),
-					payload: { elementId: childIds[i], newParentId: alParent.id, newIndex: wrapperIndex + i }
+					payload: { elementId: wrapper.id }
 				});
 			}
-			// Delete the now-empty wrapper
+			continue;
+		}
+
+		// Case 2: parent group (group of groups) — find outer wrapper via a child group's element
+		if (!group) continue;
+		const childGroupIds = Object.keys(state.groups).filter(
+			id => state.groups[id].parentGroupId === groupId
+		);
+		if (childGroupIds.length === 0) continue;
+
+		// Collect all elements across child groups to find the outer wrapper
+		const allChildElementIds = childGroupIds.flatMap(
+			id => state.groups[id].elementIds
+		);
+		if (allChildElementIds.length === 0) continue;
+
+		const anyChildEl = freshState.elements[allChildElementIds[0]];
+		if (!anyChildEl) continue;
+
+		// anyChildEl → inner wrapper → outer wrapper → AL parent
+		const innerWrapper = anyChildEl.parentId ? freshState.elements[anyChildEl.parentId] : null;
+		const outerWrapper = innerWrapper?.parentId ? freshState.elements[innerWrapper.parentId] : null;
+		const alParent = outerWrapper?.parentId ? freshState.elements[outerWrapper.parentId] : null;
+
+		if (
+			outerWrapper &&
+			!outerWrapper.autoLayout?.enabled &&
+			!outerWrapper.isView &&
+			alParent?.autoLayout?.enabled
+		) {
+			const outerIndex = alParent.children.indexOf(outerWrapper.id);
+
+			// Move each inner wrapper's children directly to the AL parent, then delete inner wrapper
+			let insertAt = outerIndex;
+			const innerWrapperIds = [...outerWrapper.children];
+			for (const innerWrapperId of innerWrapperIds) {
+				const innerWrapperEl = freshState.elements[innerWrapperId];
+				if (!innerWrapperEl) continue;
+				const grandchildIds = [...innerWrapperEl.children];
+				for (let i = 0; i < grandchildIds.length; i++) {
+					await dispatch({
+						id: uuidv4(),
+						type: 'REORDER_ELEMENT',
+						timestamp: Date.now(),
+						payload: { elementId: grandchildIds[i], newParentId: alParent.id, newIndex: insertAt + i }
+					});
+				}
+				insertAt += grandchildIds.length;
+				await dispatch({
+					id: uuidv4(),
+					type: 'DELETE_ELEMENT',
+					timestamp: Date.now(),
+					payload: { elementId: innerWrapperId }
+				});
+			}
+			// Delete the outer wrapper
 			await dispatch({
 				id: uuidv4(),
 				type: 'DELETE_ELEMENT',
 				timestamp: Date.now(),
-				payload: { elementId: wrapper.id }
+				payload: { elementId: outerWrapper.id }
 			});
 		}
 	}
