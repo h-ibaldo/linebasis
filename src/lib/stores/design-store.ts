@@ -995,8 +995,11 @@ function expandSelectionWithGroups(elementIds: string[], state: DesignState): st
 			// Find the root parent group (traverse up the hierarchy)
 			let currentGroupId = element.groupId;
 			let group = state.groups[currentGroupId];
+			const visitedGroups = new Set<string>([currentGroupId]);
 
 			while (group?.parentGroupId) {
+				if (visitedGroups.has(group.parentGroupId)) break;
+				visitedGroups.add(group.parentGroupId);
 				currentGroupId = group.parentGroupId;
 				group = state.groups[currentGroupId];
 			}
@@ -1513,10 +1516,13 @@ export async function unwrapSelectedDiv(): Promise<void> {
 			let wrapperAbsX = wrapper.position.x;
 			let wrapperAbsY = wrapper.position.y;
 			let currentParent = wrapper.parentId ? state.elements[wrapper.parentId] : null;
+			const visitedParents = new Set<string>(wrapper.parentId ? [wrapper.parentId] : []);
 			while (currentParent) {
 				wrapperAbsX += currentParent.position.x;
 				wrapperAbsY += currentParent.position.y;
-				currentParent = currentParent.parentId ? state.elements[currentParent.parentId] : null;
+				if (!currentParent.parentId || visitedParents.has(currentParent.parentId)) break;
+				visitedParents.add(currentParent.parentId);
+				currentParent = state.elements[currentParent.parentId] ?? null;
 			}
 
 			const wrapperRotation = wrapper.rotation || 0;
@@ -2083,7 +2089,10 @@ export function copyElements(): void {
 	const groupIdsToInclude = new Set(copiedGroupIds);
 	for (const groupId of copiedGroupIds) {
 		let currentGroup = state.groups[groupId];
+		const visited = new Set<string>([groupId]);
 		while (currentGroup?.parentGroupId) {
+			if (visited.has(currentGroup.parentGroupId)) break;
+			visited.add(currentGroup.parentGroupId);
 			groupIdsToInclude.add(currentGroup.parentGroupId);
 			currentGroup = state.groups[currentGroup.parentGroupId];
 		}
@@ -2132,7 +2141,10 @@ export async function cutElements(): Promise<void> {
 	const groupIdsToInclude = new Set(copiedGroupIds);
 	for (const groupId of copiedGroupIds) {
 		let currentGroup = state.groups[groupId];
+		const visited = new Set<string>([groupId]);
 		while (currentGroup?.parentGroupId) {
+			if (visited.has(currentGroup.parentGroupId)) break;
+			visited.add(currentGroup.parentGroupId);
 			groupIdsToInclude.add(currentGroup.parentGroupId);
 			currentGroup = state.groups[currentGroup.parentGroupId];
 		}
@@ -2239,8 +2251,12 @@ export async function pasteElements(
 	// This handles nested groups: A[BA, BB] — elements of BA and BB all belong to root group A.
 	function getRootGroupId(groupId: string): string {
 		let current = groupId;
+		const visited = new Set<string>([current]);
 		while (clipboardGroups[current]?.parentGroupId) {
-			current = clipboardGroups[current].parentGroupId!;
+			const next = clipboardGroups[current].parentGroupId!;
+			if (visited.has(next)) break;
+			visited.add(next);
+			current = next;
 		}
 		return current;
 	}

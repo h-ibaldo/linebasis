@@ -1201,9 +1201,15 @@ function handleCreateGroup(state: DesignState, event: CreateGroupEvent): DesignS
 			// Find the root parent group (traverse up the hierarchy)
 			let currentGroupId = el.groupId;
 			let group = newGroups[currentGroupId];
+			const visitedGroups = new Set<string>([currentGroupId]);
 
 			while (group?.parentGroupId) {
+				if (visitedGroups.has(group.parentGroupId)) {
+					console.warn(`[Reducer] Circular group reference detected at group ${currentGroupId}, breaking`);
+					break;
+				}
 				currentGroupId = group.parentGroupId;
+				visitedGroups.add(currentGroupId);
 				group = newGroups[currentGroupId];
 			}
 
