@@ -2303,63 +2303,126 @@ export async function pasteElements(
 				groupOffsets.set(groupId, { x: offsetX_group, y: offsetY_group });
 			}
 		} else if (parentElement?.autoLayout?.enabled) {
-			// Pasting groups into an AL container: create one wrapper per leaf group so each
-			// group's internal layout (absolutely-positioned children) is preserved as a flex item.
-			// A "leaf group" is a group whose direct elements are clipboard root elements — i.e.
-			// it has no child groups of its own. Groups of groups (parent groups) are skipped so
-			// that each sub-group gets its own independent wrapper rather than everything being
-			// collapsed into one big container.
-			const childGroupIds = new Set(
+			// Pasting groups into an AL container.
+			//
+			// Simple group (A[E1,E2,E3]):
+			//   → one wrapper div (flex item), elements absolutely positioned inside it.
+			//
+			// Group of groups (A[BA[E1,E2], BB[E3,E4]]):
+			//   → one OUTER wrapper for A (flex item in AL), sized to A's full bounding box.
+			//   → one INNER wrapper per sub-group (BA, BB), absolutely positioned inside the
+			//     outer wrapper at their original position relative to A's origin.
+			//   → elements go into their sub-group wrapper, positioned relative to it.
+			//   This preserves both the internal layout of each sub-group AND the spatial
+			//   disposition of sub-groups relative to each other.
+
+			// Identify which groups are parent groups (have child groups pointing to them)
+			const parentGroupIds = new Set(
 				Object.values(clipboardGroups)
 					.map(g => g.parentGroupId)
 					.filter(Boolean) as string[]
 			);
 
-			// Build a map from direct groupId → root elements that directly belong to it
+			// Build a map from direct groupId → root elements that belong to it
 			const directGroupElements = new Map<string, Element[]>();
 			for (const element of rootElements) {
 				if (!element.groupId) continue;
-				const gid = element.groupId;
-				const list = directGroupElements.get(gid) || [];
+				const list = directGroupElements.get(element.groupId) || [];
 				list.push(element);
-				directGroupElements.set(gid, list);
+				directGroupElements.set(element.groupId, list);
 			}
 
-			for (const [groupId, elementsInGroup] of directGroupElements) {
-				// Skip parent groups (groups that have child groups) — their sub-groups each
-				// get their own wrapper; no single wrapper for the whole group of groups.
-				if (childGroupIds.has(groupId)) continue;
-				if (elementsInGroup.length < 2) continue; // Single element: no wrapper needed
-
-				// Calculate bounding box of all elements in this leaf group
-				let minX = Infinity, minY = Infinity;
-				let maxX = -Infinity, maxY = -Infinity;
-
-				for (const el of elementsInGroup) {
+			// Helper: compute bounding box of elements from their clipboard positions
+			function boundingBox(elements: Element[]): { minX: number; minY: number; maxX: number; maxY: number } {
+				let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+				for (const el of elements) {
 					minX = Math.min(minX, el.position.x);
 					minY = Math.min(minY, el.position.y);
 					maxX = Math.max(maxX, el.position.x + (el.size.width || 0));
 					maxY = Math.max(maxY, el.position.y + (el.size.height || 0));
 				}
+				return { minX, minY, maxX, maxY };
+			}
 
-				// Create a wrapper div that becomes a single flex item in the AL container
-				const wrapperId = uuidv4();
-				dispatch({
-					id: uuidv4(),
-					type: 'CREATE_ELEMENT',
-					timestamp: Date.now(),
-					payload: {
-						elementId: wrapperId,
-						parentId: targetParentId,
-						pageId,
-						elementType: 'div',
-						position: { x: 0, y: 0 },
-						size: { width: maxX - minX, height: maxY - minY },
-						styles: { display: 'block' }
+			// Process each root-level group (no parentGroupId = top-level in this clipboard)
+			const topLevelGroupIds = Object.keys(clipboardGroups).filter(
+				id => !clipboardGroups[id].parentGroupId
+			);
+
+			for (const topGroupId of topLevelGroupIds) {
+				// Collect all root elements that ultimately belong to this top-level group
+				const allElementsInTree: Element[] = [];
+				for (const element of rootElements) {
+					if (element.groupId && getRootGroupId(element.groupId) === topGroupId) {
+						allElementsInTree.push(element);
 					}
-				});
+				}
+				if (allElementsInTree.length === 0) continue;
 
-				groupWrappers.set(groupId, { wrapperId, minX, minY });
+				const isParentGroup = parentGroupIds.has(topGroupId);
+
+				if (!isParentGroup) {
+					// Simple leaf group: one wrapper for everything
+					if (allElementsInTree.length < 2) continue;
+					const { minX, minY, maxX, maxY } = boundingBox(allElementsInTree);
+					const wrapperId = uuidv4();
+					dispatch({
+						id: uuidv4(), type: 'CREATE_ELEMENT', timestamp: Date.now(),
+						payload: {
+							elementId: wrapperId, parentId: targetParentId, pageId,
+							elementType: 'div', position: { x: 0, y: 0 },
+							size: { width: maxX - minX, height: maxY - minY },
+							styles: { display: 'block' }
+						}
+					});
+					groupWrappers.set(topGroupId, { wrapperId, minX, minY });
+				} else {
+					// Group of groups: create outer wrapper sized to the full tree bounding box,
+					// then inner wrappers per sub-group positioned relative to the outer wrapper.
+					const { minX: outerMinX, minY: outerMinY, maxX: outerMaxX, maxY: outerMaxY } = boundingBox(allElementsInTree);
+					const outerWrapperId = uuidv4();
+					dispatch({
+						id: uuidv4(), type: 'CREATE_ELEMENT', timestamp: Date.now(),
+						payload: {
+							elementId: outerWrapperId, parentId: targetParentId, pageId,
+							elementType: 'div', position: { x: 0, y: 0 },
+							size: { width: outerMaxX - outerMinX, height: outerMaxY - outerMinY },
+							styles: { display: 'block' }
+						}
+					});
+
+					// Store the outer wrapper so elements without a sub-group wrapper also resolve correctly
+					groupWrappers.set(topGroupId, { wrapperId: outerWrapperId, minX: outerMinX, minY: outerMinY });
+
+					// Create inner wrappers for each direct child group of topGroupId
+					const childGroupIds = Object.keys(clipboardGroups).filter(
+						id => clipboardGroups[id].parentGroupId === topGroupId
+					);
+					for (const childGroupId of childGroupIds) {
+						const childElements = directGroupElements.get(childGroupId) || [];
+						if (childElements.length < 2) {
+							// Single element in sub-group: no inner wrapper, position relative to outer
+							groupWrappers.set(childGroupId, { wrapperId: outerWrapperId, minX: outerMinX, minY: outerMinY });
+							continue;
+						}
+						const { minX, minY, maxX, maxY } = boundingBox(childElements);
+						const innerWrapperId = uuidv4();
+						dispatch({
+							id: uuidv4(), type: 'CREATE_ELEMENT', timestamp: Date.now(),
+							payload: {
+								elementId: innerWrapperId,
+								parentId: outerWrapperId,
+								pageId,
+								elementType: 'div',
+								// Position inner wrapper relative to outer wrapper's origin
+								position: { x: minX - outerMinX, y: minY - outerMinY },
+								size: { width: maxX - minX, height: maxY - minY },
+								styles: { display: 'block' }
+							}
+						});
+						groupWrappers.set(childGroupId, { wrapperId: innerWrapperId, minX, minY });
+					}
+				}
 			}
 		}
 	}
