@@ -2303,26 +2303,46 @@ export async function pasteElements(
 				groupOffsets.set(groupId, { x: offsetX_group, y: offsetY_group });
 			}
 		} else if (parentElement?.autoLayout?.enabled) {
-			// Pasting groups into an auto-layout container: create a wrapper div for each group
-			// so the group's internal layout (absolute-positioned children) is preserved.
-			// Without a wrapper, each group element becomes an individual flex item and
-			// loses its position relative to the other group elements.
-			for (const [groupId, rootElementsInGroup] of groupedRoots) {
-				if (rootElementsInGroup.length < 2) continue; // Single elements don't need wrapping
+			// Pasting groups into an AL container: create one wrapper per leaf group so each
+			// group's internal layout (absolutely-positioned children) is preserved as a flex item.
+			// A "leaf group" is a group whose direct elements are clipboard root elements — i.e.
+			// it has no child groups of its own. Groups of groups (parent groups) are skipped so
+			// that each sub-group gets its own independent wrapper rather than everything being
+			// collapsed into one big container.
+			const childGroupIds = new Set(
+				Object.values(clipboardGroups)
+					.map(g => g.parentGroupId)
+					.filter(Boolean) as string[]
+			);
 
-				// Calculate bounding box of all group elements
+			// Build a map from direct groupId → root elements that directly belong to it
+			const directGroupElements = new Map<string, Element[]>();
+			for (const element of rootElements) {
+				if (!element.groupId) continue;
+				const gid = element.groupId;
+				const list = directGroupElements.get(gid) || [];
+				list.push(element);
+				directGroupElements.set(gid, list);
+			}
+
+			for (const [groupId, elementsInGroup] of directGroupElements) {
+				// Skip parent groups (groups that have child groups) — their sub-groups each
+				// get their own wrapper; no single wrapper for the whole group of groups.
+				if (childGroupIds.has(groupId)) continue;
+				if (elementsInGroup.length < 2) continue; // Single element: no wrapper needed
+
+				// Calculate bounding box of all elements in this leaf group
 				let minX = Infinity, minY = Infinity;
 				let maxX = -Infinity, maxY = -Infinity;
 
-				for (const el of rootElementsInGroup) {
+				for (const el of elementsInGroup) {
 					minX = Math.min(minX, el.position.x);
 					minY = Math.min(minY, el.position.y);
 					maxX = Math.max(maxX, el.position.x + (el.size.width || 0));
 					maxY = Math.max(maxY, el.position.y + (el.size.height || 0));
 				}
 
-				// Create a wrapper div that will contain the group elements
-				// It becomes a flex item in the auto-layout; position {0,0} since flex handles it
+				// Create a wrapper div that becomes a single flex item in the AL container
 				const wrapperId = uuidv4();
 				dispatch({
 					id: uuidv4(),
@@ -2403,14 +2423,13 @@ export async function pasteElements(
 			// Parent is in clipboard, use its new ID
 			newParentId = oldToNewIdMap.get(element.parentId)!;
 		} else if (isRoot) {
-			// For root elements, use the determined target parent
-			// (based on whether selected element is in clipboard and has children)
-			// Exception: if this element belongs to a group that has a pre-created wrapper div
-			// (for auto-layout targets), redirect to the wrapper instead.
-			// Use getRootGroupId so nested groups (A[BA,BB]) all map to the single wrapper for A.
-			const rootGid = element.groupId ? getRootGroupId(element.groupId) : null;
-			if (rootGid && groupWrappers.has(rootGid)) {
-				newParentId = groupWrappers.get(rootGid)!.wrapperId;
+			// For root elements, use the determined target parent.
+			// If the element's direct groupId has a pre-created wrapper (leaf-group AL case),
+			// redirect into that wrapper. Parent groups (groups of groups) have no wrapper —
+			// their elements go directly into the AL container.
+			const directGid = element.groupId ?? null;
+			if (directGid && groupWrappers.has(directGid)) {
+				newParentId = groupWrappers.get(directGid)!.wrapperId;
 			} else {
 				newParentId = targetParentId;
 			}
@@ -2431,12 +2450,11 @@ export async function pasteElements(
 		} else if (isRoot && newParentId !== null) {
 			// Pasting as child of a parent element
 
-			// If this element is going into a pre-created group wrapper (auto-layout case),
-			// position it relative to the wrapper's bounding box origin.
-			// Use getRootGroupId so nested group elements find the correct wrapper.
-			const rootGidForPos = element.groupId ? getRootGroupId(element.groupId) : null;
-			if (rootGidForPos && groupWrappers.has(rootGidForPos)) {
-				const wrapper = groupWrappers.get(rootGidForPos)!;
+			// If this element is going into a pre-created leaf-group wrapper, position it
+			// relative to the wrapper's bounding box origin (preserves spatial config).
+			const directGidForPos = element.groupId ?? null;
+			if (directGidForPos && groupWrappers.has(directGidForPos)) {
+				const wrapper = groupWrappers.get(directGidForPos)!;
 				position = {
 					x: element.position.x - wrapper.minX,
 					y: element.position.y - wrapper.minY
