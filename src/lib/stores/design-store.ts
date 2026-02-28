@@ -1624,18 +1624,19 @@ export async function groupElements(): Promise<void> {
 /**
  * Helper function to recursively get all element IDs in a group
  */
-function getAllElementsInGroup(groupId: string, state: DesignState): string[] {
+function getAllElementsInGroup(groupId: string, state: DesignState, visited = new Set<string>()): string[] {
+	if (visited.has(groupId)) return [];
+	visited.add(groupId);
+
 	const result: string[] = [];
 	const group = state.groups[groupId];
 	if (!group) return result;
 
-	// Add direct elements from the group's elementIds array
 	result.push(...group.elementIds);
 
-	// Add elements from child groups recursively
 	for (const childGroup of Object.values(state.groups)) {
 		if (childGroup.parentGroupId === groupId) {
-			result.push(...getAllElementsInGroup(childGroup.id, state));
+			result.push(...getAllElementsInGroup(childGroup.id, state, visited));
 		}
 	}
 
@@ -1656,7 +1657,9 @@ export async function ungroupElements(): Promise<void> {
 	// If selected elements include group wrapper divs (plain divs inside AL), expand to include
 	// their actual group elements. This handles groups-in-AL where the wrapper is what's selected.
 	// Also handles outer wrappers for groups-of-groups (whose children are inner wrappers).
-	function collectGroupElementsFromWrapper(wrapperId: string, into: Set<string>): void {
+	function collectGroupElementsFromWrapper(wrapperId: string, into: Set<string>, visitedWrappers = new Set<string>()): void {
+		if (visitedWrappers.has(wrapperId)) return;
+		visitedWrappers.add(wrapperId);
 		const wrapper = state.elements[wrapperId];
 		if (!wrapper || wrapper.autoLayout?.enabled || wrapper.isView) return;
 		for (const childId of wrapper.children) {
@@ -1665,8 +1668,7 @@ export async function ungroupElements(): Promise<void> {
 			if (child.groupId) {
 				into.add(childId);
 			} else {
-				// Child is itself a wrapper (inner wrapper of a group-of-groups) — recurse
-				collectGroupElementsFromWrapper(childId, into);
+				collectGroupElementsFromWrapper(childId, into, visitedWrappers);
 			}
 		}
 	}
