@@ -155,6 +155,25 @@ export async function initialize(): Promise<void> {
 	// This is safe to run on every load - it only migrates elements that need it
 	designState = migrateToUnifiedPositioning(designState);
 
+	// Sanitize group parentGroupId references — break any cycles introduced by old paste bugs
+	const sanitizedGroups = { ...designState.groups };
+	for (const [groupId, group] of Object.entries(sanitizedGroups)) {
+		if (!group.parentGroupId) continue;
+		// Walk up the chain; if we revisit a node it's a cycle — clear the offending link
+		const visited = new Set<string>([groupId]);
+		let cur = group.parentGroupId;
+		while (cur) {
+			if (visited.has(cur)) {
+				console.warn(`[Init] Breaking circular parentGroupId at group ${groupId} → ${cur}`);
+				sanitizedGroups[groupId] = { ...sanitizedGroups[groupId], parentGroupId: undefined };
+				break;
+			}
+			visited.add(cur);
+			cur = sanitizedGroups[cur]?.parentGroupId ?? '';
+		}
+	}
+	designState = { ...designState, groups: sanitizedGroups };
+
 	storeState.update((state) => ({
 		...state,
 		events,
