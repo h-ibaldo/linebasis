@@ -1742,47 +1742,32 @@ export async function ungroupElements(): Promise<void> {
 
 	if (topMostGroupIds.length === 0) return;
 
-	// Collect all elements that will remain selected after ungrouping all top-most groups
+	// Collect what will be selected after ungrouping:
+	// - For a simple group: its direct element IDs
+	// - For a group of groups: its direct child group element IDs (they stay grouped)
 	const elementsToSelect: string[] = [];
 
 	for (const topMostGroupId of topMostGroupIds) {
-		// Find all direct child groups of this group being ungrouped
-		for (const [childGroupId, childGroup] of Object.entries(state.groups)) {
-			if (childGroup.parentGroupId === topMostGroupId) {
-				// This is a child group - get all its elements
-				const childElements = getAllElementsInGroup(childGroupId, state);
-				elementsToSelect.push(...childElements);
-			}
-		}
-
-		// Also include any direct elements of the group being ungrouped
 		const group = state.groups[topMostGroupId];
-		if (group) {
+		if (!group) continue;
+
+		if (group.elementIds.length > 0) {
+			// Simple group — select its direct elements
 			elementsToSelect.push(...group.elementIds);
+		} else {
+			// Group of groups — child groups survive; select all their elements
+			for (const [childGroupId, childGroup] of Object.entries(state.groups)) {
+				if (childGroup.parentGroupId === topMostGroupId) {
+					elementsToSelect.push(...getAllElementsInGroup(childGroupId, state));
+				}
+			}
 		}
 	}
 
-	// Dispatch ungroup events for ALL top-most groups.
-	// For parent groups (groups of groups, elementIds=[]), also ungroup each child group
-	// so that UNGROUP_ELEMENTS clears groupId from all descendant elements.
+	// Dispatch ungroup for each top-most group.
+	// UNGROUP_ELEMENTS(A) clears parentGroupId from direct child groups (BA, BB) without
+	// touching their elements — so BA and BB survive as independent top-level groups.
 	for (const groupId of topMostGroupIds) {
-		const group = state.groups[groupId];
-
-		// If this is a parent group (has child groups, no direct elements), ungroup children first
-		if (group && group.elementIds.length === 0) {
-			const childGroupIds = Object.keys(state.groups).filter(
-				id => state.groups[id].parentGroupId === groupId
-			);
-			for (const childGroupId of childGroupIds) {
-				await dispatch({
-					id: uuidv4(),
-					type: 'UNGROUP_ELEMENTS',
-					timestamp: Date.now(),
-					payload: { groupId: childGroupId }
-				});
-			}
-		}
-
 		await dispatch({
 			id: uuidv4(),
 			type: 'UNGROUP_ELEMENTS',
@@ -1861,30 +1846,19 @@ export async function ungroupElements(): Promise<void> {
 		) {
 			const outerIndex = alParent.children.indexOf(outerWrapper.id);
 
-			// Move each inner wrapper's children directly to the AL parent, then delete inner wrapper
-			let insertAt = outerIndex;
+			// Move each inner wrapper (BA's wrapper, BB's wrapper) directly to the AL parent.
+			// The inner wrappers become independent flex items — each one is now the wrapper
+			// for its own group (BA, BB) which are now top-level after A was ungrouped.
 			const innerWrapperIds = [...outerWrapper.children];
-			for (const innerWrapperId of innerWrapperIds) {
-				const innerWrapperEl = freshState.elements[innerWrapperId];
-				if (!innerWrapperEl) continue;
-				const grandchildIds = [...innerWrapperEl.children];
-				for (let i = 0; i < grandchildIds.length; i++) {
-					await dispatch({
-						id: uuidv4(),
-						type: 'REORDER_ELEMENT',
-						timestamp: Date.now(),
-						payload: { elementId: grandchildIds[i], newParentId: alParent.id, newIndex: insertAt + i }
-					});
-				}
-				insertAt += grandchildIds.length;
+			for (let i = 0; i < innerWrapperIds.length; i++) {
 				await dispatch({
 					id: uuidv4(),
-					type: 'DELETE_ELEMENT',
+					type: 'REORDER_ELEMENT',
 					timestamp: Date.now(),
-					payload: { elementId: innerWrapperId }
+					payload: { elementId: innerWrapperIds[i], newParentId: alParent.id, newIndex: outerIndex + i }
 				});
 			}
-			// Delete the outer wrapper
+			// Delete the now-empty outer wrapper
 			await dispatch({
 				id: uuidv4(),
 				type: 'DELETE_ELEMENT',
