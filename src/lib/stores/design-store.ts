@@ -1652,7 +1652,39 @@ export async function ungroupElements(): Promise<void> {
 	if (selected.length === 0) return;
 
 	const state = get(designState);
-	const selectedIds = new Set(selected.map(el => el.id));
+
+	// If selected elements include group wrapper divs (plain divs inside AL), expand to include
+	// their actual group elements. This handles groups-in-AL where the wrapper is what's selected.
+	// Also handles outer wrappers for groups-of-groups (whose children are inner wrappers).
+	function collectGroupElementsFromWrapper(wrapperId: string, into: Set<string>): void {
+		const wrapper = state.elements[wrapperId];
+		if (!wrapper || wrapper.autoLayout?.enabled || wrapper.isView) return;
+		for (const childId of wrapper.children) {
+			const child = state.elements[childId];
+			if (!child) continue;
+			if (child.groupId) {
+				into.add(childId);
+			} else {
+				// Child is itself a wrapper (inner wrapper of a group-of-groups) — recurse
+				collectGroupElementsFromWrapper(childId, into);
+			}
+		}
+	}
+
+	const expandedIds = new Set(selected.map(el => el.id));
+	for (const el of selected) {
+		if (el.autoLayout?.enabled || el.isView || el.children.length === 0) continue;
+		const parentEl = el.parentId ? state.elements[el.parentId] : null;
+		if (!parentEl?.autoLayout?.enabled) continue;
+		// Expand wrapper (simple or outer) into actual group element IDs
+		collectGroupElementsFromWrapper(el.id, expandedIds);
+	}
+
+	const expandedSelected = Array.from(expandedIds)
+		.map(id => state.elements[id])
+		.filter(Boolean) as Element[];
+
+	const selectedIds = new Set(expandedSelected.map(el => el.id));
 
 	// Find all groups where ALL of the group's elements are selected
 	// We need to recursively check all descendants, not just direct elementIds
