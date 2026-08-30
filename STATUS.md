@@ -36,28 +36,30 @@ errado no clique.
 
 ---
 
-## Bug conhecido: canvas irresponsivo (não corrigido)
+## Canvas irresponsivo — CORRIGIDO (29/ago/2026, commit 7e1bcc6)
 
-O canvas **renderiza mas ignora todo input** (zoom, pan, atalhos) quando a abertura
-do IndexedDB fica pendurada — tipicamente **com duas abas do builder abertas**.
+O canvas renderizava mas ignorava todo input (zoom, pan, atalhos) quando a abertura
+do IndexedDB ficava pendurada — tipicamente **com duas abas do builder abertas**,
+que é uso normal.
 
-Cadeia: `Canvas.svelte` faz `await initialize()` no `onMount` e só depois chama
-`setupEventListeners()`. `initialize()` começa com `await initDB()`. Se o `open` não
-resolve porque outra aba segura a conexão, o await nunca retorna e **os listeners
-nunca são registrados**. O markup é estático, então a tela parece normal e o console
-fica limpo.
+Cadeia: `Canvas.svelte` fazia `await initialize()` no `onMount` e só depois chamava
+`setupEventListeners()`. `initialize()` começa com `await initDB()`. Com outra aba
+segurando a conexão, `indexedDB.open()` dispara `onblocked` e nunca resolve — o await
+não retornava e **os listeners nunca eram registrados**. O markup é estático, então a
+tela parecia normal e o console ficava limpo.
 
-Contribui: o handler `onversionchange` em `event-store.ts` fecha a conexão da aba
-antiga quando uma nova abre. Foi escrito para corrigir "database connection is
-closing" e, com duas abas, produz este bug.
+Correção:
+- `initDB()` trata `onblocked` e tem deadline de 5s — um open travado rejeita em vez
+  de pendurar quem espera
+- `onMount` envolve `initialize()` em try/catch, então `setupEventListeners()` roda de
+  qualquer jeito: falha de carregamento nunca mais custa o input do usuário
+- A falha aparece na UI em vez de mostrar canvas vazio como se estivesse tudo bem
 
-`initDB()` não tem `onblocked` nem timeout; nem `onMount` nem `initialize()` têm
-try/catch.
+Cobertura em `src/lib/stores/event-store-init.test.ts` (4 testes): caminho bloqueado,
+caminho que nunca resolve, sucesso normal, e sucesso sem rejeição tardia do timer. Os
+dois primeiros travam até o timeout do vitest sem o fix.
 
-**Contorno:** manter uma aba só do builder.
-**Fix real:** `onblocked` + timeout em `initDB()`, try/catch no `onMount`.
-A branch `fix/canvas-unresponsive` foi criada para isso em dez/2025 e está **vazia**
-— o fix nunca foi escrito.
+Era o bug para o qual a branch vazia `fix/canvas-unresponsive` foi criada em dez/2025.
 
 ---
 
