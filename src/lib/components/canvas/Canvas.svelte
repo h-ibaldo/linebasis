@@ -206,8 +206,22 @@
 	const MAX_ZOOM = 4;
 	const ZOOM_STEP = 0.1;
 
+	// Set when loading the document fails, so the failure is visible instead of
+	// presenting an empty canvas as if nothing were wrong.
+	let initError: string | null = null;
+
 	onMount(async () => {
-		await initialize();
+		// Never let a failed load strand the canvas: setupEventListeners() must
+		// run either way, or the builder renders but ignores every input with
+		// nothing in the console to explain it.
+		try {
+			await initialize();
+		} catch (error) {
+			initError =
+				error instanceof Error ? error.message : 'Failed to load the document from storage.';
+			console.error('[Canvas] Initialization failed:', error);
+		}
+
 		setupEventListeners();
 
 		// Initialize canvas bounds for virtualization
@@ -681,6 +695,14 @@
 
 <!-- STYLE: Canvas container - full viewport, overflow hidden -->
 <div class="canvas-container">
+	{#if initError}
+		<!-- STYLE: Load failure banner - top-center, sits above the canvas -->
+		<div class="init-error" role="alert">
+			<strong>Could not load your document.</strong>
+			<span>{initError}</span>
+		</div>
+	{/if}
+
 	<!-- STYLE: Zoom controls - floating toolbar, top-right corner -->
 	<div class="zoom-controls">
 		<button on:click={zoomOut}>-</button>
@@ -788,6 +810,29 @@
 		overflow: hidden;
 		background: #1a1a1a; /* Dark canvas background */
 		box-sizing: border-box;
+	}
+
+	.init-error {
+		position: absolute;
+		top: 20px;
+		left: 50%;
+		transform: translateX(-50%);
+		z-index: 200;
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+		max-width: 480px;
+		padding: 10px 14px;
+		background: white;
+		border-left: 3px solid #dc2626;
+		border-radius: 4px;
+		box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+		font-size: 13px;
+		line-height: 1.4;
+	}
+
+	.init-error span {
+		color: #666;
 	}
 
 	.zoom-controls {

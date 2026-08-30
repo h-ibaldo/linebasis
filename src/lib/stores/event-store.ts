@@ -12,6 +12,9 @@ const DB_VERSION = 1;
 const EVENTS_STORE = 'events';
 const SNAPSHOTS_STORE = 'snapshots';
 
+/** Deadline for indexedDB.open() so a blocked request can never hang a caller. */
+const OPEN_DB_TIMEOUT_MS = 5000;
+
 // ============================================================================
 // IndexedDB Setup
 // ============================================================================
@@ -38,8 +41,41 @@ export async function initDB(): Promise<IDBDatabase> {
 	return new Promise((resolve, reject) => {
 		const request = indexedDB.open(DB_NAME, DB_VERSION);
 
+		// An open request can stall forever: another tab holding the connection
+		// fires onblocked and then nothing. Without a deadline, callers that
+		// await initDB() never resume — which used to leave the canvas rendered
+		// but with no event listeners attached.
+		let settled = false;
+		const timeoutId = setTimeout(() => {
+			if (settled) return;
+			settled = true;
+			reject(
+				new Error(
+					`Timed out opening IndexedDB after ${OPEN_DB_TIMEOUT_MS}ms. ` +
+						'Another tab may be holding the connection.'
+				)
+			);
+		}, OPEN_DB_TIMEOUT_MS);
+
+		const finish = (fn: () => void) => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timeoutId);
+			fn();
+		};
+
+		request.onblocked = () => {
+			finish(() =>
+				reject(
+					new Error(
+						'IndexedDB is blocked by another tab. Close other tabs running the builder and reload.'
+					)
+				)
+			);
+		};
+
 		request.onerror = () => {
-			reject(new Error('Failed to open IndexedDB'));
+			finish(() => reject(new Error('Failed to open IndexedDB')));
 		};
 
 		request.onsuccess = () => {
@@ -57,7 +93,7 @@ export async function initDB(): Promise<IDBDatabase> {
 				dbInstance = null;
 			};
 
-			resolve(dbInstance);
+			finish(() => resolve(request.result));
 		};
 
 		request.onupgradeneeded = (event) => {
