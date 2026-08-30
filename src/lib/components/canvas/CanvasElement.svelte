@@ -287,24 +287,33 @@ type DocumentWithCaret = Document & {
 			// For scale tool, pass 'se' handle to trigger resize mode with aspect ratio lock
 			const handle = tool === 'scale' ? 'se' : undefined;
 
-			// If this element is inside a plain wrapper div that's inside auto-layout,
-			// treat the wrapper as the drag target so AL reordering works correctly.
-			const parent = state.elements[element.parentId ?? ''];
-			const grandparent = parent?.parentId ? state.elements[parent.parentId] : null;
-			const isInAutoLayoutWrapper =
-				parent &&
-				!parent.autoLayout?.enabled &&
-				!parent.isView &&
-				parent.parentId &&
-				grandparent?.autoLayout?.enabled;
+			// If this element is inside a wrapper div (or nested wrappers) that is a direct
+			// child of an auto-layout container, treat that AL-direct-child wrapper as the
+			// drag target so AL reordering works correctly.
+			// Walk up the ancestry chain to find the direct child of the AL container.
+			let alDirectChild: typeof element | null = null;
+			{
+				const visited = new Set<string>();
+				let cur = state.elements[element.parentId ?? ''];
+				let child = element;
+				while (cur && !visited.has(cur.id)) {
+					visited.add(cur.id);
+					if (cur.autoLayout?.enabled) {
+						// cur is the AL container; child is its direct child (the wrapper to drag)
+						if (child.id !== element.id) alDirectChild = child;
+						break;
+					}
+					if (cur.isView) break; // don't cross view boundaries
+					child = cur;
+					cur = cur.parentId ? state.elements[cur.parentId] : null as any;
+				}
+			}
 
-			if (isInAutoLayoutWrapper && !mightBeDoubleClick) {
-				// Select the wrapper instead and drag it as a single element
-				storeState.update((s) => ({
-					...s,
-					designState: { ...s.designState, selectedElementIds: [parent.id] }
-				}));
-				onStartDrag(e, parent, handle, [parent]);
+			if (alDirectChild && !mightBeDoubleClick) {
+				// Keep the click's selection intact (e.g. group members selected via expansion).
+				// For drag purposes only, redirect to the AL-direct-child wrapper so that
+				// AL reordering works correctly regardless of nesting depth.
+				onStartDrag(e, alDirectChild, handle, [alDirectChild]);
 			} else {
 				onStartDrag(e, element, handle, elementsToDrag);
 			}
