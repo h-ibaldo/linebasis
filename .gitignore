@@ -57,3 +57,6 @@ static/uploads/
 # Playwright test results
 test-results/
 playwright-report/
+
+# Git worktrees (local only — never commit as gitlinks)
+worktrees/
