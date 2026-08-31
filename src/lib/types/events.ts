@@ -533,10 +533,16 @@ export interface Element {
 	parentId: string | null;
 	pageId: string; // Elements belong to a page's canvas
 
-	// TODO: Remove these deprecated group properties once group code is fully removed
-	/** @deprecated Group feature removed - this property will be deleted */
+	/** @deprecated Legacy state.groups membership — superseded by isGroupWrapper */
 	groupId?: string | null;
-	/** @deprecated Group feature removed - this property will be deleted */
+
+	/**
+	 * Marks this div as a group: a real node in the tree whose children move as
+	 * one unit and which flexbox lays out as a single item. Distinguishes a
+	 * group ("these belong together") from a plain container div ("things live
+	 * inside me"), the same way isView marks a view. It is edit-time metadata —
+	 * the element still publishes as an ordinary <div>.
+	 */
 	isGroupWrapper?: boolean;
 
 	positionMode?: PositionMode; // How this element is positioned (default: 'absolute')

@@ -23,6 +23,11 @@ import { currentTool } from './tool-store';
 import { interactionState, startEditingText, clearElementIsolation, isolateElementFromGroup } from './interaction-store';
 import { viewport, screenToCanvas } from './viewport-store';
 import { migrateToUnifiedPositioning } from '$lib/utils/migrate-positioning';
+import {
+	findRootGroupWrapper,
+	collectDescendants,
+	type ElementMap as GroupTreeMap
+} from '$lib/utils/group-tree';
 
 // ============================================================================
 // Store State
@@ -1002,6 +1007,30 @@ function expandSelectionWithGroups(elementIds: string[], state: DesignState): st
 
 	for (const id of elementIds) {
 		const element = state.elements[id];
+
+		// Tree-based groups: a wrapper div marked isGroupWrapper is the group, so
+		// membership comes from the tree rather than state.groups. Checked first,
+		// then the legacy groupId path below still runs for older documents.
+		if (element && !element.groupId) {
+			const rootWrapperId = findRootGroupWrapper(id, state.elements as GroupTreeMap);
+
+			// Inside an isolated group, clicking a member selects that member
+			// rather than re-selecting the whole group (drill-down behaviour).
+			const isInsideIsolation =
+				isolatedId !== null &&
+				(id === isolatedId ||
+					collectDescendants(isolatedId, state.elements as GroupTreeMap).includes(id));
+
+			if (rootWrapperId && !isInsideIsolation) {
+				for (const memberId of [rootWrapperId, ...collectDescendants(rootWrapperId, state.elements as GroupTreeMap)]) {
+					if (!seen.has(memberId) && state.elements[memberId]) {
+						seen.add(memberId);
+						expanded.push(memberId);
+					}
+				}
+				continue;
+			}
+		}
 
 		// Skip group expansion if:
 		// 1. This element is the isolated one, OR
