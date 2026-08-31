@@ -99,6 +99,40 @@ Era o bug para o qual a branch vazia `fix/canvas-unresponsive` foi criada em dez
 
 ---
 
+## Grupos — estado atual
+
+Grupo é um div marcado `isGroupWrapper`: um nó real na árvore, que o flexbox
+trata como um item e o painel de layers mostra em qualquer profundidade. Publica
+como `<div>` comum — a marca é metadado de edição.
+
+**Funcionando:**
+- Cmd+G cria o wrapper; Cmd+Shift+G desfaz (grupos legados seguem pelo caminho antigo)
+- Clicar num membro seleciona o grupo; arrastar move o grupo como uma unidade
+- Redimensionar escala os filhos proporcionalmente (Figma/Illustrator), ao vivo
+  durante o arraste, nos quatro handles
+- Grupos aninhados escalam o próprio conteúdo
+
+**Limitação conhecida — preview de resize em grupo rotacionado:**
+Ao arrastar um handle de um grupo rotacionado, os filhos escapam da caixa durante
+o arraste. Ao soltar, ficam corretos: o reducer está certo, só o preview erra.
+
+Causa: `absoluteToRelative` chama `getAbsoluteTransform`, que faz cache por id
+(`transformCache`), e `getElementCenterAbsoluteRecursive` sobe a árvore lendo
+`state.elements`. Passar uma cópia do pai com posição/tamanho pendentes não tem
+efeito — o cache devolve o valor de antes do arraste, então os filhos giram em
+torno de um centro defasado. Sem rotação a conversão é uma subtração simples e o
+contorno atual dá conta; com rotação, não.
+
+Corrigir exige mexer em `utils/coordinates.ts`: invalidar o cache a cada frame do
+preview (simples, mas o cache existe por desempenho e é usado por todo o canvas),
+ou abrir uma via de conversão que aceite transformações pendentes sem passar pelo
+cache (mais correto, mais invasivo).
+
+**Não migrado ainda:** `state.groups` segue de pé e documentos antigos continuam
+pelo caminho legado. Migrá-los e remover o sistema antigo são os passos seguintes.
+
+---
+
 ## Roadmap
 
 Fase 1 em ~56%, milestones 1–5 completos, milestone 6 (Page Builder UI) em ~60%.
