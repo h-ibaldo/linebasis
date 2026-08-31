@@ -67,6 +67,11 @@ type DocumentWithCaret = Document & {
 		if (el.autoLayout?.enabled || el.isView || !el.parentId || el.children.length === 0) return false;
 		const parent = state.elements[el.parentId];
 		if (!parent?.autoLayout?.enabled) return false;
+
+		// Tree-based groups say so outright; no need to infer from the children.
+		if (el.isGroupWrapper) return true;
+
+		// Legacy groups: infer from all children sharing one groupId.
 		const firstGroupId = state.elements[el.children[0]]?.groupId;
 		if (!firstGroupId) return false;
 		return el.children.every(id => state.elements[id]?.groupId === firstGroupId);

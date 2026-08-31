@@ -17,6 +17,7 @@
 	import { currentTool } from '$lib/stores/tool-store';
 	import { CANVAS_INTERACTION } from '$lib/constants/canvas';
 	import { getAbsolutePosition, getAbsoluteTransform, absoluteToRelative, invalidateTransformCache, getElementCenterAbsoluteRecursive } from '$lib/utils/coordinates';
+	import { findRootGroupWrapper, collectDescendants, type ElementMap as GroupTreeMap } from '$lib/utils/group-tree';
 	import SelectionUI from './SelectionUI.svelte';
 
 	// Props
@@ -1276,6 +1277,36 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 		// NESTED GROUPS: If element is in a group, ensure root group hierarchy is selected
 		// (Will use the 'state' variable declared below)
 		let expandedElements: Element[] | null = null;
+
+		// Tree-based groups: membership comes from isGroupWrapper ancestors.
+		// selectElement() already expands to the whole group, so we only need to
+		// trigger it when the group is not fully selected yet.
+		if (!element.groupId) {
+			const currentState = get(designState);
+			const rootWrapperId = findRootGroupWrapper(element.id, currentState.elements as GroupTreeMap);
+			const isolatedId = getCurrentIsolationLevel(get(interactionState));
+
+			if (rootWrapperId && isolatedId === null) {
+				const groupIds = [
+					rootWrapperId,
+					...collectDescendants(rootWrapperId, currentState.elements as GroupTreeMap)
+				];
+				const currentSelectionIds = new Set(
+					(passedSelectedElements || selectedElements).map((el) => el.id)
+				);
+
+				if (groupIds.some((id) => !currentSelectionIds.has(id))) {
+					selectElement(element.id);
+					await tick();
+
+					const updatedState = get(designState);
+					expandedElements = updatedState.selectedElementIds
+						.map((id) => updatedState.elements[id])
+						.filter(Boolean);
+				}
+			}
+		}
+
 		if (element.groupId) {
 			const currentState = get(designState);
 			let currentGroupId = element.groupId;
