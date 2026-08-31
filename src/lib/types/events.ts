@@ -72,6 +72,7 @@ export interface CreateElementEvent extends BaseEvent {
 		size: Size;
 		styles?: Partial<ElementStyles>;
 		content?: string; // For text elements
+		isGroupWrapper?: boolean; // Created as a group rather than a plain container
 	};
 }
 

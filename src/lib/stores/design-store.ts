@@ -535,6 +535,7 @@ export async function createElement(data: {
 	size: { width: number; height: number };
 	styles?: Partial<Element['styles']>;
 	content?: string;
+	isGroupWrapper?: boolean;
 }): Promise<string> {
 	const elementId = uuidv4();
 	const state = get(designState);
@@ -561,7 +562,8 @@ export async function createElement(data: {
 			position: data.position,
 			size: data.size,
 			styles: data.styles,
-			content: data.content
+			content: data.content,
+			isGroupWrapper: data.isGroupWrapper
 		}
 	});
 
@@ -1390,6 +1392,9 @@ export async function wrapSelectedElementsInDiv(): Promise<void> {
 		elementType: 'div',
 		position: { x: minX, y: minY },
 		size: { width: wrapperWidth, height: wrapperHeight },
+		// Marks this div as a group: its children move as one unit and flexbox
+		// lays it out as a single item. It still publishes as a plain <div>.
+		isGroupWrapper: true,
 		styles: {
 			display: 'block'
 		}
@@ -3270,16 +3275,27 @@ export function setupKeyboardShortcuts(): (() => void) | undefined {
 		}
 
 		// Cmd+G (Mac) or Ctrl+G (Windows/Linux) - Group elements
+		// Creates a real wrapper div marked isGroupWrapper. Only a real node gets
+		// laid out by flexbox as one item and shows in the layers panel at any
+		// depth — and a composition placed inside an auto-layout container needs
+		// that positioning context in the published page anyway.
 		if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'g' && !e.shiftKey && !isTyping) {
 			e.preventDefault();
-			groupElements();
+			wrapSelectedElementsInDiv();
 			return;
 		}
 
 		// Cmd+Shift+G (Mac) or Ctrl+Shift+G (Windows/Linux) - Ungroup elements
+		// Legacy groups still need the old path; tree groups are plain unwrapping.
 		if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'g' && e.shiftKey && !isTyping) {
 			e.preventDefault();
-			ungroupElements();
+			const selected = get(selectedElements);
+			const hasLegacyGroup = selected.some((el) => el.groupId);
+			if (hasLegacyGroup) {
+				ungroupElements();
+			} else {
+				unwrapSelectedDiv();
+			}
 			return;
 		}
 

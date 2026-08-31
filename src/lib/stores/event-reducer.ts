@@ -240,7 +240,7 @@ export function reduceEvent(state: DesignState, event: DesignEvent): DesignState
 // ============================================================================
 
 function handleCreateElement(state: DesignState, event: CreateElementEvent): DesignState {
-	const { elementId, parentId, pageId, elementType, position, size, styles, content } =
+	const { elementId, parentId, pageId, elementType, position, size, styles, content, isGroupWrapper } =
 		event.payload;
 
 	// New elements are added to end of array (visual top layer)
@@ -260,7 +260,8 @@ function handleCreateElement(state: DesignState, event: CreateElementEvent): Des
 		spacing: {},
 		autoLayout: {},
 		content,
-		children: []
+		children: [],
+		...(isGroupWrapper ? { isGroupWrapper: true } : {})
 	};
 
 	// Add element to state
