@@ -595,7 +595,8 @@ function handleResizeElement(state: DesignState, event: ResizeElementEvent): Des
 		}
 	};
 
-	// If this element is a plain wrapper div inside auto-layout, resize its children proportionally
+	// If this element is a group, or a wrapper div inside auto-layout, scale its
+	// children proportionally
 	syncChildrenToAutoLayoutWrapper(newElements, elementId, oldSize);
 
 	// If this element lives inside an auto-layout wrapper div, resize the wrapper
@@ -925,9 +926,16 @@ function syncAutoLayoutWrapperToChildren(
 }
 
 /**
- * When a plain-div wrapper (flex item inside an auto-layout container) is
- * directly resized, proportionally resize and reposition all of its children
- * to fill the new wrapper dimensions.
+ * When a wrapper div is directly resized, proportionally resize and reposition
+ * all of its children to fill the new dimensions.
+ *
+ * Applies to two cases:
+ *  - a group (isGroupWrapper): resizing a group scales its contents, the way
+ *    groups behave in Figma and Illustrator
+ *  - a plain wrapper div acting as a flex item inside an auto-layout container
+ *
+ * A plain container div that is neither is left alone: resizing a container
+ * changes the container, not what is inside it.
  *
  * scaleX = newWidth / oldWidth, scaleY = newHeight / oldHeight
  * Each child: new size = old size * scale, new position = old position * scale
@@ -940,13 +948,17 @@ function syncChildrenToAutoLayoutWrapper(
 	const wrapper = newElements[wrapperId];
 	if (!wrapper) return;
 
-	// Only applies to plain wrapper divs inside auto-layout
 	if (wrapper.type !== 'div') return;
 	if (wrapper.autoLayout?.enabled) return;
 	if (wrapper.isView) return;
-	if (!wrapper.parentId) return;
-	const grandparent = newElements[wrapper.parentId];
-	if (!grandparent?.autoLayout?.enabled) return;
+
+	const isGroup = wrapper.isGroupWrapper === true;
+	if (!isGroup) {
+		// Legacy case: a plain wrapper div that is a flex item in auto-layout.
+		if (!wrapper.parentId) return;
+		const grandparent = newElements[wrapper.parentId];
+		if (!grandparent?.autoLayout?.enabled) return;
+	}
 
 	const newSize = wrapper.size;
 	const scaleX = oldSize.width > 0 ? newSize.width / oldSize.width : 1;

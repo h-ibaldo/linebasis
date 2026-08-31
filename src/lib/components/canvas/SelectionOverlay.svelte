@@ -1278,24 +1278,20 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 		// (Will use the 'state' variable declared below)
 		let expandedElements: Element[] | null = null;
 
-		// Tree-based groups: membership comes from isGroupWrapper ancestors.
-		// selectElement() already expands to the whole group, so we only need to
-		// trigger it when the group is not fully selected yet.
+		// Tree-based groups: clicking a member drags the wrapper, and only the
+		// wrapper — it is a real parent node, so its children come along through
+		// the DOM. Dragging them as well would move them twice.
 		if (!element.groupId) {
 			const currentState = get(designState);
 			const rootWrapperId = findRootGroupWrapper(element.id, currentState.elements as GroupTreeMap);
 			const isolatedId = getCurrentIsolationLevel(get(interactionState));
 
 			if (rootWrapperId && isolatedId === null) {
-				const groupIds = [
-					rootWrapperId,
-					...collectDescendants(rootWrapperId, currentState.elements as GroupTreeMap)
-				];
 				const currentSelectionIds = new Set(
 					(passedSelectedElements || selectedElements).map((el) => el.id)
 				);
 
-				if (groupIds.some((id) => !currentSelectionIds.has(id))) {
+				if (!currentSelectionIds.has(rootWrapperId)) {
 					selectElement(element.id);
 					await tick();
 

@@ -1024,11 +1024,15 @@ function expandSelectionWithGroups(elementIds: string[], state: DesignState): st
 					collectDescendants(isolatedId, state.elements as GroupTreeMap).includes(id));
 
 			if (rootWrapperId && !isInsideIsolation) {
-				for (const memberId of [rootWrapperId, ...collectDescendants(rootWrapperId, state.elements as GroupTreeMap)]) {
-					if (!seen.has(memberId) && state.elements[memberId]) {
-						seen.add(memberId);
-						expanded.push(memberId);
-					}
+				// Select the wrapper alone — never its descendants. The wrapper is
+				// a real parent node, so it already carries its children: dragging
+				// it moves them, resizing it resizes them. Adding the descendants
+				// too would apply every transform twice, once via the wrapper and
+				// once directly, which is exactly what made dragged children run
+				// away from the cursor.
+				if (!seen.has(rootWrapperId) && state.elements[rootWrapperId]) {
+					seen.add(rootWrapperId);
+					expanded.push(rootWrapperId);
 				}
 				continue;
 			}

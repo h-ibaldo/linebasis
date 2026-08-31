@@ -190,4 +190,14 @@ describe('resolveClickSelection', () => {
 	it('returns the id unchanged for an unknown element', () => {
 		expect(resolveClickSelection('ghost', nested)).toBe('ghost');
 	});
+
+	it('resolves to exactly one element — never the group plus its members', () => {
+		// A group selection is a selection of one node: the wrapper. It already
+		// carries its children, so including them too would apply every drag and
+		// resize twice — once through the wrapper, once directly.
+		const selected = resolveClickSelection('a1', nested);
+
+		expect(selected).toBe('outer');
+		expect(collectDescendants('outer', nested)).not.toContain(selected);
+	});
 });
