@@ -76,17 +76,26 @@ Era o bug para o qual a branch vazia `fix/canvas-unresponsive` foi criada em dez
 
 ---
 
-## Limpeza pendente
+## Limpeza — feita (30/ago/2026)
 
-- **43 branches locais** com 0 commits exclusivos vs `main` — histórico absorvido,
-  seguras para deletar.
-- **Worktrees `worktrees/docs` e `worktrees/engine`** apontam para um commit já
-  mergeado, sem alterações. Remover com `git worktree remove`.
-- **`feat/groupid-based-groups`** (4 commits) — abordagem `groupId` abandonada em
-  favor de `parentGroupId`. O "fix crítico de data loss" dela **não é mais
-  relevante**: o bug de escopo de `designState` não existe no código atual.
+- 48 branches locais deletadas (43 já absorvidas no `main` + 5 snapshots redundantes
+  já contidos em `feat/groups-inside-divs`). De ~50 para 9.
+- Worktrees fantasma `worktrees/docs` e `worktrees/engine` removidos.
+- `worktrees/` estava commitado como gitlinks modo 160000 sem `.gitmodules` — eram
+  worktrees locais, não submodules. Destrackeado e adicionado ao `.gitignore`; era
+  a origem do `git status` sujo que persistia há meses.
+
+### Branches vivas
+
+- **`feat/groups-inside-divs`** — a linha de trabalho (worktree `worktrees/canvas`)
+- **`main`**
 - **`fix/selection-ui-nested-rotation`** (5 commits, nov/2025) — rotação aninhada na
-  selection UI, nunca mergeada. **Revisar antes de descartar**, pode ainda ser útil.
+  selection UI, nunca mergeada. **Revisar antes de descartar.**
+- **`feat/groupid-based-groups`** (4 commits) — abordagem `groupId` abandonada. O
+  "fix crítico de data loss" dela não é mais relevante: o bug de escopo de
+  `designState` não existe no código atual. Descartável.
+- 4 branches `phase-1/*` e `feat/canvas-improvements-*` com 1 commit exploratório
+  cada ("testing stuff", "test 2") — provavelmente descartáveis, não revisadas.
 
 ---
 
