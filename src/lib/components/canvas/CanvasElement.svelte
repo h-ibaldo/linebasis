@@ -602,7 +602,32 @@ type DocumentWithCaret = Document & {
 				// CRITICAL FIX: Check if parent has auto-layout ancestor (same as drag fix)
 				const parentHasAutoLayoutAncestor = hasAutoLayoutAncestor(parentEl, state);
 
+				// While the parent itself is being resized from a N/W handle it also
+				// moves, but state still holds its pre-drag position. Converting
+				// against that stale origin offsets every child by the parent's
+				// displacement — which is why children escaped the box on NW/NE/SW
+				// drags but tracked correctly on SE. Measure the parent live instead.
+				// Only the unrotated case: with rotation the conversion below has to
+				// rotate the offset into the parent's local frame, so leave it be.
+				const isParentBeingTransformed =
+					$interactionState.activeElementId === parentEl.id &&
+					$interactionState.pendingPosition !== null &&
+					!parentEl.rotation &&
+					!parentHasAutoLayoutAncestor;
+
 				let centerLocal;
+
+				if (isParentBeingTransformed) {
+					// The transform map already carries this child's absolute
+					// position for the pending frame; expressing it against the
+					// parent's pending origin gives the relative position to render.
+					const parentPending = $interactionState.pendingPosition as { x: number; y: number };
+
+					return {
+						x: absolutePos.x - parentPending.x,
+						y: absolutePos.y - parentPending.y
+					};
+				}
 
 				if (parentHasAutoLayoutAncestor) {
 					// Parent is in auto-layout: get its actual DOM position
