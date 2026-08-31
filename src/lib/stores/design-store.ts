@@ -23,6 +23,7 @@ import { currentTool } from './tool-store';
 import { interactionState, startEditingText, clearElementIsolation, isolateElementFromGroup } from './interaction-store';
 import { viewport, screenToCanvas } from './viewport-store';
 import { migrateToUnifiedPositioning } from '$lib/utils/migrate-positioning';
+import { calculateGroupBounds, toWrapperRelativePosition } from '$lib/utils/group-bounds';
 
 // ============================================================================
 // Store State
@@ -1261,43 +1262,6 @@ let clipboardGroups: Record<string, Group> = {};
 let isClipboardFromCut = false;
 
 /**
- * Helper: Get the four corners of a rotated rectangle in world space
- * Returns [topLeft, topRight, bottomRight, bottomLeft]
- */
-function getRotatedCorners(rect: {
-	x: number;
-	y: number;
-	width: number;
-	height: number;
-	rotation: number;
-}): Array<{ x: number; y: number }> {
-	const { x, y, width, height, rotation } = rect;
-	const angleRad = rotation * (Math.PI / 180);
-	const cos = Math.cos(angleRad);
-	const sin = Math.sin(angleRad);
-
-	// Center of the rectangle
-	const centerX = x + width / 2;
-	const centerY = y + height / 2;
-
-	// Local corners (relative to center)
-	const halfW = width / 2;
-	const halfH = height / 2;
-	const localCorners = [
-		{ x: -halfW, y: -halfH }, // Top-left
-		{ x: halfW, y: -halfH },  // Top-right
-		{ x: halfW, y: halfH },   // Bottom-right
-		{ x: -halfW, y: halfH }   // Bottom-left
-	];
-
-	// Rotate each corner around center and convert to world space
-	return localCorners.map(corner => ({
-		x: centerX + corner.x * cos - corner.y * sin,
-		y: centerY + corner.x * sin + corner.y * cos
-	}));
-}
-
-/**
  * Wrap selected elements in a new div container
  */
 export async function wrapSelectedElementsInDiv(): Promise<void> {
@@ -1316,51 +1280,25 @@ export async function wrapSelectedElementsInDiv(): Promise<void> {
 		? firstParentId
 		: null;
 
-	// Calculate bounding box of all selected elements (accounting for rotation)
-	let minX = Infinity;
-	let minY = Infinity;
-	let maxX = -Infinity;
-	let maxY = -Infinity;
-
-	for (const el of selected) {
-		const rotation = el.rotation || 0;
-
-		if (rotation !== 0) {
-			// For rotated elements, get all four corners and find their bounds
-			const corners = getRotatedCorners({
-				x: el.position.x,
-				y: el.position.y,
-				width: el.size.width || 0,
-				height: el.size.height || 0,
-				rotation
-			});
-
-			// Find min/max across all corners
-			for (const corner of corners) {
-				minX = Math.min(minX, corner.x);
-				minY = Math.min(minY, corner.y);
-				maxX = Math.max(maxX, corner.x);
-				maxY = Math.max(maxY, corner.y);
-			}
-		} else {
-			// For non-rotated elements, use simple bounds
-			minX = Math.min(minX, el.position.x);
-			minY = Math.min(minY, el.position.y);
-			maxX = Math.max(maxX, el.position.x + (el.size.width || 0));
-			maxY = Math.max(maxY, el.position.y + (el.size.height || 0));
-		}
-	}
-
-	const wrapperWidth = maxX - minX;
-	const wrapperHeight = maxY - minY;
+	// Bounding box of the selection, covering the swept extent of rotated
+	// elements so the wrapper never clips them.
+	const bounds = calculateGroupBounds(
+		selected.map((el) => ({
+			x: el.position.x,
+			y: el.position.y,
+			width: el.size.width || 0,
+			height: el.size.height || 0,
+			rotation: el.rotation || 0
+		}))
+	);
 
 	// Create the wrapper div with the common parent
 	const wrapperId = await createElement({
 		parentId: commonParent,
 		pageId,
 		elementType: 'div',
-		position: { x: minX, y: minY },
-		size: { width: wrapperWidth, height: wrapperHeight },
+		position: { x: bounds.x, y: bounds.y },
+		size: { width: bounds.width, height: bounds.height },
 		styles: {
 			display: 'block'
 		}
@@ -1373,10 +1311,8 @@ export async function wrapSelectedElementsInDiv(): Promise<void> {
 		// Move element to be a child of the wrapper at index i
 		await reorderElement(el.id, wrapperId, i);
 
-		// Update position to be relative to wrapper
-		const relativeX = el.position.x - minX;
-		const relativeY = el.position.y - minY;
-		await moveElement(el.id, { x: relativeX, y: relativeY });
+		// Rebase onto the wrapper origin so the element stays visually put
+		await moveElement(el.id, toWrapperRelativePosition(el.position, bounds));
 	}
 
 	// Select the new wrapper div
@@ -3241,16 +3177,19 @@ export function setupKeyboardShortcuts(): (() => void) | undefined {
 		}
 
 		// Cmd+G (Mac) or Ctrl+G (Windows/Linux) - Group elements
+		// A group is a real wrapper div in the tree, not a parallel state.groups
+		// record: only a real node gets laid out by flexbox and shows up in the
+		// layers panel at any depth.
 		if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'g' && !e.shiftKey && !isTyping) {
 			e.preventDefault();
-			groupElements();
+			wrapSelectedElementsInDiv();
 			return;
 		}
 
 		// Cmd+Shift+G (Mac) or Ctrl+Shift+G (Windows/Linux) - Ungroup elements
 		if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'g' && e.shiftKey && !isTyping) {
 			e.preventDefault();
-			ungroupElements();
+			unwrapSelectedDiv();
 			return;
 		}
 
@@ -3374,13 +3313,6 @@ export function setupKeyboardShortcuts(): (() => void) | undefined {
 				moveLayerForward(selected);
 			}
 		}
-		// Cmd+G - Group selected elements
-		if ((e.metaKey || e.ctrlKey) && e.key === 'g' && !isTyping) {
-			e.preventDefault();
-			groupElements();
-			return;
-		}
-
 		// Cmd+Backspace (Mac) or Ctrl+Backspace (Windows) - Unwrap selected div
 		if (
 			(e.metaKey || e.ctrlKey) &&
