@@ -2997,19 +2997,23 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 				pendingPosition = { x: newX, y: newY };
 			}
 
-			// If the single selected element is an AL group wrapper, propagate resize to its children
+			// If the single selected element scales its children — a group, or a
+			// legacy AL group wrapper — preview that scaling live, so the children
+			// track the handle instead of only catching up on mouse release.
 			if (!isGroupInteraction && activeElement) {
 				const state = get(designState);
 				const wrapperParent = activeElement.parentId ? state.elements[activeElement.parentId] : null;
 				const firstGroupId = activeElement.children.length > 0 ? state.elements[activeElement.children[0]]?.groupId : undefined;
-				const isALWrapper =
-					!activeElement.autoLayout?.enabled &&
-					!activeElement.isView &&
+				const isLegacyALWrapper =
 					!!wrapperParent?.autoLayout?.enabled &&
 					!!firstGroupId &&
 					activeElement.children.every(id => state.elements[id]?.groupId === firstGroupId);
+				const scalesChildren =
+					!activeElement.autoLayout?.enabled &&
+					!activeElement.isView &&
+					(activeElement.isGroupWrapper === true || isLegacyALWrapper);
 
-				if (isALWrapper) {
+				if (scalesChildren) {
 					const scaleX = newWidth / elementStartCanvas.width;
 					const scaleY = newHeight / elementStartCanvas.height;
 					// Use pendingPosition if available (DOM-measured position for AL children),
@@ -3083,20 +3087,22 @@ let groupDragOffsets: Map<string, { x: number; y: number }> = new Map(); // Offs
 					})
 				);
 
-				// If a single selected element is a plain wrapper div inside auto-layout,
-				// also propagate pending transforms proportionally to its children.
+				// If a single selected element scales its children — a group, or a
+				// plain wrapper div inside auto-layout — propagate the pending
+				// transform to them too, so the preview matches what the reducer
+				// will commit instead of the children jumping on mouse release.
 				if (groupStartElements.length === 1) {
 					const state = get(designState);
 					const wrapper = state.elements[groupStartElements[0].id];
 					const wrapperParent = wrapper?.parentId ? state.elements[wrapper.parentId] : null;
 					const wrapperGrandparent = wrapperParent?.parentId ? state.elements[wrapperParent.parentId] : null;
-					const isALWrapper =
+					const scalesChildren =
 						wrapper &&
 						!wrapper.autoLayout?.enabled &&
 						!wrapper.isView &&
-						wrapperGrandparent?.autoLayout?.enabled;
+						(wrapper.isGroupWrapper === true || wrapperGrandparent?.autoLayout?.enabled);
 
-					if (isALWrapper && wrapper.children && wrapper.children.length > 0) {
+					if (scalesChildren && wrapper.children && wrapper.children.length > 0) {
 						// Wrapper's pending absolute top-left (the scaled position from transforms map)
 						const wrapperTransform = transforms.get(wrapper.id);
 						const wrapperAbsX = wrapperTransform?.position.x ?? elementStartCanvas.x;

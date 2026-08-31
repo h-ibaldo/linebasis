@@ -943,8 +943,14 @@ function syncAutoLayoutWrapperToChildren(
 function syncChildrenToAutoLayoutWrapper(
 	newElements: Record<string, Element>,
 	wrapperId: string,
-	oldSize: { width: number; height: number }
+	oldSize: { width: number; height: number },
+	visited: Set<string> = new Set()
 ): void {
+	// Circular parent/child references have turned up in stored documents before
+	// and would recurse forever here.
+	if (visited.has(wrapperId)) return;
+	visited.add(wrapperId);
+
 	const wrapper = newElements[wrapperId];
 	if (!wrapper) return;
 
@@ -971,17 +977,25 @@ function syncChildrenToAutoLayoutWrapper(
 		.filter((el): el is Element => el !== undefined);
 
 	for (const child of children) {
+		const scaledSize = {
+			width: Math.round(child.size.width * scaleX),
+			height: Math.round(child.size.height * scaleY)
+		};
+
 		newElements[child.id] = {
 			...newElements[child.id],
-			size: {
-				width: Math.round(child.size.width * scaleX),
-				height: Math.round(child.size.height * scaleY)
-			},
+			size: scaledSize,
 			position: {
 				x: Math.round(child.position.x * scaleX),
 				y: Math.round(child.position.y * scaleY)
 			}
 		};
+
+		// A nested group scales its own contents too, or the inner arrangement
+		// would drift out of the group that was resized.
+		if (child.children && child.children.length > 0) {
+			syncChildrenToAutoLayoutWrapper(newElements, child.id, child.size, visited);
+		}
 	}
 }
 
