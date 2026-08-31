@@ -25,6 +25,7 @@ import { interactionState, startEditingText, stopEditingText, setIsolationStack,
 import { sanitizeTextContent } from '$lib/utils/sanitize';
 import { absoluteToRelative } from '$lib/utils/coordinates';
 import { handleDoubleClick as handleDoubleClickIsolation, handleSingleClick as handleSingleClickIsolation } from '$lib/utils/drill-down-figma-logic';
+import { findRootGroupWrapper, type ElementMap as GroupTreeMap } from '$lib/utils/group-tree';
 
 	const dispatch = createEventDispatcher<{ contextmenu: { elementId: string; x: number; y: number } }>();
 
@@ -214,6 +215,10 @@ type DocumentWithCaret = Document & {
 		// Elements to drag (will be set based on click type)
 		let elementsToDrag: Element[] = [];
 
+		// Set when the click resolved to a group wrapper, so the drag targets the
+		// wrapper rather than the child under the cursor.
+		let groupWrapperToDrag: Element | null = null;
+
 		if (mightBeDoubleClick) {
 			// Handle double-click: drill down one isolation level (Figma-style)
 			const result = handleDoubleClickIsolation(
@@ -248,6 +253,26 @@ type DocumentWithCaret = Document & {
 		else if (isPartOfMultiSelection) {
 			// Element is part of multi-selection - drag all selected elements
 			elementsToDrag = get(selectedElements);
+		}
+		// Tree-based group: clicking a member selects and drags the wrapper alone.
+		// It is a real parent node, so its children ride along through the DOM —
+		// dragging them too would move them twice. Checked before the legacy
+		// isolation path, which resolves by groupId and would return just the
+		// clicked child here.
+		else if (
+			!groupId &&
+			currentStack.length === 0 &&
+			findRootGroupWrapper(element.id, state.elements as GroupTreeMap)
+		) {
+			const wrapperId = findRootGroupWrapper(element.id, state.elements as GroupTreeMap) as string;
+
+			storeState.update((s) => ({
+				...s,
+				designState: { ...s.designState, selectedElementIds: [wrapperId] }
+			}));
+
+			elementsToDrag = [state.elements[wrapperId]].filter(Boolean);
+			groupWrapperToDrag = state.elements[wrapperId] ?? null;
 		}
 		else {
 			// Handle single-click: select element/group with automatic isolation dismantling
@@ -319,6 +344,10 @@ type DocumentWithCaret = Document & {
 				// For drag purposes only, redirect to the AL-direct-child wrapper so that
 				// AL reordering works correctly regardless of nesting depth.
 				onStartDrag(e, alDirectChild, handle, [alDirectChild]);
+			} else if (groupWrapperToDrag) {
+				// Group: drag the wrapper, not the child under the cursor, so the
+				// group moves as one node instead of the clicked element escaping.
+				onStartDrag(e, groupWrapperToDrag, handle, [groupWrapperToDrag]);
 			} else {
 				onStartDrag(e, element, handle, elementsToDrag);
 			}
