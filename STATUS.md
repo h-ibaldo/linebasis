@@ -112,21 +112,18 @@ como `<div>` comum — a marca é metadado de edição.
   durante o arraste, nos quatro handles
 - Grupos aninhados escalam o próprio conteúdo
 
-**Limitação conhecida — preview de resize em grupo rotacionado:**
-Ao arrastar um handle de um grupo rotacionado, os filhos escapam da caixa durante
-o arraste. Ao soltar, ficam corretos: o reducer está certo, só o preview erra.
+- Grupo rotacionado: o resize mantém os filhos na caixa durante todo o arraste
 
-Causa: `absoluteToRelative` chama `getAbsoluteTransform`, que faz cache por id
-(`transformCache`), e `getElementCenterAbsoluteRecursive` sobe a árvore lendo
-`state.elements`. Passar uma cópia do pai com posição/tamanho pendentes não tem
-efeito — o cache devolve o valor de antes do arraste, então os filhos giram em
-torno de um centro defasado. Sem rotação a conversão é uma subtração simples e o
-contorno atual dá conta; com rotação, não.
-
-Corrigir exige mexer em `utils/coordinates.ts`: invalidar o cache a cada frame do
-preview (simples, mas o cache existe por desempenho e é usado por todo o canvas),
-ou abrir uma via de conversão que aceite transformações pendentes sem passar pelo
-cache (mais correto, mais invasivo).
+**Resolvido em 31/ago/2026 (2fd9839) — resize de grupo rotacionado.**
+Eram duas falhas sobrepostas. Primeira: `absoluteToRelative` delega para
+`getAbsoluteTransform`, que faz cache por id — passar uma cópia do pai com
+valores pendentes recebia de volta o transform antigo, e os filhos eram
+desgirados em torno de um centro já deslocado. Resolvida com
+`utils/pending-transform.ts`, que recebe o transform ao vivo explicitamente e
+não consulta cache. Segunda: o `SelectionOverlay` monta a posição pendente do
+filho como (origem do pai + offset local escalado) — posição *dentro* do pai,
+com a rotação ainda por aplicar pelo CSS. O `CanvasElement` tratava como
+posição de canvas e desgirava, removendo uma rotação que o valor nunca teve.
 
 **Não migrado ainda:** `state.groups` segue de pé e documentos antigos continuam
 pelo caminho legado. Migrá-los e remover o sistema antigo são os passos seguintes.
