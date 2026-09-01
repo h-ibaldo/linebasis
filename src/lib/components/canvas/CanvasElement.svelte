@@ -24,6 +24,7 @@
 import { interactionState, startEditingText, stopEditingText, setIsolationStack, clearIsolation, getCurrentIsolationLevel } from '$lib/stores/interaction-store';
 import { sanitizeTextContent } from '$lib/utils/sanitize';
 import { absoluteToRelative } from '$lib/utils/coordinates';
+import { absoluteToRelativeWithOverride } from '$lib/utils/pending-transform';
 import { handleDoubleClick as handleDoubleClickIsolation, handleSingleClick as handleSingleClickIsolation } from '$lib/utils/drill-down-figma-logic';
 import { findRootGroupWrapper, type ElementMap as GroupTreeMap } from '$lib/utils/group-tree';
 
@@ -602,30 +603,32 @@ type DocumentWithCaret = Document & {
 				// CRITICAL FIX: Check if parent has auto-layout ancestor (same as drag fix)
 				const parentHasAutoLayoutAncestor = hasAutoLayoutAncestor(parentEl, state);
 
-				// While the parent itself is being resized from a N/W handle it also
-				// moves, but state still holds its pre-drag position. Converting
-				// against that stale origin offsets every child by the parent's
-				// displacement — which is why children escaped the box on NW/NE/SW
-				// drags but tracked correctly on SE. Measure the parent live instead.
-				// Only the unrotated case: with rotation the conversion below has to
-				// rotate the offset into the parent's local frame, so leave it be.
+				// While the parent is mid-resize its committed position and size are
+				// still the pre-drag ones; the new values live only in pending
+				// interaction state. Convert against those instead, or children are
+				// offset by the parent's displacement and — on a rotated parent —
+				// un-rotated about a centre that has already moved, which throws
+				// them off the selection box entirely.
 				const isParentBeingTransformed =
 					$interactionState.activeElementId === parentEl.id &&
 					$interactionState.pendingPosition !== null &&
-					!parentEl.rotation &&
 					!parentHasAutoLayoutAncestor;
 
 				let centerLocal;
 
 				if (isParentBeingTransformed) {
-					// The transform map already carries this child's absolute
-					// position for the pending frame; expressing it against the
-					// parent's pending origin gives the relative position to render.
-					const parentPending = $interactionState.pendingPosition as { x: number; y: number };
+					// While the parent is being resized, SelectionOverlay builds each
+					// child's pending position as (parent origin + scaled local offset).
+					// That is the child's position *inside* the parent, not a true
+					// canvas position: the parent's own rotation is applied by CSS on
+					// top of it. Subtracting the pending origin recovers the local
+					// offset, which is exactly what we render — no un-rotation, since
+					// the value never had the rotation baked in.
+					const pendingOrigin = $interactionState.pendingPosition as { x: number; y: number };
 
 					return {
-						x: absolutePos.x - parentPending.x,
-						y: absolutePos.y - parentPending.y
+						x: absolutePos.x - pendingOrigin.x,
+						y: absolutePos.y - pendingOrigin.y
 					};
 				}
 
